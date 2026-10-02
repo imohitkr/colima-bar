@@ -18,6 +18,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         app.run()
     }
 
+    static let popoverSize = NSSize(width: 480, height: 640)
+
     private let model = ColimaModel()
     private let ui = ViewState()
     private var item: NSStatusItem!
@@ -34,13 +36,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         popover.behavior = .transient
         popover.animates = false
         popover.delegate = self
-        popover.contentViewController = NSHostingController(rootView:
+        // Fixed size, and the hosting controller must not drive it: if it
+        // reports its SwiftUI size after the popover is on screen, the popover
+        // grows upward from its anchor and ends up off the top of the screen.
+        let host = NSHostingController(rootView:
             DashboardView(model: model, ui: ui, openWindow: { [weak self] in self?.showWindow() }))
+        host.sizingOptions = []
+        host.view.frame = NSRect(origin: .zero, size: Self.popoverSize)
+        popover.contentViewController = host
+        popover.contentSize = Self.popoverSize
 
         model.start()
         updateIcon()
         registerLoginItemOnce()
         if CommandLine.arguments.contains("--window") { showWindow() }
+        // Debug: `--popover [PATH]` opens the popover on launch and, with a
+        // path, renders it to a PNG and quits.
+        if let i = CommandLine.arguments.firstIndex(of: "--popover") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in self?.togglePopover() }
+            if i + 1 < CommandLine.arguments.count {
+                let path = CommandLine.arguments[i + 1]
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                    if let v = self?.popover.contentViewController?.view { self?.snapshot(v, to: path) }
+                    NSApp.terminate(nil)
+                }
+            }
+        }
         // Debug: `--snapshot PATH [TAB]` renders the dashboard window to a PNG
         // a few seconds after launch (no Screen Recording permission needed).
         let args = CommandLine.arguments
@@ -48,15 +69,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             if i + 2 < args.count, let tab = Tab(rawValue: args[i + 2]) { ui.tab = tab }
             showWindow()
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
-                self?.snapshot(to: args[i + 1])
+                if let v = self?.window?.contentView { self?.snapshot(v, to: args[i + 1]) }
                 NSApp.terminate(nil)
             }
         }
     }
 
-    private func snapshot(to path: String) {
-        guard let view = window?.contentView, let layer = view.layer else { return }
-        let scale = window?.backingScaleFactor ?? 2
+    private func snapshot(_ view: NSView, to path: String) {
+        guard let layer = view.layer else { return }
+        let scale = view.window?.backingScaleFactor ?? 2
         let w = Int(view.bounds.width * scale), h = Int(view.bounds.height * scale)
         guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
                                   space: CGColorSpaceCreateDeviceRGB(),
