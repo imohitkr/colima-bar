@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
             if i + 2 < args.count, let tab = Tab(rawValue: args[i + 2]) { ui.tab = tab }
+            if let h = ProcessInfo.processInfo.environment["COLIMABAR_HINT"] { Hint.shared.text = h }
             showWindow()
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
                 if let v = self?.window?.contentView { self?.snapshot(v, to: args[i + 1]) }

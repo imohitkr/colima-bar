@@ -17,13 +17,14 @@ struct ContainersTab: View {
                 let isCollapsed = Binding(
                     get: { ui.collapsed.contains(g.key) },
                     set: { if $0 { ui.collapsed.insert(g.key) } else { ui.collapsed.remove(g.key) } })
-                SectionHeader(title: g.title, collapsed: isCollapsed) {
+                SectionHeader(title: g.title, collapsed: isCollapsed, hint: g.project == nil ? Help.standalone : Help.projectGroup) {
                     if let project = g.project {
                         IconButton("play.fill", "Start all in \(project)") { model.project(project, "start") }
                         IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, "restart") }
                         IconButton("stop.fill", "Stop all in \(project)") { model.project(project, "stop") }
                     } else if g.key == "~standalone", model.running.count > 1 {
                         Button("Stop all") { model.ctl("stop-all") }.buttonStyle(.borderless).font(.caption)
+                            .hint(Help.stopAll)
                     }
                 }
                 if !isCollapsed.wrappedValue {
@@ -88,6 +89,7 @@ struct ContainerRow: View {
                             .padding(.horizontal, 4).padding(.vertical, 1)
                             .background(healthColor(h).opacity(0.15), in: Capsule())
                             .foregroundStyle(healthColor(h))
+                            .hint(h == "healthy" ? Help.healthy : h == "unhealthy" ? Help.unhealthy : Help.starting)
                     }
                 }
                 Text(c.isRunning ? c.image : "\(c.image) · \(c.status)")
@@ -101,14 +103,16 @@ struct ContainerRow: View {
                     .padding(.horizontal, 5).padding(.vertical, 2)
                     .background(.blue.opacity(0.12), in: Capsule())
                     .foregroundStyle(.blue)
-                    .help("Open http://localhost:\(p)")
+                    .hint(Help.port(p))
             }
             if c.isRunning {
                 // Fixed-width, right-aligned, monospaced: numbers tick in place.
                 Text(stat.map { String(format: "%.1f%%", $0.cpu) } ?? "–")
                     .frame(width: 46, alignment: .trailing)
+                    .hint(Help.ctrCPU)
                 Text(stat.map { Fmt.bytes($0.memBytes) } ?? "–")
                     .frame(width: 54, alignment: .trailing)
+                    .hint(Help.ctrMem)
             }
             actions
         }
@@ -121,14 +125,14 @@ struct ContainerRow: View {
     @ViewBuilder private var actions: some View {
         HStack(spacing: 0) {
             if c.isRunning {
-                IconButton("text.alignleft", "Logs") { model.terminal("ctr-logs", c.name) }
-                IconButton("chevron.left.forwardslash.chevron.right", "Shell") { model.terminal("ctr-shell", c.name) }
-                IconButton("arrow.clockwise", "Restart") { model.container(c.id, "restart") }
-                IconButton("stop.fill", "Stop") { model.container(c.id, "stop") }
+                IconButton("text.alignleft", Help.logs) { model.terminal("ctr-logs", c.name) }
+                IconButton("chevron.left.forwardslash.chevron.right", Help.shell) { model.terminal("ctr-shell", c.name) }
+                IconButton("arrow.clockwise", Help.ctrRestart) { model.container(c.id, "restart") }
+                IconButton("stop.fill", Help.ctrStop) { model.container(c.id, "stop") }
             } else {
-                IconButton("text.alignleft", "Logs") { model.terminal("ctr-logs", c.name) }
-                IconButton("play.fill", "Start") { model.container(c.id, "start") }
-                IconButton("trash", "Remove") { model.ctl("ctr-rm", c.name) }
+                IconButton("text.alignleft", Help.logs) { model.terminal("ctr-logs", c.name) }
+                IconButton("play.fill", Help.ctrStart) { model.container(c.id, "start") }
+                IconButton("trash", Help.ctrRemove) { model.ctl("ctr-rm", c.name) }
             }
             Menu {
                 Button("Copy name") { copy(c.name) }
@@ -147,6 +151,7 @@ struct ContainerRow: View {
                 Image(systemName: "ellipsis")
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
+            .hint(Help.more)
         }
         .font(.system(size: 11))
     }
@@ -178,13 +183,16 @@ struct ImagesTab: View {
         VStack(alignment: .leading, spacing: 6) {
             SectionHeader(title: "\(model.images.count) images · \(unused.count) unused") {
                 Button("Remove dangling") { model.ctl("prune", "dangling") }.buttonStyle(.borderless).font(.caption)
+                    .hint(Help.removeDangling)
                 Button("Remove unused") { model.ctl("prune", "images") }.buttonStyle(.borderless).font(.caption)
+                    .hint(Help.removeUnusedImages)
             }
             if list.isEmpty { Empty(text: model.images.isEmpty ? "No images" : "No matches") }
             ForEach(list) { i in
                 HStack(spacing: 8) {
                     Image(systemName: i.dangling ? "square.dashed" : "square.stack.3d.up")
                         .foregroundStyle(.secondary).frame(width: 16)
+                        .hint(i.dangling ? Help.dangling : "Image \(i.repo):\(i.tag)")
                     VStack(alignment: .leading, spacing: 1) {
                         Text(i.dangling ? "<none>" : i.repo).font(.system(size: 12, weight: .medium))
                             .lineLimit(1).truncationMode(.head)
@@ -196,9 +204,11 @@ struct ImagesTab: View {
                         Text("in use").font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, 4).padding(.vertical, 1)
                             .background(.green.opacity(0.15), in: Capsule()).foregroundStyle(.green)
+                            .hint(Help.inUse)
                     }
                     Text(Fmt.bytes(i.size)).font(.system(size: 11).monospacedDigit())
                         .frame(width: 60, alignment: .trailing)
+                        .hint(Help.imageSize)
                     Menu {
                         Button("Copy reference") { copy(i.ref) }
                         if !i.dangling { Button("Pull latest of this tag") { model.ctl("img-pull", i.ref) } }
@@ -227,6 +237,7 @@ struct VolumesTab: View {
         VStack(alignment: .leading, spacing: 6) {
             SectionHeader(title: "\(model.volumes.count) volumes · \(unused.count) unused") {
                 Button("Remove unused") { model.ctl("prune", "volumes") }.buttonStyle(.borderless).font(.caption)
+                    .hint(Help.removeUnusedVolumes)
             }
             if list.isEmpty { Empty(text: model.volumes.isEmpty ? "No volumes" : "No matches") }
             ForEach(list) { v in
@@ -239,6 +250,7 @@ struct VolumesTab: View {
                               v.links > 0 ? "used by \(v.links)" : "unused"].compactMap { $0 }.joined(separator: " · "))
                             .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                     }
+                    .hint(v.anonymous ? Help.anonymous : v.links == 0 ? Help.unusedVolume : "Volume \(v.name), used by \(v.links) container(s).")
                     Spacer(minLength: 4)
                     Text(Fmt.bytes(v.size)).font(.system(size: 11).monospacedDigit())
                         .frame(width: 60, alignment: .trailing)
@@ -293,6 +305,7 @@ struct SystemTab: View {
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? Color.accentColor : .clear))
                     }
                     .buttonStyle(.plain).disabled(active)
+                    .hint(Help.presets)
                 }
             }
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
@@ -300,11 +313,13 @@ struct SystemTab: View {
                     Text("CPU").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: $form.cpu) { ForEach(cpuOpts, id: \.self) { Text("\($0)").tag($0) } }
                         .pickerStyle(.segmented).labelsHidden()
+                        .hint(Help.cpu)
                 }
                 GridRow {
                     Text("Memory").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: $form.mem) { ForEach(memOpts, id: \.self) { Text("\($0) GB").tag($0) } }
                         .pickerStyle(.segmented).labelsHidden()
+                        .hint(Help.memory)
                 }
             }
             HStack {
@@ -313,6 +328,7 @@ struct SystemTab: View {
                 Spacer()
                 Button("Apply") { model.ctl("resources", "\(form.cpu)", "\(form.mem)") }
                     .disabled(form.cpu == model.vm.cpus && form.mem == model.vm.memGB)
+                    .hint(Help.apply)
             }
 
             Divider()
@@ -320,9 +336,11 @@ struct SystemTab: View {
             Toggle(isOn: Binding(get: { model.rosetta }, set: { model.ctl("rosetta", $0 ? "on" : "off") })) {
                 Label("Rosetta (amd64 emulation)", systemImage: "cpu")
             }
+            .hint(Help.rosetta)
             Toggle(isOn: Binding(get: { model.k8s }, set: { model.ctl("k8s", $0 ? "on" : "off") })) {
                 Label("Kubernetes (k3s) · context: colima", systemImage: "circle.hexagongrid")
             }
+            .hint(Help.k8s)
             HStack {
                 Label("Disk: \(model.vm.diskGB) GB", systemImage: "internaldrive")
                 Spacer()
@@ -330,13 +348,14 @@ struct SystemTab: View {
                     Button("\(d) GB") { model.ctl("disk", "\(d)") }.controlSize(.small)
                 }
             }
+            .hint(Help.disk)
             Text("Disks can only grow, not shrink.").font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             SectionHeader(title: "Disk usage")
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
                 GridRow {
-                    Text("Type"); Text("Count"); Text("Size"); Text("Reclaimable")
+                    Text("Type"); Text("Count"); Text("Size"); Text("Reclaimable").hint(Help.dfReclaimable)
                 }
                 .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                 ForEach(model.df) { r in
@@ -348,19 +367,21 @@ struct SystemTab: View {
                             .foregroundStyle(r.reclaimable > 0 ? .orange : .secondary)
                     }
                     .font(.system(size: 11).monospacedDigit())
+                    .hint(dfHelp(r.type))
                 }
             }
             HStack(spacing: 6) {
-                Button("Dangling + build cache") { model.ctl("prune", "dangling") }
-                Button("Unused images") { model.ctl("prune", "images") }
-                Button("Unused volumes") { model.ctl("prune", "volumes") }
-                Button("Full cleanup") { model.ctl("prune", "all") }
+                Button("Dangling + build cache") { model.ctl("prune", "dangling") }.hint(Help.pruneDangling)
+                Button("Unused images") { model.ctl("prune", "images") }.hint(Help.pruneImages)
+                Button("Unused volumes") { model.ctl("prune", "volumes") }.hint(Help.pruneVolumes)
+                Button("Full cleanup") { model.ctl("prune", "all") }.hint(Help.pruneAll)
             }
             .controlSize(.small)
 
             Divider()
             SectionHeader(title: "App")
             Toggle("Notify when a container crashes, OOMs or turns unhealthy", isOn: $model.notifyOnCrash)
+                .hint(Help.notify)
             Toggle("Launch ColimaBar at login", isOn: Binding(get: { form.loginEnabled }, set: { on in
                 do {
                     if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
@@ -369,10 +390,20 @@ struct SystemTab: View {
                 }
                 form.loginEnabled = SMAppService.mainApp.status == .enabled
             }))
+            .hint(Help.login)
         }
         .toggleStyle(.switch).controlSize(.small)
         .onAppear { syncPickers() }
         .onChange(of: model.vm) { syncPickers() }
+    }
+
+    private func dfHelp(_ type: String) -> String {
+        switch type {
+        case "Images": return Help.dfImages
+        case "Containers": return Help.dfContainers
+        case "Volumes": return Help.dfVolumes
+        default: return Help.dfCache
+        }
     }
 
     private func syncPickers() {

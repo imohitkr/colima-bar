@@ -35,6 +35,7 @@ struct DashboardView: View {
                     ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden()
+                .hint(Help.tabs)
                 .padding(.horizontal, 12).padding(.bottom, 8)
                 if ui.tab != .system { searchBar }
                 Divider()
@@ -54,6 +55,7 @@ struct DashboardView: View {
             } else {
                 StoppedView(model: model)
             }
+            HintBar()
             Divider()
             FooterView(model: model, inWindow: inWindow, openWindow: openWindow)
         }
@@ -80,8 +82,10 @@ struct DashboardView: View {
             }
             .padding(.horizontal, 7).padding(.vertical, 4)
             .background(.quaternary.opacity(0.6), in: RoundedRectangle(cornerRadius: 6))
+            .hint(Help.search)
             if ui.tab == .containers {
                 Toggle("Running only", isOn: $ui.runningOnly).toggleStyle(.checkbox).font(.caption)
+                    .hint(Help.runningOnly)
             }
         }
         .padding(.horizontal, 12).padding(.bottom, 8)
@@ -110,13 +114,14 @@ struct HeaderView: View {
                     }
                 }
                 Text(subtitle).font(.caption).foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+                    .hint(Help.subtitle)
             }
             Spacer()
             if model.state == .running {
-                IconButton("arrow.clockwise", "Restart Colima") { model.ctl("restart") }
-                IconButton("stop.fill", "Stop Colima") { model.ctl("stop") }
+                IconButton("arrow.clockwise", Help.restart) { model.ctl("restart") }
+                IconButton("stop.fill", Help.stopVM) { model.ctl("stop") }
             } else if model.state == .stopped {
-                IconButton("play.fill", "Start Colima") { model.ctl("start") }
+                IconButton("play.fill", Help.startVM) { model.ctl("start") }
             }
         }
         .disabled(model.busy != nil)
@@ -158,16 +163,16 @@ struct FooterView: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            IconButton("terminal", "SSH into the VM") { model.terminal("ssh") }
-            IconButton("doc.on.clipboard", "Copy DOCKER_HOST export") { model.ctl("copy-env") }
-            IconButton("doc.text", "Open colima.yaml") { model.ctl("config") }
-            IconButton("list.bullet.rectangle", "Open Colima log") { model.ctl("logs") }
+            IconButton("terminal", Help.ssh) { model.terminal("ssh") }
+            IconButton("doc.on.clipboard", Help.copyEnv) { model.ctl("copy-env") }
+            IconButton("doc.text", Help.config) { model.ctl("config") }
+            IconButton("list.bullet.rectangle", Help.log) { model.ctl("logs") }
             Spacer()
             if !inWindow {
-                IconButton("macwindow", "Open in a window") { openWindow() }
+                IconButton("macwindow", Help.window) { openWindow() }
             }
-            IconButton("arrow.clockwise.circle", "Refresh (⌘R)") { Task { await model.refreshAll() } }
-            IconButton("power", "Quit ColimaBar") { NSApp.terminate(nil) }
+            IconButton("arrow.clockwise.circle", Help.refresh) { Task { await model.refreshAll() } }
+            IconButton("power", Help.quit) { NSApp.terminate(nil) }
         }
         .padding(.horizontal, 8).padding(.vertical, 6)
     }
@@ -203,8 +208,10 @@ struct LiveTiles: View {
         HStack(spacing: 10) {
             Tile(title: "CPU", value: cpuText, detail: "of \(model.vm.cpus) cores",
                  history: model.cpuHistory, tint: .blue)
+                .hint(Help.cpuTile)
             Tile(title: "Memory", value: memText, detail: "of \(model.vm.memGB) GB",
                  history: model.memHistory, tint: .purple)
+                .hint(Help.memTile)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Containers").font(.caption).foregroundStyle(.secondary)
                 Text("\(model.running.count)").font(.title2.weight(.semibold)).monospacedDigit()
@@ -216,6 +223,7 @@ struct LiveTiles: View {
             .frame(width: 92, height: 72, alignment: .topLeading)
             .padding(8)
             .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 8))
+            .hint(Help.ctrTile)
         }
     }
 
@@ -277,13 +285,14 @@ struct IconButton: View {
             Image(systemName: symbol).frame(width: 22, height: 20).contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .help(help)
+        .hint(help)
     }
 }
 
 struct SectionHeader<Trailing: View>: View {
     let title: String
     var collapsed: Binding<Bool>? = nil
+    var hint: String? = nil
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
@@ -297,6 +306,9 @@ struct SectionHeader<Trailing: View>: View {
                 .buttonStyle(.plain)
             } else {
                 Text(title).font(.caption.weight(.semibold))
+            }
+            if let hint {
+                Image(systemName: "info.circle").font(.caption2).foregroundStyle(.tertiary).hint(hint)
             }
             Spacer()
             trailing
