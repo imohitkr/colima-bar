@@ -43,7 +43,7 @@ echo "built $APP ($VERSION)"
 if [ "${1:-}" = install ]; then
   mkdir -p ~/Applications ~/.local/bin
   install -m 755 scripts/colima-ctl.sh ~/.local/bin/colima-ctl.sh
-  pkill -x ColimaBar 2>/dev/null && sleep 0.5 || true
+  osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1 && sleep 1 || true
   rm -rf ~/Applications/ColimaBar.app
   cp -R "$APP" ~/Applications/
   open ~/Applications/ColimaBar.app

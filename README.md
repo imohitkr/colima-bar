@@ -37,6 +37,8 @@ Command Line Tools are enough; Xcode isn't needed. Requires macOS 14+.
 
 The first launch from `~/Applications` registers ColimaBar as a login item. You can turn it off from the System tab or the right-click menu.
 
+Logs, shell and SSH open in iTerm (Terminal.app if iTerm is not installed).
+
 Debug: `ColimaBar.app/Contents/MacOS/ColimaBar --snapshot out.png [Containers|Images|Volumes|System]` renders the dashboard to a PNG and quits.
 
 ## Roadmap

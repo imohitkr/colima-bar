@@ -49,11 +49,19 @@ enum Shell {
         }
     }
 
-    /// Opens Terminal and runs `command` in a new window.
+    /// Runs `command` in a new iTerm window, falling back to Terminal.app
+    /// when iTerm isn't installed.
     static func inTerminal(_ command: String) {
         let escaped = command.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = """
+        let iTerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
+        let script = iTerm ? """
+        tell application "iTerm"
+            activate
+            set w to (create window with default profile)
+            tell current session of w to write text "\(escaped)"
+        end tell
+        """ : """
         tell application "Terminal"
             activate
             do script "\(escaped)"

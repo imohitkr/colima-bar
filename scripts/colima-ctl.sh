@@ -1,5 +1,5 @@
 #!/bin/bash
-# Action backend for ColimaBar (and the legacy SwiftBar plugin). Pins
+# Action backend for ColimaBar. Pins
 # XDG_CONFIG_HOME so it always targets the same VM as an interactive `colima`.
 export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export XDG_CONFIG_HOME="$HOME/.config"
@@ -16,23 +16,14 @@ confirm() {
   osascript -e "display dialog \"$1\" with title \"Colima\" buttons {\"Cancel\", \"OK\"} default button \"OK\" cancel button \"Cancel\" with icon caution" >/dev/null 2>&1
 }
 
-# ColimaBar watches the busy marker itself; only poke SwiftBar if it's running
-# so `open` never launches it.
-refresh_bar() {
-  pgrep -xq SwiftBar && open -g "swiftbar://refreshplugin?name=colima" >/dev/null 2>&1
-  return 0
-}
-
-# with_busy "label" cmd... -> marks the plugin busy while cmd runs.
+# with_busy "label" cmd... -> writes the busy marker ColimaBar watches.
 with_busy() {
   local label="$1"; shift
   mkdir -p "$(dirname "$BUSY")"
   echo "$label" > "$BUSY"
-  refresh_bar
   "$@"
   local rc=$?
   rm -f "$BUSY"
-  refresh_bar
   return $rc
 }
 
