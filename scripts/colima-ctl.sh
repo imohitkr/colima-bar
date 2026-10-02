@@ -16,8 +16,14 @@ KCTX=$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")
 colima() { command colima "$@" --profile "$PROFILE"; }
 BUSY="$HOME/.cache/colima-bar/busy"
 
+# Failures only. Run by ColimaBar, the message goes back to the app (native
+# alert with ColimaBar's icon); run by hand, it falls back to osascript.
 notify() {
-  osascript -e "display notification \"$1\" with title \"Colima\"" >/dev/null 2>&1
+  if [ -n "${COLIMABAR_APP:-}" ]; then
+    echo "COLIMABAR_NOTIFY:$1"
+  else
+    osascript -e "display notification \"$1\" with title \"Colima\"" >/dev/null 2>&1
+  fi
 }
 
 # confirm "message" -> exit status 0 only if the user clicked OK.

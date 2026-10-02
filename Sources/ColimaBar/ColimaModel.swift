@@ -29,6 +29,8 @@ final class ColimaModel {
     var volumes: [VolumeRow] = []
     var profiles: [ProfileRow] = []
     var routing = Routing.Status()
+    var alerts: [AlertItem] = []            // newest first, also shown in the dashboard
+    var notificationsAllowed = true
     var idleSince: Date?
 
     var profile = Defaults.string("profile") ?? "default" {
@@ -428,7 +430,10 @@ final class ColimaModel {
         let action = ev.Action ?? ""
         // Stats/exec events fire constantly and change nothing we show.
         if action.hasPrefix("exec_") || action == "top" { return }
-        if notifyOnCrash, ev.Type == "container", let id = ev.Actor?.ID {
+        // testcontainers' containers are torn down (often non-zero) on every
+        // test run; their failures already show up in the test output.
+        let isTestcontainer = attrs["org.testcontainers"] == "true"
+        if notifyOnCrash, ev.Type == "container", !isTestcontainer, let id = ev.Actor?.ID {
             let name = attrs["name"] ?? "container"
             let ctr = (id: id, name: name)
             if action == "oom" {
@@ -458,10 +463,23 @@ final class ColimaModel {
     func ctl(_ args: String...) {
         let p = profile
         Task {
-            _ = await Shell.run([Paths.ctl] + args, timeout: 900, extraEnv: ["COLIMABAR_PROFILE": p])
+            let r = await Shell.run([Paths.ctl] + args, timeout: 900,
+                                    extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
+            // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
+            // lines when ColimaBar runs it, so they arrive as native alerts.
+            for line in r.out.split(separator: "\n") where line.hasPrefix("COLIMABAR_NOTIFY:") {
+                Notifier.shared.post(String(line.dropFirst("COLIMABAR_NOTIFY:".count)))
+            }
             await refreshAll()
         }
     }
+
+    func record(_ title: String, _ body: String, containerID: String?) {
+        alerts.insert(AlertItem(title: title, body: body, containerID: containerID), at: 0)
+        if alerts.count > 20 { alerts.removeLast(alerts.count - 20) }
+    }
+
+    func container(withID id: String) -> Container? { containers.first { $0.id == id } }
 
     /// Container lifecycle calls that need no confirmation go straight to the API.
     func container(_ id: String, _ verb: String) {

@@ -107,7 +107,7 @@ final class LogStore {
            let config = j["Config"] as? [String: Any] {
             tty = config["Tty"] as? Bool ?? false
         } else {
-            status = "Container not found"
+            status = "This container has been removed, so its logs are gone."
             return
         }
         var q = "follow=1&stdout=1&stderr=1&timestamps=1&tail=\(tail)"

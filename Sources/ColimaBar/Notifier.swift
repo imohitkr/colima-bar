@@ -4,8 +4,10 @@ import UserNotifications
 
 /// Native notifications (ColimaBar's own name and icon). Container alerts get
 /// "View logs" and "Restart" buttons. Permission is requested the first time
-/// something is worth notifying about; if it's denied or unavailable, falls
-/// back to an osascript banner.
+/// something is worth notifying about. Every alert is also handed to
+/// `onAlert`, so the dashboard can list it even when notifications are off.
+/// There's deliberately no osascript fallback: clicking one of those banners
+/// opens Script Editor.
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
@@ -18,6 +20,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     /// Called with (action, containerID, containerName) when a button is used.
     var onContainerAction: ((String, String, String) -> Void)?
+    /// Called for every alert, delivered or not.
+    var onAlert: ((String, String, (id: String, name: String)?) -> Void)?
+    /// Called with whether macOS currently allows ColimaBar's notifications.
+    var onPermission: ((Bool) -> Void)?
 
     /// Must run before the app finishes launching so a click that launches
     /// the app isn't lost.
@@ -32,11 +38,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func post(_ body: String, title: String = "Colima", container: (id: String, name: String)? = nil) {
+        onAlert?(title, body, container)
         Task {
-            guard await authorized() else {
-                fallback(title: title, body: body)
-                return
-            }
+            guard await authorized() else { return }
             let content = UNMutableNotificationContent()
             content.title = title
             content.body = body
@@ -49,24 +53,54 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
             do { try await center.add(req) } catch {
                 log.error("notification failed: \(error.localizedDescription, privacy: .public)")
-                fallback(title: title, body: body)
             }
+        }
+    }
+
+    /// Debug: prints the permission state and posts a test alert.
+    func selfTest() async {
+        let before = await center.notificationSettings().authorizationStatus
+        let ok = await authorized()
+        let after = await center.notificationSettings().authorizationStatus
+        print("notification auth before=\(before.rawValue) after=\(after.rawValue) granted=\(ok)")
+        if ok {
+            let c = UNMutableNotificationContent()
+            c.title = "ColimaBar"
+            c.body = "Test notification"
+            do {
+                try await center.add(UNNotificationRequest(identifier: "selftest", content: c, trigger: nil))
+                print("posted")
+            } catch { print("post failed: \(error)") }
         }
     }
 
     private func authorized() async -> Bool {
         let settings = await center.notificationSettings()
+        defer { Task { await refreshPermission() } }
         switch settings.authorizationStatus {
         case .authorized, .provisional: return true
         case .notDetermined:
-            return (try? await center.requestAuthorization(options: [.alert, .sound])) ?? false
-        default: return false
+            do {
+                return try await center.requestAuthorization(options: [.alert, .sound])
+            } catch {
+                log.error("notification authorization failed: \(error.localizedDescription, privacy: .public)")
+                return false
+            }
+        default:
+            log.notice("notifications not allowed (status \(settings.authorizationStatus.rawValue))")
+            return false
         }
     }
 
-    private func fallback(title: String, body: String) {
-        let esc = { (s: String) in s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") }
-        Task { _ = await Shell.run(["osascript", "-e", "display notification \"\(esc(body))\" with title \"\(esc(title))\""]) }
+    /// Re-reads the permission (e.g. after the user changed it in Settings).
+    func refreshPermission() async {
+        let st = await center.notificationSettings().authorizationStatus
+        onPermission?(st == .authorized || st == .provisional || st == .notDetermined)
+    }
+
+    static func openSettings() {
+        let url = "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(AppDelegate.bundleID)"
+        if let u = URL(string: url) { NSWorkspace.shared.open(u) }
     }
 
     // MARK: - UNUserNotificationCenterDelegate

@@ -129,8 +129,10 @@ enum Help {
     static let autoStop = "Stop the VM after it has had no running containers for the chosen time, which frees its memory and CPU. With auto-start on, the next docker command starts it again."
     static let autoStopMinutes = "How long the VM must sit with zero running containers before it's stopped."
 
+    static let enableNotifications = "Open System Settings > Notifications > ColimaBar and turn on Allow Notifications."
+
     // App
-    static let notify = "Get a macOS notification when a container exits with an error, is killed for running out of memory, or its healthcheck starts failing."
+    static let notify = "Alert when a container exits with an error, is killed for running out of memory, or its healthcheck starts failing (testcontainers' throwaway containers are skipped). Failed actions always alert. Alerts are also listed on the Containers tab."
     static let login = "Start ColimaBar when you log in, and relaunch it right away if it ever crashes, so the docker socket keeps working."
 
     // Footer

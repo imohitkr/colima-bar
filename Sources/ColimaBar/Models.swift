@@ -26,6 +26,14 @@ struct Container: Identifiable, Equatable {
     }
 }
 
+struct AlertItem: Identifiable, Equatable {
+    let id = UUID()
+    let date = Date()
+    let title: String
+    let body: String
+    let containerID: String?
+}
+
 struct ProfileRow: Identifiable, Equatable {
     var id: String { name }
     let name: String

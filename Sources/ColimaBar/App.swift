@@ -22,7 +22,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     static let bundleID = "com.imohitkr.ColimaBar"
     /// Snapshot/debug runs sit beside the real instance and must not touch
     /// the proxy socket, docker routing or login items.
-    static let isDebugRun = CommandLine.arguments.contains { $0 == "--snapshot" || $0 == "--popover" }
+    static let isDebugRun = CommandLine.arguments.contains { ["--snapshot", "--popover", "--notify-test"].contains($0) }
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
@@ -37,6 +37,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // Before launch completes, so a notification click that launched us
         // isn't lost.
         Notifier.shared.install()
+        Notifier.shared.onAlert = { [weak self] title, body, ctr in
+            self?.model.record(title, body, containerID: ctr?.id)
+        }
+        Notifier.shared.onPermission = { [weak self] ok in
+            if self?.model.notificationsAllowed != ok { self?.model.notificationsAllowed = ok }
+        }
         Notifier.shared.onContainerAction = { [weak self] action, id, name in
             guard let self else { return }
             if Notifier.isRestart(action) {
@@ -48,6 +54,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        if CommandLine.arguments.contains("--notify-test") {
+            Task {
+                await Notifier.shared.selfTest()
+                try? await Task.sleep(for: .seconds(2))
+                exit(0)
+            }
+            return
+        }
+
         // One instance only: a second launch (Finder, `open`, the login agent)
         // hands over to the running one and exits.
         if !Self.isDebugRun,
@@ -258,7 +273,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     // MARK: - Visibility drives live stats
 
-    func popoverWillShow(_ n: Notification) { model.visibleCount += 1 }
+    func popoverWillShow(_ n: Notification) {
+        model.visibleCount += 1
+        Task { await Notifier.shared.refreshPermission() }
+    }
     func popoverDidClose(_ n: Notification) { model.visibleCount -= 1 }
 
     // MARK: - Detached window
