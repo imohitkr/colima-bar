@@ -106,6 +106,8 @@ struct HeaderView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text("Colima").font(.headline)
+                    // Only worth showing once there's more than one profile.
+                    if model.profiles.count > 1 { ProfileMenu(model: model) }
                     if let busy = model.busy {
                         ProgressView().controlSize(.mini)
                         Text(busy + "…").font(.caption).foregroundStyle(.orange)
@@ -133,7 +135,7 @@ struct HeaderView: View {
         switch model.state {
         case .running: return .green
         case .stopped: return .secondary
-        case .unknown: return .secondary
+        case .unknown, .notInstalled: return .secondary
         }
     }
 
@@ -142,11 +144,12 @@ struct HeaderView: View {
         case .running: return "Running"
         case .stopped: return "Stopped"
         case .unknown: return "Checking…"
+        case .notInstalled: return "Not installed"
         }
     }
 
     private var subtitle: String {
-        guard model.state == .running else { return "default profile" }
+        guard model.state == .running else { return "profile: \(model.profile)" }
         let v = model.vm
         var parts = ["\(v.cpus) CPU", "\(v.memGB) GB", "\(v.diskGB) GB disk", v.arch]
         if !v.mountType.isEmpty { parts.append(v.mountType) }
@@ -164,7 +167,10 @@ struct FooterView: View {
     var body: some View {
         HStack(spacing: 2) {
             IconButton("terminal", Help.ssh) { model.terminal("ssh") }
-            IconButton("doc.on.clipboard", Help.copyEnv) { model.ctl("copy-env") }
+            IconButton("doc.on.clipboard", Help.copyEnv) {
+                model.ctl("copy-env")
+                Hint.shared.text = "Copied the DOCKER_HOST export to the clipboard."
+            }
             IconButton("doc.text", Help.config) { model.ctl("config") }
             IconButton("list.bullet.rectangle", Help.log) { model.ctl("logs") }
             Spacer()
@@ -185,8 +191,17 @@ struct StoppedView: View {
         VStack(spacing: 14) {
             Spacer()
             Image(systemName: "shippingbox").font(.system(size: 44)).foregroundStyle(.secondary)
-            Text(model.state == .unknown ? "Checking Colima…" : "Colima is stopped").font(.title3)
+            Text(title).font(.title3)
+            if model.state == .notInstalled {
+                Text("Install it with Homebrew, then reopen this menu:").foregroundStyle(.secondary)
+                Text("brew install colima docker").font(.system(.body, design: .monospaced))
+                    .textSelection(.enabled)
+            }
             if model.state == .stopped {
+                if model.autoStart {
+                    Text("It will start by itself when something uses docker.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Button { model.ctl("start") } label: {
                     Label("Start Colima", systemImage: "play.fill").frame(width: 160)
                 }
@@ -196,6 +211,42 @@ struct StoppedView: View {
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var title: String {
+        switch model.state {
+        case .unknown: return "Checking Colima…"
+        case .notInstalled: return "Colima isn't installed"
+        default: return "Colima (\(model.profile)) is stopped"
+        }
+    }
+}
+
+/// Header chip that shows the selected profile and switches between them.
+struct ProfileMenu: View {
+    let model: ColimaModel
+
+    var body: some View {
+        Menu {
+            ForEach(model.profiles) { p in
+                Button {
+                    model.profile = p.name
+                } label: {
+                    Text("\(p.name == model.profile ? "✓ " : "")\(p.name)  ·  \(p.running ? "running" : "stopped")")
+                }
+            }
+            if model.profiles.isEmpty { Text("No profiles yet") }
+        } label: {
+            HStack(spacing: 2) {
+                Text(model.profile)
+                Image(systemName: "chevron.down").font(.system(size: 8, weight: .bold))
+            }
+            .font(.caption.weight(.medium))
+            .padding(.horizontal, 6).padding(.vertical, 2)
+            .background(.quaternary.opacity(0.6), in: Capsule())
+        }
+        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+        .hint(Help.profile)
     }
 }
 
@@ -286,6 +337,7 @@ struct IconButton: View {
         }
         .buttonStyle(.borderless)
         .hint(help)
+        .accessibilityLabel(String(help.split(separator: ".").first ?? Substring(help)))
     }
 }
 

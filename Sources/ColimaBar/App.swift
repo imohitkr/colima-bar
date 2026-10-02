@@ -19,6 +19,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     static let popoverSize = NSSize(width: 480, height: 640)
+    static let bundleID = "com.imohitkr.ColimaBar"
+    /// Snapshot/debug runs sit beside the real instance and must not touch
+    /// the proxy socket, docker routing or login items.
+    static let isDebugRun = CommandLine.arguments.contains { $0 == "--snapshot" || $0 == "--popover" }
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+    }
 
     private let model = ColimaModel()
     private let ui = ViewState()
@@ -26,12 +33,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private let popover = NSPopover()
     private var window: NSWindow?
 
+    func applicationWillFinishLaunching(_ note: Notification) {
+        // Before launch completes, so a notification click that launched us
+        // isn't lost.
+        Notifier.shared.install()
+        Notifier.shared.onContainerAction = { [weak self] action, id, name in
+            guard let self else { return }
+            if Notifier.isRestart(action) {
+                self.model.container(id, "restart")
+            } else {
+                self.model.openLogs(id: id, name: name)
+            }
+        }
+    }
+
     func applicationDidFinishLaunching(_ note: Notification) {
+        // One instance only: a second launch (Finder, `open`, the login agent)
+        // hands over to the running one and exits.
+        if !Self.isDebugRun,
+           let other = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
+            .first(where: { $0 != .current }) {
+            other.activate()
+            exit(0)
+        }
+
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.target = self
         item.button?.action = #selector(clicked)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         item.button?.imagePosition = .imageLeading
+        item.button?.setAccessibilityLabel("Colima")
+        item.button?.setAccessibilityHelp("Left-click for the dashboard, right-click for quick actions")
 
         popover.behavior = .transient
         popover.animates = false
@@ -46,9 +78,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         popover.contentViewController = host
         popover.contentSize = Self.popoverSize
 
-        model.start()
+        model.start(debug: Self.isDebugRun)
         updateIcon()
-        registerLoginItemOnce()
+        if !Self.isDebugRun {
+            LoginItem.migrate()
+            registerLoginItemOnce()
+        }
         if CommandLine.arguments.contains("--window") { showWindow() }
         // Debug: `--popover [PATH]` opens the popover on launch and, with a
         // path, renders it to a PNG and quits.
@@ -68,7 +103,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
             if i + 2 < args.count, let tab = Tab(rawValue: args[i + 2]) { ui.tab = tab }
             if let h = ProcessInfo.processInfo.environment["COLIMABAR_HINT"] { Hint.shared.text = h }
+            if let name = ProcessInfo.processInfo.environment["COLIMABAR_LOGS"] {
+                // Snapshot the log viewer for a container instead.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    guard let self, let c = self.model.containers.first(where: { $0.name == name }) else { return }
+                    self.model.openLogs(id: c.id, name: c.name)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+                    if let v = NSApp.windows.first(where: { $0.title.hasPrefix("Logs:") })?.contentView {
+                        self?.snapshot(v, to: args[i + 1])
+                    }
+                    NSApp.terminate(nil)
+                }
+                return
+            }
             showWindow()
+            if let hs = ProcessInfo.processInfo.environment["COLIMABAR_SNAPSHOT_HEIGHT"], let h = Double(hs) {
+                window?.setContentSize(NSSize(width: 480, height: h))
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
                 if let v = self?.window?.contentView { self?.snapshot(v, to: args[i + 1]) }
                 NSApp.terminate(nil)
@@ -117,9 +169,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             img?.isTemplate = true
             item.button?.image = img
             item.button?.title = title
+            item.button?.setAccessibilityValue(model.busy ?? (model.state == .running
+                ? "\(model.running.count) containers running" : "stopped"))
             item.button?.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         } onChange: {
-            Task { @MainActor [weak self] in self?.updateIcon() }
+            // The app delegate lives for the whole process.
+            Task { @MainActor in self.updateIcon() }
         }
     }
 
@@ -159,9 +214,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         add("Open Dashboard Window", #selector(openWindowAction))
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
-        login.state = SMAppService.mainApp.status == .enabled ? .on : .off
+        login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
+        let auto = NSMenuItem(title: "Auto-start Colima on Demand", action: #selector(toggleAutoStart), keyEquivalent: "")
+        auto.target = self
+        auto.state = model.autoStart ? .on : .off
+        menu.addItem(auto)
         menu.addItem(.separator())
+        let ver = NSMenuItem(title: "ColimaBar \(Self.version)", action: nil, keyEquivalent: "")
+        ver.isEnabled = false
+        menu.addItem(ver)
         add("Quit ColimaBar", #selector(quit), key: "q")
         item.menu = menu
         item.button?.performClick(nil)
@@ -175,7 +237,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         guard !UserDefaults.standard.bool(forKey: key),
               Bundle.main.bundlePath.contains("/Applications/") else { return }
         UserDefaults.standard.set(true, forKey: key)
-        try? SMAppService.mainApp.register()
+        try? LoginItem.set(true)
     }
 
     @objc private func startVM() { model.ctl("start") }
@@ -183,13 +245,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     @objc private func restartVM() { model.ctl("restart") }
     @objc private func openWindowAction() { showWindow() }
     @objc private func quit() { NSApp.terminate(nil) }
+    @objc private func toggleAutoStart() { model.autoStart.toggle() }
     @objc private func toggleLogin() {
-        let svc = SMAppService.mainApp
-        do {
-            if svc.status == .enabled { try svc.unregister() } else { try svc.register() }
-        } catch {
+        do { try LoginItem.set(!LoginItem.isEnabled) } catch {
             model.notify("Login item change failed: \(error.localizedDescription)")
         }
+    }
+
+    func applicationWillTerminate(_ note: Notification) {
+        if !Self.isDebugRun { model.shutdown() }
     }
 
     // MARK: - Visibility drives live stats

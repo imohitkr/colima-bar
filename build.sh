@@ -1,31 +1,42 @@
 #!/bin/bash
-# Builds ColimaBar.app with swiftc (Command Line Tools are enough, no Xcode).
+# Builds ColimaBar.app with SwiftPM (Command Line Tools are enough, no Xcode).
 #   ./build.sh            build into ./build/ColimaBar.app
-#   ./build.sh install    also install the app to ~/Applications and
-#                         scripts/colima-ctl.sh to ~/.local/bin, then relaunch
+#   ./build.sh test       run the test suite
+#   ./build.sh install    build, then install the app to ~/Applications and
+#                         scripts/colima-ctl.sh to ~/.local/bin, and relaunch
 set -euo pipefail
 cd "$(dirname "$0")"
 
+if [ "${1:-}" = test ]; then
+  exec swift test
+fi
+
 APP=build/ColimaBar.app
-BIN="$APP/Contents/MacOS/ColimaBar"
-VERSION=$(git describe --tags --always 2>/dev/null || echo dev)
+ID=com.imohitkr.ColimaBar
+VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
+VERSION=${VERSION#v}
+
+swift build -c release --product ColimaBar
+BIN=$(swift build -c release --show-bin-path)/ColimaBar
+
+mkdir -p Resources
+[ -f Resources/AppIcon.icns ] || swift scripts/make-icon.swift Resources/AppIcon.icns
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-
-swiftc -O -parse-as-library -swift-version 5 \
-  -target arm64-apple-macos14.0 \
-  -o "$BIN" Sources/ColimaBar/*.swift
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
+cp "$BIN" "$APP/Contents/MacOS/ColimaBar"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleIdentifier</key><string>com.imohitkr.ColimaBar</string>
+  <key>CFBundleIdentifier</key><string>${ID}</string>
   <key>CFBundleName</key><string>ColimaBar</string>
   <key>CFBundleDisplayName</key><string>ColimaBar</string>
   <key>CFBundleExecutable</key><string>ColimaBar</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>
@@ -36,7 +47,24 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-# Ad-hoc signature: required for SMAppService (launch at login) to accept it.
+# Login agent (registered via SMAppService): starts at login and relaunches
+# after a crash; a normal Quit (exit 0) is left alone.
+cat > "$APP/Contents/Library/LaunchAgents/${ID}.agent.plist" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${ID}.agent</string>
+  <key>BundleProgram</key><string>Contents/MacOS/ColimaBar</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+</dict>
+</plist>
+EOF
+
+# Ad-hoc signature: required for SMAppService and notifications.
 codesign --force --sign - "$APP" >/dev/null
 echo "built $APP ($VERSION)"
 

@@ -72,7 +72,7 @@ enum Help {
     static let healthy = "HEALTHCHECK is passing."
     static let unhealthy = "HEALTHCHECK is failing. The container is running but probably not working; check its logs."
     static let starting = "HEALTHCHECK hasn't passed yet; the container is still starting up."
-    static let logs = "Follow the container's logs (last 200 lines, then live) in iTerm."
+    static let logs = "Open a live log window for this container: search, follow, stderr filter and copy. Use the ••• menu to follow the logs in iTerm instead."
     static let shell = "Open an interactive shell (bash if present, otherwise sh) inside the container in iTerm."
     static let ctrRestart = "Restart this container. Its filesystem and volumes are kept."
     static let ctrStop = "Stop this container (SIGTERM, then SIGKILL after 10s). It can be started again."
@@ -115,13 +115,27 @@ enum Help {
     static let pruneVolumes = "Delete all volumes no container uses. Their data is lost for good."
     static let pruneAll = "Remove stopped containers, unused networks, unused images and build cache. Volumes are kept."
 
+    // Profiles
+    static let profile = "Colima profile shown in this dashboard. Each profile is a separate VM with its own containers, images and settings. Pick another to switch."
+    static let profiles = "All Colima profiles (create one with `colima start --profile NAME`). The dashboard and every action apply to the selected one."
+
+    // Auto-start / auto-stop
+    static let autoStart = "Every docker client (terminal, IDE test runs, testcontainers) is pointed at ColimaBar's socket. While the VM is stopped, the first real docker request starts it and then goes through. Turn off to connect straight to Colima (no auto-start)."
+    static let routeContext = "The current docker context points at ColimaBar's socket. Used by the docker CLI when DOCKER_HOST isn't set, and by most GUIs."
+    static let routeLaunchd = "DOCKER_HOST is set for apps launched from the Dock or Finder, so IDE test runners (GoLand, PyCharm, VS Code) use ColimaBar's socket. Restart an IDE that was already open for it to pick this up."
+    static let routeTestcontainers = "testcontainers (Java, Go, …) reads docker.host from ~/.testcontainers.properties."
+    static let routeVarRun = "Some tools only look at /var/run/docker.sock (e.g. the Python docker SDK without DOCKER_HOST). Linking it needs your admin password once."
+    static let linkVarRun = "Create /var/run/docker.sock as a symlink to ColimaBar's socket. Asks for your admin password."
+    static let autoStop = "Stop the VM after it has had no running containers for the chosen time, which frees its memory and CPU. With auto-start on, the next docker command starts it again."
+    static let autoStopMinutes = "How long the VM must sit with zero running containers before it's stopped."
+
     // App
     static let notify = "Get a macOS notification when a container exits with an error, is killed for running out of memory, or its healthcheck starts failing."
-    static let login = "Start ColimaBar automatically when you log in."
+    static let login = "Start ColimaBar when you log in, and relaunch it right away if it ever crashes, so the docker socket keeps working."
 
     // Footer
     static let ssh = "Open a shell inside the Colima VM itself in iTerm."
-    static let copyEnv = "Copy 'export DOCKER_HOST=…' for tools that don't read the docker context, like some testcontainers setups."
+    static let copyEnv = "Copy 'export DOCKER_HOST=…' pointing at ColimaBar's socket (auto-starts Colima, still works when ColimaBar is quit), for scripts or shells that don't read the docker context."
     static let config = "Open colima.yaml, the VM's configuration file, in your text editor."
     static let log = "Open Colima's log in Console, which is useful when start or stop fails."
     static let window = "Open the dashboard in a resizable window that stays open."

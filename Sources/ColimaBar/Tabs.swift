@@ -125,16 +125,18 @@ struct ContainerRow: View {
     @ViewBuilder private var actions: some View {
         HStack(spacing: 0) {
             if c.isRunning {
-                IconButton("text.alignleft", Help.logs) { model.terminal("ctr-logs", c.name) }
+                IconButton("text.alignleft", Help.logs) { model.openLogs(id: c.id, name: c.name) }
                 IconButton("chevron.left.forwardslash.chevron.right", Help.shell) { model.terminal("ctr-shell", c.name) }
                 IconButton("arrow.clockwise", Help.ctrRestart) { model.container(c.id, "restart") }
                 IconButton("stop.fill", Help.ctrStop) { model.container(c.id, "stop") }
             } else {
-                IconButton("text.alignleft", Help.logs) { model.terminal("ctr-logs", c.name) }
+                IconButton("text.alignleft", Help.logs) { model.openLogs(id: c.id, name: c.name) }
                 IconButton("play.fill", Help.ctrStart) { model.container(c.id, "start") }
                 IconButton("trash", Help.ctrRemove) { model.ctl("ctr-rm", c.name) }
             }
             Menu {
+                Button("Logs in iTerm") { model.terminal("ctr-logs", c.name) }
+                Divider()
                 Button("Copy name") { copy(c.name) }
                 Button("Copy ID") { copy(String(c.id.prefix(12))) }
                 Button("Copy image") { copy(c.image) }
@@ -277,7 +279,8 @@ struct VolumesTab: View {
 final class SystemForm {
     var cpu = 0
     var mem = 0
-    var loginEnabled = SMAppService.mainApp.status == .enabled
+    var loginEnabled = LoginItem.isEnabled
+    var linking = false
 }
 
 struct SystemTab: View {
@@ -379,16 +382,81 @@ struct SystemTab: View {
             .controlSize(.small)
 
             Divider()
+            SectionHeader(title: "Auto-start & auto-stop")
+            Toggle(isOn: $model.autoStart) {
+                Label("Start Colima when something uses docker", systemImage: "bolt.badge.automatic")
+            }
+            .hint(Help.autoStart)
+            VStack(alignment: .leading, spacing: 3) {
+                RouteRow(ok: model.routing.context, text: "docker context: \(Routing.contextName)", help: Help.routeContext)
+                RouteRow(ok: model.routing.launchd, text: "Apps & IDE test runners (launchd DOCKER_HOST)", help: Help.routeLaunchd)
+                RouteRow(ok: model.routing.testcontainers, text: "testcontainers (~/.testcontainers.properties)", help: Help.routeTestcontainers)
+                HStack {
+                    RouteRow(ok: model.routing.varRun, text: "/var/run/docker.sock", help: Help.routeVarRun)
+                    if !model.routing.varRun {
+                        Button(form.linking ? "Linking…" : "Link (admin)") {
+                            form.linking = true
+                            Task {
+                                if !(await Routing.linkVarRun()) { model.notify("Couldn't link /var/run/docker.sock") }
+                                await model.refreshRouting()
+                                form.linking = false
+                            }
+                        }
+                        .controlSize(.mini).disabled(form.linking)
+                        .hint(Help.linkVarRun)
+                    }
+                }
+            }
+            .padding(.leading, 4)
+            .opacity(model.autoStart ? 1 : 0.5)
+            HStack {
+                Toggle(isOn: $model.autoStop) {
+                    Label("Stop Colima when idle", systemImage: "moon.zzz")
+                }
+                .hint(Help.autoStop)
+                Spacer()
+                Picker("", selection: $model.autoStopMinutes) {
+                    Text("15 min").tag(15)
+                    Text("30 min").tag(30)
+                    Text("60 min").tag(60)
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 190)
+                .disabled(!model.autoStop)
+                .hint(Help.autoStopMinutes)
+            }
+            if model.autoStop, let since = model.idleSince {
+                Text("Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(since.addingTimeInterval(Double(model.autoStopMinutes * 60)).formatted(date: .omitted, time: .shortened)).")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+
+            if model.profiles.count > 1 {
+            Divider()
+            SectionHeader(title: "Profiles", hint: Help.profiles) { EmptyView() }
+            ForEach(model.profiles) { p in
+                HStack(spacing: 8) {
+                    Circle().fill(p.running ? Color.green : .secondary.opacity(0.5)).frame(width: 7, height: 7)
+                    Text(p.name).font(.system(size: 12, weight: p.name == model.profile ? .semibold : .regular))
+                    Text("\(p.cpus) CPU · \(p.memGB) GB").font(.caption).foregroundStyle(.secondary)
+                    Spacer()
+                    if p.name != model.profile {
+                        Button("Show") { model.profile = p.name }.controlSize(.mini)
+                            .hint("Switch the dashboard to the \(p.name) profile.")
+                    }
+                }
+            }
+            }
+
+            Divider()
             SectionHeader(title: "App")
             Toggle("Notify when a container crashes, OOMs or turns unhealthy", isOn: $model.notifyOnCrash)
                 .hint(Help.notify)
             Toggle("Launch ColimaBar at login", isOn: Binding(get: { form.loginEnabled }, set: { on in
                 do {
-                    if on { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
+                    try LoginItem.set(on)
                 } catch {
                     model.notify("Login item change failed: \(error.localizedDescription)")
                 }
-                form.loginEnabled = SMAppService.mainApp.status == .enabled
+                form.loginEnabled = LoginItem.isEnabled
             }))
             .hint(Help.login)
         }
@@ -409,7 +477,22 @@ struct SystemTab: View {
     private func syncPickers() {
         form.cpu = model.vm.cpus
         form.mem = model.vm.memGB
-        form.loginEnabled = SMAppService.mainApp.status == .enabled
+        form.loginEnabled = LoginItem.isEnabled
+    }
+}
+
+struct RouteRow: View {
+    let ok: Bool
+    let text: String
+    let help: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle.dashed")
+                .foregroundStyle(ok ? Color.green : .secondary)
+            Text(text).font(.caption)
+        }
+        .hint(help)
     }
 }
 

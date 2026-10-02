@@ -8,12 +8,13 @@ import Foundation
 final class DockerAPI: @unchecked Sendable {
     let socketPath: String
 
-    init(socketPath: String = "\(Shell.home)/.config/colima/default/docker.sock") {
+    init(socketPath: String) {
         self.socketPath = socketPath
     }
 
     struct Response {
         let status: Int
+        let headers: [String: String]   // lower-cased names
         let body: Data
         var ok: Bool { (200..<300).contains(status) }
     }
@@ -47,10 +48,45 @@ final class DockerAPI: @unchecked Sendable {
         }
         guard let split = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
         let head = String(decoding: data[..<split.lowerBound], as: UTF8.self)
-        let status = head.split(separator: " ", maxSplits: 2).dropFirst().first.flatMap { Int($0) } ?? 0
+        let lines = head.components(separatedBy: "\r\n")
+        let status = lines.first?.split(separator: " ", maxSplits: 2).dropFirst().first.flatMap { Int($0) } ?? 0
+        var headers: [String: String] = [:]
+        for line in lines.dropFirst() {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+        }
         var body = Data(data[split.upperBound...])
-        if head.lowercased().contains("transfer-encoding: chunked") { body = Self.dechunk(body) }
-        return Response(status: status, body: body)
+        if headers["transfer-encoding"]?.lowercased() == "chunked" { body = Self.dechunk(body) }
+        return Response(status: status, headers: headers, body: body)
+    }
+
+    /// Like `stream`, but hands over raw body bytes as they arrive (for log
+    /// streams, whose frames are binary rather than newline-delimited).
+    func streamRaw(_ path: String, onData: @escaping @Sendable (Data) -> Void,
+                   onEnd: @escaping @Sendable () -> Void) -> StreamHandle {
+        let handle = StreamHandle()
+        Thread.detachNewThread { [self] in
+            guard let fd = connect(timeout: 0) else { onEnd(); return }
+            guard handle.attach(fd) else { close(fd); return }
+            defer { handle.finish() }
+            guard send(fd, method: "GET", path: path) else { if !handle.cancelled { onEnd() }; return }
+            var pending = Data()
+            var headerDone = false
+            var buf = [UInt8](repeating: 0, count: 65536)
+            while true {
+                let n = read(fd, &buf, buf.count)
+                if n <= 0 { break }
+                if headerDone { onData(Data(buf[0..<n])); continue }
+                pending.append(buf, count: n)
+                guard let split = pending.range(of: Data("\r\n\r\n".utf8)) else { continue }
+                headerDone = true
+                let rest = Data(pending[split.upperBound...])
+                pending.removeAll()
+                if !rest.isEmpty { onData(rest) }
+            }
+            if !handle.cancelled { onEnd() }
+        }
+        return handle
     }
 
     /// Opens a long-lived request and calls `onLine` with each newline-delimited
@@ -90,30 +126,7 @@ final class DockerAPI: @unchecked Sendable {
     // MARK: - Socket plumbing
 
     private func connect(timeout: Int) -> Int32? {
-        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return nil }
-        var addr = sockaddr_un()
-        addr.sun_family = sa_family_t(AF_UNIX)
-        let path = Array(socketPath.utf8)
-        guard path.count < MemoryLayout.size(ofValue: addr.sun_path) else { close(fd); return nil }
-        withUnsafeMutableBytes(of: &addr.sun_path) { raw in
-            raw.copyBytes(from: path)
-            raw[path.count] = 0
-        }
-        let ok = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
-            }
-        }
-        guard ok else { close(fd); return nil }
-        var one: Int32 = 1
-        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-        if timeout > 0 {
-            var tv = timeval(tv_sec: timeout, tv_usec: 0)
-            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        }
-        return fd
+        UnixSocket.connect(socketPath, timeout: timeout)
     }
 
     private func send(_ fd: Int32, method: String, path: String) -> Bool {
@@ -123,7 +136,7 @@ final class DockerAPI: @unchecked Sendable {
         return bytes.withUnsafeBytes { write(fd, $0.baseAddress, bytes.count) } == bytes.count
     }
 
-    private static func dechunk(_ d: Data) -> Data {
+    static func dechunk(_ d: Data) -> Data {
         var out = Data()
         var i = d.startIndex
         while i < d.endIndex, let crlf = d[i...].range(of: Data("\r\n".utf8)) {

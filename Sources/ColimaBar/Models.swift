@@ -26,6 +26,14 @@ struct Container: Identifiable, Equatable {
     }
 }
 
+struct ProfileRow: Identifiable, Equatable {
+    var id: String { name }
+    let name: String
+    let running: Bool
+    let cpus: Int
+    let memGB: Int
+}
+
 struct Stat: Equatable {
     let cpu: Double     // percent of one core, as docker reports it
     let memBytes: Double
@@ -42,6 +50,7 @@ struct DFRow: Identifiable, Equatable {
 // MARK: - Raw docker/colima JSON
 
 struct ColimaListJSON: Decodable {
+    let name: String?
     let status: String
     let arch: String?
     let cpus: Int?
@@ -85,8 +94,11 @@ struct APIStats: Decodable {
 
     /// Same formulas as `docker stats`: CPU% of one core, memory minus page cache.
     var cpuPercent: Double {
+        // The first sample of a stream has no previous one; a delta against
+        // zero would be the container's lifetime average, not current load.
+        guard let prevSys = precpu_stats.system_cpu_usage, prevSys > 0 else { return 0 }
         let cpuDelta = Double(cpu_stats.cpu_usage.total_usage) - Double(precpu_stats.cpu_usage.total_usage)
-        let sysDelta = Double(cpu_stats.system_cpu_usage ?? 0) - Double(precpu_stats.system_cpu_usage ?? 0)
+        let sysDelta = Double(cpu_stats.system_cpu_usage ?? 0) - Double(prevSys)
         guard cpuDelta > 0, sysDelta > 0 else { return 0 }
         return cpuDelta / sysDelta * Double(cpu_stats.online_cpus ?? 1) * 100
     }
@@ -142,7 +154,10 @@ struct VolumeRow: Identifiable, Equatable {
 }
 
 struct DockerEvent: Decodable {
-    struct Actor: Decodable { let Attributes: [String: String]? }
+    struct Actor: Decodable {
+        let ID: String?
+        let Attributes: [String: String]?
+    }
     let `Type`: String?
     let Action: String?
     let Actor: Actor?
