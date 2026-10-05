@@ -13,6 +13,7 @@
   <a href="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml"><img src="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
   <img src="https://img.shields.io/badge/Swift-5.10-F05138?logo=swift&logoColor=white" alt="Swift 5.10">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
 
 <p align="center">
@@ -51,7 +52,7 @@ git clone https://github.com/imohitkr/colima-bar && cd colima-bar
 ./build.sh install    # builds, installs to ~/Applications and launches
 ```
 
-Needs macOS 14+, [Colima](https://github.com/abiosoft/colima) and the Xcode Command Line Tools. Then add the [`DOCKER_HOST` snippet](#auto-start-how-docker-clients-reach-colima) to your `~/.zshrc`. Prebuilt zips are on the [releases page](https://github.com/imohitkr/colima-bar/releases) when a version is tagged.
+Needs macOS 14+, [Colima](https://github.com/abiosoft/colima) and the Xcode Command Line Tools. Then add the [`DOCKER_HOST` snippet](#auto-start-how-docker-clients-reach-colima) to your `~/.zshrc`. Or grab a prebuilt zip from the [releases page](https://github.com/imohitkr/colima-bar/releases) (clear quarantine once, see below).
 
 ## Features
 
@@ -117,7 +118,7 @@ Command Line Tools are enough; Xcode isn't needed. Requires macOS 14+.
 CI (`.github/workflows/ci.yml`) runs the tests and builds the app on pushes to `main` and on PRs. Pushing a `v*` tag also publishes a zipped `.app` as a GitHub release:
 
 ```sh
-git tag v1.0.0 && git push origin v1.0.0
+git tag v0.2.0 && git push origin v0.2.0
 ```
 
 The app is ad-hoc signed. A downloaded release zip is quarantined, so clear that once with `xattr -dr com.apple.quarantine ~/Applications/ColimaBar.app`.
@@ -137,3 +138,7 @@ This quits the app, removes the login agent, switches the docker context back to
 - kubectl context / namespace switcher
 - Global hotkey
 - Docker context switcher for remote daemons
+
+## License
+
+[MIT](LICENSE)
