@@ -1,8 +1,57 @@
-# ColimaBar
+<p align="center">
+  <img src="docs/screenshots/icon.png" width="112" alt="ColimaBar icon">
+</p>
 
-A native macOS menu bar dashboard for [Colima](https://github.com/abiosoft/colima) that also **starts Colima on demand**: run `docker`, a test suite or an IDE test with the VM stopped, and it boots and carries on. A cold `docker run` takes about 8 s.
+<h1 align="center">ColimaBar</h1>
 
-Left-click opens a live dashboard. Right-click opens quick actions (start/stop, window, auto-start, launch at login, quit). Hover over anything for an explanation.
+<p align="center">
+  A native macOS menu bar dashboard for <a href="https://github.com/abiosoft/colima">Colima</a> that <b>starts the VM on demand</b>.<br>
+  Run <code>docker</code>, a test suite or an IDE test with Colima stopped; it boots and carries on.
+</p>
+
+<p align="center">
+  <a href="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml"><img src="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/Swift-5.10-F05138?logo=swift&logoColor=white" alt="Swift 5.10">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/containers.png" width="480" alt="Dashboard: containers grouped by Compose project, with health, ports, CPU and memory">
+</p>
+
+- **Zero-thought Docker**: every client (terminal, IDE, testcontainers) goes through one socket that boots Colima on the first real request. A cold `docker run` takes about 8 s.
+- **Live dashboard**: containers grouped by Compose project, health, ports, per-container CPU and memory, logs, images, volumes and VM settings in one popover.
+- **Quiet by default**: idles at ~0% CPU, can stop the VM when idle, and only notifies you when something actually breaks.
+
+Left-click the menu bar icon for the dashboard. Right-click for quick actions (start/stop, window, auto-start, launch at login, quit). Hover over anything for an explanation.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/images.png" alt="Images tab: sizes, in-use badges, prune"></td>
+    <td width="50%"><img src="docs/screenshots/system.png" alt="System tab: VM resources, features, disk usage, auto-start and auto-stop"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Images</b>: sizes, what's in use, one-click prune</td>
+    <td align="center"><b>System</b>: VM presets, Rosetta, k3s, disk, auto-start and auto-stop</td>
+  </tr>
+  <tr>
+    <td colspan="2"><img src="docs/screenshots/logs.png" alt="Log viewer with search, follow, timestamps and highlighted stderr"></td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center"><b>Log viewer</b>: live follow, search, timestamps, stderr highlighted; survives container restarts</td>
+  </tr>
+</table>
+
+## Quick start
+
+```sh
+git clone https://github.com/imohitkr/colima-bar && cd colima-bar
+./build.sh install    # builds, installs to ~/Applications and launches
+```
+
+Needs macOS 14+, [Colima](https://github.com/abiosoft/colima) and the Xcode Command Line Tools. Then add the [`DOCKER_HOST` snippet](#auto-start-how-docker-clients-reach-colima) to your `~/.zshrc`. Prebuilt zips are on the [releases page](https://github.com/imohitkr/colima-bar/releases) when a version is tagged.
 
 ## Features
 
