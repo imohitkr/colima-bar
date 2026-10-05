@@ -52,7 +52,11 @@ git clone https://github.com/imohitkr/colima-bar && cd colima-bar
 ./build.sh install    # builds, installs to ~/Applications and launches
 ```
 
-Needs macOS 14+, [Colima](https://github.com/abiosoft/colima) and the Xcode Command Line Tools. Then add the [`DOCKER_HOST` snippet](#auto-start-how-docker-clients-reach-colima) to your `~/.zshrc`. Or grab a prebuilt zip from the [releases page](https://github.com/imohitkr/colima-bar/releases) (clear quarantine once, see below).
+Needs macOS 14+, [Colima](https://github.com/abiosoft/colima) and the Xcode Command Line Tools. Then add the [`DOCKER_HOST` snippet](#auto-start-how-docker-clients-reach-colima) to your `~/.zshrc`. Or download the zip from the [latest release](https://github.com/imohitkr/colima-bar/releases/latest), move `ColimaBar.app` to `~/Applications`, and clear the quarantine flag once (the app is ad-hoc signed):
+
+```sh
+xattr -dr com.apple.quarantine ~/Applications/ColimaBar.app
+```
 
 ## Features
 
@@ -103,27 +107,6 @@ An IDE that was already open when ColimaBar first ran must be restarted to pick 
 - Colima has no API of its own, so VM facts come from `colima list -j` / `colima status -j`. These run only when a socket `/_ping` says the VM went up or down, and otherwise once a minute.
 - Actions that need a confirmation or edit `colima.yaml` go through `scripts/colima-ctl.sh` (installed to `~/.local/bin`, profile chosen through `COLIMABAR_PROFILE`). Container lifecycle calls go straight to the API.
 - With the dashboard closed, the app idles at ~0% CPU.
-- Diagnostics: `log stream --predicate 'subsystem == "com.imohitkr.ColimaBar"'`
-
-## Build, test, install
-
-Command Line Tools are enough; Xcode isn't needed. Requires macOS 14+.
-
-```sh
-./build.sh test       # swift-testing suite (parsing, log demux, proxy end to end)
-./build.sh            # build/ColimaBar.app
-./build.sh install    # install to ~/Applications, install colima-ctl.sh, relaunch
-```
-
-CI (`.github/workflows/ci.yml`) runs the tests and builds the app on pushes to `main` and on PRs. Pushing a `v*` tag also publishes a zipped `.app` as a GitHub release:
-
-```sh
-git tag v0.2.0 && git push origin v0.2.0
-```
-
-The app is ad-hoc signed. A downloaded release zip is quarantined, so clear that once with `xattr -dr com.apple.quarantine ~/Applications/ColimaBar.app`.
-
-Debug: `ColimaBar.app/Contents/MacOS/ColimaBar --snapshot out.png [Containers|Images|Volumes|System]` renders the dashboard to a PNG and quits (`COLIMABAR_SNAPSHOT_HEIGHT`, `COLIMABAR_HINT` and `COLIMABAR_LOGS=<container>` adjust it). `--popover [out.png]` does the same for the popover.
 
 ## Uninstall
 
