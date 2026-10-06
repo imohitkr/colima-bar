@@ -4,7 +4,11 @@ import Foundation
 /// ~/.config/colima (the "default" profile in .../default).
 enum Paths {
     static let home = FileManager.default.homeDirectoryForCurrentUser.path
-    static let ctl = "\(home)/.local/bin/colima-ctl.sh"
+    /// The action backend ships inside the app bundle, so a downloaded copy
+    /// works without a separate install step. Unbundled runs use the copy
+    /// that older versions installed.
+    static let ctl = Bundle.main.path(forResource: "colima-ctl", ofType: "sh")
+        ?? "\(home)/.local/bin/colima-ctl.sh"
     static let cacheDir = "\(home)/.cache/colima-bar"
     /// Busy marker colima-ctl.sh writes while a VM action runs, per profile.
     static func busy(_ profile: String) -> String { "\(cacheDir)/busy.\(profile)" }

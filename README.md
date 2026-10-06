@@ -45,18 +45,33 @@ Left-click the menu bar icon for the dashboard. Right-click for quick actions (s
   </tr>
 </table>
 
-## Quick start
+## Install
+
+Needs a Mac with Apple silicon, macOS 14 or later, and [Colima](https://github.com/abiosoft/colima) (`brew install colima docker`).
+
+**Installer (recommended).** Run this in Terminal. It installs or updates ColimaBar in `/Applications` (or `~/Applications`) and opens it:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | bash
+```
+
+**Disk image.** Download [ColimaBar.dmg](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.dmg), open it and drag ColimaBar into Applications. ColimaBar is not notarized by Apple, so the first launch shows "Apple could not verify ColimaBar". Do this one time:
+
+1. Click **Done**.
+2. Open **System Settings > Privacy & Security**.
+3. Next to "ColimaBar was blocked", click **Open Anyway**.
+
+Or clear the quarantine flag in Terminal: `xattr -dr com.apple.quarantine /Applications/ColimaBar.app`
+
+**From source.** Needs the Xcode Command Line Tools.
 
 ```sh
 git clone https://github.com/imohitkr/colima-bar && cd colima-bar
 ./build.sh install    # builds, installs to ~/Applications and launches
+./build.sh dmg        # builds build/ColimaBar-<version>.dmg
 ```
 
-Needs macOS 14+, [Colima](https://github.com/abiosoft/colima) and the Xcode Command Line Tools. Then add the [`DOCKER_HOST` snippet](#auto-start-how-docker-clients-reach-colima) to your `~/.zshrc`. Or download the zip from the [latest release](https://github.com/imohitkr/colima-bar/releases/latest), move `ColimaBar.app` to `~/Applications`, and clear the quarantine flag once (the app is ad-hoc signed):
-
-```sh
-xattr -dr com.apple.quarantine ~/Applications/ColimaBar.app
-```
+After you install, add the [`DOCKER_HOST` snippet](#auto-start-how-docker-clients-reach-colima) to your `~/.zshrc`.
 
 ## Features
 
@@ -107,14 +122,16 @@ An IDE that was already open when ColimaBar first ran must be restarted to pick 
 
 - Container data comes from the **Docker Engine API on the unix socket**, the same transport Portainer and the docker CLI use. `/events` streams changes, and `/containers/{id}/stats?stream=1` pushes per-container samples, but only while the dashboard is open. `docker stats --no-stream` blocks ~2 s per call; the stream doesn't.
 - Colima has no API of its own, so VM facts come from `colima list -j` / `colima status -j`. These run only when a socket `/_ping` says the VM went up or down, and otherwise once a minute.
-- Actions that need a confirmation or edit `colima.yaml` go through `scripts/colima-ctl.sh` (installed to `~/.local/bin`, profile chosen through `COLIMABAR_PROFILE`). Container lifecycle calls go straight to the API.
+- Actions that need a confirmation or edit `colima.yaml` go through `scripts/colima-ctl.sh` (shipped inside the app bundle, profile chosen through `COLIMABAR_PROFILE`). Container lifecycle calls go straight to the API.
 - With the dashboard closed, the app idles at ~0% CPU.
 
 ## Uninstall
 
 ```sh
-scripts/uninstall.sh
+/Applications/ColimaBar.app/Contents/Resources/uninstall.sh
 ```
+
+If you installed into `~/Applications`, use that path. From a clone, `scripts/uninstall.sh` does the same.
 
 This quits the app, removes the login agent, switches the docker context back to `colima`, clears the launchd `DOCKER_HOST` and the testcontainers `docker.host`, removes the `/var/run/docker.sock` link if ColimaBar made it, and deletes the app.
 

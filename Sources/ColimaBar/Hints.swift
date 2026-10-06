@@ -146,5 +146,5 @@ enum Help {
     static let log = "Open Colima's log in Console, which is useful when start or stop fails."
     static let window = "Open the dashboard in a resizable window that stays open."
     static let refresh = "Reload everything now (⌘R). It normally updates by itself."
-    static let quit = "Quit ColimaBar. Colima and your containers keep running."
+    static let quit = "Quit ColimaBar. Colima and your containers keep running. Auto-start stops: docker no longer starts Colima until you open ColimaBar again."
 }

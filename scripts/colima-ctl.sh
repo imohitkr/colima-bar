@@ -1,7 +1,7 @@
 #!/bin/bash
 # Action backend for ColimaBar. Pins
 # XDG_CONFIG_HOME so it always targets the same VM as an interactive `colima`.
-export PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export XDG_CONFIG_HOME="$HOME/.config"
 
 # Profile to act on: ColimaBar passes the selected one in COLIMABAR_PROFILE.

@@ -38,14 +38,19 @@ jobs:
       - name: Build app
         run: ./build.sh
 
+      # Stable asset names, so releases/latest/download/ColimaBar.{dmg,zip}
+      # always points at the newest version (install.sh and the README use it).
       - name: Package
         if: startsWith(github.ref, 'refs/tags/v')
-        run: ditto -c -k --keepParent build/ColimaBar.app "ColimaBar-${GITHUB_REF_NAME}.zip"
+        run: |
+          ./build.sh dmg
+          cp build/ColimaBar-*.dmg ColimaBar.dmg
+          ditto -c -k --keepParent build/ColimaBar.app ColimaBar.zip
 
       - name: Release
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "$GITHUB_REF_NAME" "ColimaBar-${GITHUB_REF_NAME}.zip" \
+          gh release create "$GITHUB_REF_NAME" ColimaBar.dmg ColimaBar.zip \
             --title "ColimaBar $GITHUB_REF_NAME" --generate-notes

@@ -27,7 +27,7 @@ if [ "$(readlink /var/run/docker.sock 2>/dev/null)" = "$STABLE" ]; then
   sudo rm /var/run/docker.sock
 fi
 
-rm -rf ~/Applications/ColimaBar.app ~/.cache/colima-bar
+rm -rf ~/Applications/ColimaBar.app /Applications/ColimaBar.app ~/.cache/colima-bar
 rm -f ~/.local/bin/colima-ctl.sh
 # Keep the stable path as a link to Colima's socket, so a DOCKER_HOST that
 # still points at it (shell rc files, scripts) keeps working.
