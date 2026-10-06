@@ -6,8 +6,7 @@ COLIMA_SOCK="$HOME/.config/colima/default/docker.sock"
 STABLE="$HOME/.cache/colima-bar/docker.sock"
 
 wait_for_exit() {
-  local i
-  for i in $(seq 1 20); do
+  for _ in $(seq 1 20); do
     pgrep -U "$(id -u)" -xq ColimaBar || return 0
     sleep 0.5
   done
@@ -62,7 +61,7 @@ rm -rf ~/Applications/ColimaBar.app /Applications/ColimaBar.app ~/.cache/colima-
 rm -f ~/.local/bin/colima-ctl.sh
 # Keep the stable path as a link to Colima's socket, so a DOCKER_HOST that
 # still points at it (shell rc files, scripts) keeps working.
-mkdir -p -m 700 "$(dirname "$STABLE")" && ln -sfn "$COLIMA_SOCK" "$STABLE"
+(umask 077 && mkdir -p "$(dirname "$STABLE")") && ln -sfn "$COLIMA_SOCK" "$STABLE"
 defaults delete com.imohitkr.ColimaBar >/dev/null 2>&1
 
 echo "ColimaBar removed. Docker clients now use Colima's socket: $COLIMA_SOCK"

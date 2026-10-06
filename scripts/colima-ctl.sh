@@ -55,7 +55,7 @@ confirm() {
 # lock_vm [quiet] -> "quiet" skips the notice (timer-driven auto-stop).
 HOLD_LOCK=""
 lock_vm() {
-  mkdir -p -m 700 "$STATE_DIR"
+  (umask 077 && mkdir -p "$STATE_DIR")  # private: 0700
   if ! mkdir "$LOCK" 2>/dev/null; then
     # Take over a stale lock atomically: only one script wins the mv.
     if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +30 2>/dev/null)" ] \
@@ -101,7 +101,7 @@ trap on_term TERM INT
 # with_busy "label" cmd... -> writes the busy marker ColimaBar watches.
 with_busy() {
   local label="$1"; shift
-  mkdir -p -m 700 "$STATE_DIR"
+  (umask 077 && mkdir -p "$STATE_DIR")  # private: 0700
   echo "$label" > "$BUSY"
   WROTE_BUSY=1
   "$@" &

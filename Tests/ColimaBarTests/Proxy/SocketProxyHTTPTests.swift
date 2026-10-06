@@ -4,6 +4,11 @@ import Testing
 @testable import ColimaBar
 
 @Suite struct SocketProxyHTTPTests {
+    @Test func headCapHoldsAtLeastOneRead() {
+        // The VM-down path reads a request head in buffer-sized pieces.
+        #expect(SocketProxy.maxHead >= SocketProxy.bufferSize)
+    }
+
     private func last(_ s: String) -> String {
         let bytes = Array(s.utf8)
         return bytes.withUnsafeBytes { SocketProxy.lastRequestLine($0) }

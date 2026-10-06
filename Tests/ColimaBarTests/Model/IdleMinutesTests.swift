@@ -4,6 +4,12 @@ import Testing
 @testable import ColimaBar
 
 @Suite struct IdleMinutesTests {
+    @Test func offersTheDocumentedPresets() {
+        // README and the hints name these choices.
+        #expect(IdleMinutes.presets == [5, 15, 30, 60])
+        #expect(IdleMinutes.presets.allSatisfy { IdleMinutes.range.contains($0) })
+    }
+
     @Test func acceptsWholeMinutesInRange() {
         #expect(IdleMinutes.parse("5") == 5)
         #expect(IdleMinutes.parse(" 90 ") == 90)

@@ -13,8 +13,7 @@
 set -euo pipefail
 
 wait_for_exit() {
-  local i
-  for i in $(seq 1 20); do
+  for _ in $(seq 1 20); do
     pgrep -U "$(id -u)" -xq ColimaBar || return 0
     sleep 0.5
   done
