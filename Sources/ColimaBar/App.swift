@@ -142,6 +142,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             if let hs = ProcessInfo.processInfo.environment["COLIMABAR_SNAPSHOT_HEIGHT"], let h = Double(hs) {
                 window?.setContentSize(NSSize(width: 480, height: h))
             }
+            // Away from the mouse pointer, so no hover hint shows up in the shot.
+            window?.setFrameOrigin(NSPoint(x: -4000, y: -4000))
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
                 if let v = self?.window?.contentView { self?.snapshot(v, to: args[i + 1]) }
                 NSApp.terminate(nil)
@@ -421,7 +423,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func showWindow() {
         popover.performClose(nil)
         if window == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 720, height: 760),
+            let w = (Self.isDebugRun ? SnapshotWindow.self : NSWindow.self).init(contentRect: NSRect(x: 0, y: 0, width: 720, height: 760),
                              styleMask: [.titled, .closable, .miniaturizable, .resizable],
                              backing: .buffered, defer: false)
             w.title = "Colima"
@@ -450,4 +452,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func windowWillClose(_ n: Notification) { setWindowCounted(false) }
     func windowDidMiniaturize(_ n: Notification) { setWindowCounted(false) }
     func windowDidDeminiaturize(_ n: Notification) { setWindowCounted(true) }
+}
+
+/// Debug snapshots only: a window that may be taller than the screen, so a
+/// whole tab fits in one README screenshot.
+final class SnapshotWindow: NSWindow {
+    override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
 }

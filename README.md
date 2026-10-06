@@ -24,18 +24,18 @@
 - **Live dashboard**: containers grouped by Compose project, health, ports, per-container CPU and memory, logs, images, volumes and VM settings in one popover.
 - **Quiet by default**: idles at ~0% CPU, can stop the VM when idle, and only notifies you when something actually breaks.
 
-Left-click the menu bar icon for the dashboard. Right-click for quick actions (start/stop, window, auto-start, launch at login, quit). Hover over anything for an explanation.
+Left-click the menu bar icon for the dashboard. Right-click for quick actions (start/stop, window, auto-start, launch at login, hide icon, check for updates, quit). Hover over anything for an explanation.
 
 ## Screenshots
 
 <table>
   <tr>
     <td width="50%"><img src="docs/screenshots/images.png" alt="Images tab: sizes, in-use badges, prune"></td>
-    <td width="50%"><img src="docs/screenshots/system.png" alt="System tab: VM resources, features, disk usage, auto-start and auto-stop"></td>
+    <td width="50%"><img src="docs/screenshots/system.png" alt="System tab: VM resources, features, disk usage, auto-start, auto-stop presets, hide icon, update check"></td>
   </tr>
   <tr>
     <td align="center"><b>Images</b>: sizes, what's in use, one-click prune</td>
-    <td align="center"><b>System</b>: VM presets, Rosetta, k3s, disk, auto-start and auto-stop</td>
+    <td align="center"><b>System</b>: VM presets, Rosetta, k3s, disk, auto-start, auto-stop and app settings</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/screenshots/logs.png" alt="Log viewer with search, follow, timestamps and highlighted stderr"></td>
@@ -71,6 +71,7 @@ xattr -dr com.apple.quarantine ~/Applications/ColimaBar.app
 - **Alerts, failures only**: a container exits non-zero, is OOM-killed or turns unhealthy, with **View logs** and **Restart** buttons; or an action fails. Nothing for routine start/stop.
 - **Profiles**: if you have more than one Colima profile, a picker appears; otherwise it stays hidden
 - Starts at login and relaunches itself if it ever crashes. Single instance. ⌘R refresh, ⌘F filter.
+- Tells you once when a new version is out (checks GitHub daily; turn it off on the System tab), and shows a download button in the dashboard.
 
 ## Auto-start: how docker clients reach Colima
 
