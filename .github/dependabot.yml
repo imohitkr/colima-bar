@@ -1,0 +1,8 @@
+# Opens pull requests when a new version of a SHA-pinned action is available.
+# ColimaBar has no package dependencies, so only GitHub Actions is listed.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

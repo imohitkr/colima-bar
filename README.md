@@ -64,6 +64,8 @@ curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/in
 
 The installer downloads the latest release and installs ColimaBar in `/Applications`. If it cannot write to `/Applications`, it uses `~/Applications`. Then it opens ColimaBar. macOS does not show the "Apple could not verify" prompt for this download.
 
+If the [GitHub CLI](https://cli.github.com) (`gh`) is installed and logged in, the installer verifies the download before it installs it. If the check fails, the installer stops. Without `gh`, the installer tells you that it did not verify the download.
+
 ### The disk image
 
 1. Download [ColimaBar.dmg](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.dmg).
@@ -84,6 +86,16 @@ xattr -dr com.apple.quarantine /Applications/ColimaBar.app
 ```
 
 The release also contains [ColimaBar.zip](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.zip). The installer uses this file.
+
+### Verify a download
+
+GitHub Actions builds each release and signs a build provenance attestation for `ColimaBar.dmg` and `ColimaBar.zip`. The ad-hoc code signature only shows that the app is not damaged. It does not show who built it. To check that a file comes from this repository's release workflow, run this command in the folder of the file:
+
+```sh
+gh attestation verify ColimaBar.dmg --repo imohitkr/colima-bar
+```
+
+Use `ColimaBar.zip` in place of `ColimaBar.dmg` for the zip file. Releases made before attestations were added cannot be verified this way.
 
 ### From source
 
@@ -257,6 +269,10 @@ The script does these steps:
 - kubectl context and namespace switcher
 - Global hotkey
 - Docker context switcher for remote daemons
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) to build, test and change ColimaBar. Report security problems privately as [SECURITY.md](SECURITY.md) describes, and follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
