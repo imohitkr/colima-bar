@@ -236,6 +236,29 @@ enum LogTrim {
     }
 }
 
+/// Decides which of the visible lines the list renders. SwiftUI places
+/// every row of the list again when rows leave its head, so the list
+/// renders only the newest lines. Search and Copy still use all lines.
+enum LogTail {
+    /// The list renders at least this many of the newest lines.
+    static let limit = 2000
+    /// While Follow is off, the rendered lines may grow this far past
+    /// `limit` before the oldest ones leave the list. Rows then leave in
+    /// batches, so the text that you read does not move with each new line.
+    /// While Follow is on, rows leave with each batch: that costs less.
+    static let slack = 2000
+
+    /// Returns the new index of the first rendered line, when `count` lines
+    /// are visible and the list rendered from `current` before.
+    static func start(current: Int, count: Int, limit: Int = limit, slack: Int = slack) -> Int {
+        let s = min(max(0, current), count)
+        return count - s > limit + slack ? count - limit : s
+    }
+
+    /// The index of the first rendered line after a new filter or a clear.
+    static func reset(count: Int, limit: Int = limit) -> Int { max(0, count - limit) }
+}
+
 /// Docker multiplexes stdout/stderr of non-TTY containers into frames:
 /// [stream(1), 0, 0, 0, size(4, big-endian)] + payload. TTY containers send
 /// raw text. Keeps partial lines per stream between reads as raw bytes, so a
@@ -388,8 +411,11 @@ final class LogStore {
     /// incrementally: new lines are filtered once as they arrive, and only a
     /// filter change re-filters everything.
     private(set) var visible: [LogLine] = []
+    /// The index in `visible` of the first line that the list renders.
+    /// See `LogTail`.
+    private(set) var tailStart = 0
     var search = "" { didSet { if search != oldValue { refilter() } } }
-    var follow = true
+    var follow = true { didSet { if follow && !oldValue { updateTail() } } }
     var showTime = true
     var wrap = true
     var stderrOnly = false { didSet { if stderrOnly != oldValue { refilter() } } }
@@ -435,6 +461,16 @@ final class LogStore {
 
     private func refilter() {
         visible = filtered(lines)
+        setTailStart(LogTail.reset(count: visible.count))
+    }
+
+    /// The lines that the list renders: the newest part of `visible`.
+    var shown: ArraySlice<LogLine> { visible[min(tailStart, visible.count)...] }
+
+    /// Writes only a changed value, so that the list does not re-render
+    /// for nothing.
+    private func setTailStart(_ v: Int) {
+        if v != tailStart { tailStart = v }
     }
 
     /// Called when the window is minimized, covered or shown again. While it
@@ -461,8 +497,11 @@ final class LogStore {
         lines.removeAll()
         visible.removeAll()
         textBytes = 0
+        setTailStart(0)
     }
 
+    /// All lines that pass the filters, also those that the list does not
+    /// render.
     var allText: String {
         visible.map { showTime ? "\($0.time)  \($0.text)" : $0.text }.joined(separator: "\n")
     }
@@ -577,13 +616,23 @@ final class LogStore {
         lines.append(contentsOf: batch)
         textBytes += batch.reduce(0) { $0 + LogTrim.size($1) }
         visible.append(contentsOf: filtered(batch))
+        var start = tailStart
         if lines.count > maxLines + Self.trimSlack || textBytes > maxBytes + maxBytes / Self.byteSlackDivisor {
             let d = LogTrim.dropCount(lines, bytes: textBytes, maxLines: maxLines, maxBytes: maxBytes)
             lines.removeFirst(d.count)
             textBytes -= d.bytes
             let first = lines.first?.id ?? Int.max
-            visible.removeFirst(visible.firstIndex(where: { $0.id >= first }) ?? visible.count)
+            let gone = visible.firstIndex(where: { $0.id >= first }) ?? visible.count
+            visible.removeFirst(gone)
+            start -= gone
         }
+        updateTail(from: start)
+    }
+
+    /// Moves the start of the rendered lines when they pass the limit.
+    private func updateTail(from start: Int? = nil) {
+        setTailStart(LogTail.start(current: start ?? tailStart, count: visible.count,
+                                   slack: follow ? 0 : LogTail.slack))
     }
 
     /// Stream ends when the container stops or restarts: keep the window and
@@ -647,7 +696,7 @@ struct LogView: View {
                 Toggle("Wrap", isOn: $store.wrap).hint("Wrap long lines instead of scrolling sideways.")
                 Toggle("stderr", isOn: $store.stderrOnly).hint("Show only lines the container wrote to stderr.")
                 Spacer()
-                IconButton("doc.on.doc", "Copy the visible lines.") {
+                IconButton("doc.on.doc", "Copy all lines that pass the filters.") {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(store.allText, forType: .string)
                 }
@@ -666,8 +715,8 @@ struct LogView: View {
     }
 }
 
-/// The visible lines. It reads `visible` but not `lines`, so lines that the
-/// filter hides do not re-render it.
+/// The newest visible lines (see `LogTail`). It reads `visible` but not
+/// `lines`, so lines that the filter hides do not re-render it.
 private struct LogList: View {
     let store: LogStore
 
@@ -677,7 +726,13 @@ private struct LogList: View {
         ScrollViewReader { proxy in
             ScrollView(wrap ? .vertical : [.vertical, .horizontal]) {
                 LazyVStack(alignment: .leading, spacing: 1) {
-                    ForEach(store.visible) { line in
+                    let shown = store.shown
+                    if store.tailStart > 0 {
+                        Text("Showing the newest \(shown.count) of \(store.visible.count) lines. Use the filter to find older lines. Copy includes all lines.")
+                            .foregroundStyle(.secondary)
+                            .padding(.bottom, 4)
+                    }
+                    ForEach(shown) { line in
                         LogRow(line: line, showTime: showTime, wrap: wrap)
                             .id(line.id)
                     }

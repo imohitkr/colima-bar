@@ -184,6 +184,11 @@ final class SocketProxy: @unchecked Sendable {
     /// cannot make the proxy buffer without limit.
     static let maxHead = 64 * 1024
 
+    /// The size of each copy buffer. A spliced connection has two. 16 KB
+    /// still copies far faster than Lima's socket forward, and a burst of
+    /// connections leaves less memory behind than with 64 KB.
+    static let bufferSize = 16 * 1024
+
     /// How long a request waits for a wake. wake() must finish well inside it.
     /// wake() worst case: 300 s waiting for another start + 600 s for
     /// `colima start` (+10 s to kill it) + 60 s of readiness probes.
@@ -325,7 +330,7 @@ final class SocketProxy: @unchecked Sendable {
         UnixSocket.setTimeout(client, idleTimeout)
         let marker = Data("\r\n\r\n".utf8)
         var pending = Data()
-        var buf = [UInt8](repeating: 0, count: 65536)
+        var buf = [UInt8](repeating: 0, count: Self.bufferSize)
         while true {
             // Need one complete request head to decide what to do. Only the
             // new bytes (and the 3 before them) are searched on each read.
@@ -542,29 +547,37 @@ final class SocketProxy: @unchecked Sendable {
     /// connection for the pull, push or build. A pooled client (docker-java)
     /// pulls once and then polls GET /containers/json on the same connection;
     /// the poll must not keep the VM awake.
+    ///
+    /// The buffer lives on this thread's stack, not in the heap. The stack
+    /// goes away with the thread, so a burst of connections leaves no
+    /// freed buffers behind in the heap.
     private func copy(from src: Int32, to dst: Int32, conn: Int, classify: Bool = false) {
-        var buf = [UInt8](repeating: 0, count: 65536)
-        var lastTouch = Date.distantPast
-        while true {
-            let n = read(src, &buf, buf.count)
-            if n < 0, errno == EINTR { continue }
-            if n <= 0 { break }
-            if classify {
-                let line = Self.requestLine(buf, n)
-                if !line.isEmpty {
-                    let work = Self.isWork(line)
-                    lock.withLock { conns[conn]?.work = work }
+        withUnsafeTemporaryAllocation(byteCount: Self.bufferSize, alignment: 16) { buf in
+            guard let base = buf.baseAddress else { return }
+            var lastTouch = Date.distantPast
+            while true {
+                let n = read(src, base, buf.count)
+                if n < 0, errno == EINTR { continue }
+                if n <= 0 { break }
+                if classify {
+                    // requestLine reads at most the first 512 bytes.
+                    let head = Array(UnsafeRawBufferPointer(rebasing: buf[0..<min(n, 512)]))
+                    let line = Self.requestLine(head, head.count)
+                    if !line.isEmpty {
+                        let work = Self.isWork(line)
+                        lock.withLock { conns[conn]?.work = work }
+                    }
+                }
+                let now = Date()
+                if now.timeIntervalSince(lastTouch) >= 1 { touch(conn); lastTouch = now }
+                var off = 0
+                while off < n {
+                    let w = write(dst, base + off, n - off)
+                    if w <= 0 { shutdown(src, SHUT_RD); shutdown(dst, SHUT_WR); return }
+                    off += w
                 }
             }
-            let now = Date()
-            if now.timeIntervalSince(lastTouch) >= 1 { touch(conn); lastTouch = now }
-            var off = 0
-            while off < n {
-                let w = buf.withUnsafeBytes { write(dst, $0.baseAddress! + off, n - off) }
-                if w <= 0 { shutdown(src, SHUT_RD); shutdown(dst, SHUT_WR); return }
-                off += w
-            }
+            shutdown(dst, SHUT_WR)
         }
-        shutdown(dst, SHUT_WR)
     }
 }

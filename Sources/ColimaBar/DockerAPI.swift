@@ -8,6 +8,10 @@ import Foundation
 final class DockerAPI: @unchecked Sendable {
     let socketPath: String
 
+    /// The size of each read buffer. Each stats stream and log window holds
+    /// one for as long as it is open, so this stays small.
+    static let bufferSize = 16 * 1024
+
     init(socketPath: String) {
         self.socketPath = socketPath
     }
@@ -40,7 +44,7 @@ final class DockerAPI: @unchecked Sendable {
         defer { close(fd) }
         guard send(fd, method: method, path: path) else { return nil }
         var data = Data()
-        var buf = [UInt8](repeating: 0, count: 65536)
+        var buf = [UInt8](repeating: 0, count: Self.bufferSize)
         while true {
             let n = read(fd, &buf, buf.count)
             if n == 0 { break }
@@ -97,7 +101,7 @@ final class DockerAPI: @unchecked Sendable {
             guard send(fd, method: "GET", path: path) else { end(); return }
             var pending = Data()
             var headerDone = false
-            var buf = [UInt8](repeating: 0, count: 65536)
+            var buf = [UInt8](repeating: 0, count: Self.bufferSize)
             while true {
                 let n = read(fd, &buf, buf.count)
                 if n < 0, errno == EINTR { continue }
