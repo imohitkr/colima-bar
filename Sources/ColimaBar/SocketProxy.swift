@@ -115,14 +115,16 @@ final class SocketProxy: @unchecked Sendable {
     private var waking = false
     private var waiters: [DispatchSemaphore] = []
     private var wakeOK = false
-    private var conns: [Int: (opened: Date, lastIO: Date)] = [:]
+    private var conns: [Int: (opened: Date, lastIO: Date, work: Bool)] = [:]
     private var nextConn = 0
 
     /// Starts Colima and returns once Docker is ready (or false on failure).
     var wake: @Sendable () async -> Bool = { false }
 
     /// How long a request waits for a wake. wake() must finish well inside it.
-    static let waitBudget: TimeInterval = 15 * 60
+    /// wake() worst case: 300 s waiting for another start + 600 s for
+    /// `colima start` (+10 s to kill it) + 60 s of readiness probes.
+    static let waitBudget: TimeInterval = 20 * 60
 
     /// Where the stable socket lives (injectable for tests).
     let path: String
@@ -213,7 +215,14 @@ final class SocketProxy: @unchecked Sendable {
         // before dockerd and containerd are stable, so requests must wait for
         // the readiness check in wake() like the one that triggered it.
         if !lock.withLock({ waking }), let up = UnixSocket.connect(upstream) {
-            splice(client, up, initial: Data())
+            // Read the start of the first request to classify the connection
+            // (auto-stop activity); the bytes are forwarded as they are.
+            var buf = [UInt8](repeating: 0, count: 8192)
+            let n = read(client, &buf, buf.count)
+            guard n > 0 else { close(client); close(up); return }
+            let first = Data(buf[0..<n])
+            let line = String(decoding: first.prefix { $0 != 0x0D && $0 != 0x0A }, as: UTF8.self)
+            splice(client, up, initial: first, work: Self.isWork(line))
             return
         }
         var pending = Data()
@@ -231,7 +240,7 @@ final class SocketProxy: @unchecked Sendable {
             if let reply = pingReply(requestLine) {
                 // VM may have come up meanwhile; prefer the real daemon.
                 if !lock.withLock({ waking }), let up = UnixSocket.connect(upstream) {
-                    splice(client, up, initial: pending)
+                    splice(client, up, initial: pending, work: Self.isWork(requestLine))
                     return
                 }
                 guard UnixSocket.writeAll(client, reply) else { close(client); return }
@@ -240,7 +249,7 @@ final class SocketProxy: @unchecked Sendable {
             }
             log.notice("waking Colima for: \(requestLine, privacy: .public)")
             if waitForWake(), let up = UnixSocket.connect(upstream) {
-                splice(client, up, initial: pending)
+                splice(client, up, initial: pending, work: Self.isWork(requestLine))
             } else {
                 let body = #"{"message":"ColimaBar could not start Colima. Check the Colima log or start it from the menu bar."}"#
                 let resp = "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
@@ -251,15 +260,30 @@ final class SocketProxy: @unchecked Sendable {
         }
     }
 
-    /// Proxied connections that look like real work rather than polling:
-    /// open for at least `minAge` and moving bytes within `recent`. A
-    /// `docker build`, `pull` or `push` streams progress the whole time; a
-    /// poller's short requests and an idle `docker events` stream don't count.
-    /// Auto-stop treats any of these as "not idle".
-    func activeTransfers(now: Date = Date(), minAge: TimeInterval = 30, recent: TimeInterval = 120) -> Int {
+    /// Open connections doing real work: a build, pull, push, load, save,
+    /// import or commit (classified by the connection's first request, see
+    /// isWork). They count while open, even through a silent build step, up
+    /// to `stall` without any bytes. Pollers' GETs and `docker events` never
+    /// count. Auto-stop treats any of these as "not idle".
+    func activeTransfers(now: Date = Date(), stall: TimeInterval = 30 * 60) -> Int {
         lock.withLock {
-            conns.values.filter { now.timeIntervalSince($0.opened) >= minAge && now.timeIntervalSince($0.lastIO) <= recent }.count
+            conns.values.filter { $0.work && now.timeIntervalSince($0.lastIO) <= stall }.count
         }
+    }
+
+    /// Whether an HTTP request line starts long-running work on the daemon.
+    static func isWork(_ requestLine: String) -> Bool {
+        let parts = requestLine.split(separator: " ")
+        guard parts.count >= 2 else { return false }
+        let method = parts[0]
+        var path = String(parts[1].split(separator: "?").first ?? "")
+        // Drop the API version prefix: /v1.54/build -> /build
+        if path.hasPrefix("/v"), let slash = path.dropFirst().firstIndex(of: "/") { path = String(path[slash...]) }
+        if path == "/session" || path.hasPrefix("/grpc") { return true }   // BuildKit
+        guard method == "POST" || method == "GET" else { return false }
+        if method == "GET" { return path == "/images/get" || (path.hasPrefix("/images/") && path.hasSuffix("/get")) }   // save
+        return path == "/build" || path == "/images/create" || path == "/images/load" || path == "/commit"
+            || (path.hasPrefix("/images/") && path.hasSuffix("/push"))
     }
 
     private func touch(_ id: Int) {
@@ -310,13 +334,13 @@ final class SocketProxy: @unchecked Sendable {
 
     /// Copies bytes both ways until each side closes, half-closing as it goes
     /// so request/response streams (and hijacked attach/exec) end cleanly.
-    private func splice(_ client: Int32, _ upstream: Int32, initial: Data) {
+    private func splice(_ client: Int32, _ upstream: Int32, initial: Data, work: Bool = false) {
         if !initial.isEmpty, !UnixSocket.writeAll(upstream, initial) {
             close(client); close(upstream); return
         }
         let id = lock.withLock { () -> Int in
             nextConn += 1
-            conns[nextConn] = (Date(), Date())
+            conns[nextConn] = (Date(), Date(), work)
             return nextConn
         }
         defer { lock.withLock { conns[id] = nil } }

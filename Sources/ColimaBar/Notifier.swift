@@ -37,9 +37,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         ])
     }
 
+    /// `record: false` for messages about the app itself (updates, tips),
+    /// which don't belong in the dashboard's list of container alerts.
+    /// `url` makes a click on the banner open that page.
     func post(_ body: String, title: String = "Colima", container: (id: String, name: String)? = nil,
-              profile: String? = nil) {
-        onAlert?(title, body, container)
+              profile: String? = nil, record: Bool = true, url: URL? = nil) {
+        if record { onAlert?(title, body, container) }
         Task {
             guard await authorized() else { return }
             let content = UNMutableNotificationContent()
@@ -50,6 +53,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 content.categoryIdentifier = Self.containerCategory
                 content.userInfo = ["id": container.id, "name": container.name, "profile": profile ?? ""]
                 content.threadIdentifier = container.name
+            } else if let url {
+                content.userInfo = ["url": url.absoluteString]
             }
             let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
             do { try await center.add(req) } catch {
@@ -118,7 +123,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let id = info["id"] as? String ?? ""
         let name = info["name"] as? String ?? ""
         let profile = (info["profile"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let link = (info["url"] as? String).flatMap(URL.init(string:))
         Task { @MainActor in
+            if let link { NSWorkspace.shared.open(link) }
             if !id.isEmpty {
                 // Clicking the banner itself also opens the logs.
                 let a = action == UNNotificationDefaultActionIdentifier ? Self.viewLogs : action

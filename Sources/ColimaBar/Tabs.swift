@@ -335,7 +335,7 @@ final class SystemForm {
     var cpu = 0
     var mem = 0
     var loginEnabled = LoginItem.isEnabled
-    var loginNeedsApproval = LoginItem.needsApproval
+    var loginNeedsApproval = false   // filled in off the main thread (runs launchctl)
     var linking = false
     var customIdle = false        // "Custom" picked in the auto-stop picker
     var customMinutes = ""
@@ -485,23 +485,23 @@ struct SystemTab: View {
             }
             .hint(Help.autoStop)
             HStack(spacing: 8) {
-                Picker("", selection: idleSelection) {
+                Picker("Auto-stop after", selection: idleSelection) {
                     ForEach(IdleMinutes.presets, id: \.self) { Text("\($0) min").tag($0) }
                     Text("Custom").tag(IdleMinutes.custom)
                 }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 300)
+                .pickerStyle(.segmented).labelsHidden().frame(width: 250)
                 .hint(Help.autoStopMinutes)
                 if idleSelection.wrappedValue == IdleMinutes.custom {
+                    // Applied as soon as the text is a valid number, so what
+                    // the field shows is always the timeout in effect.
                     TextField("min", text: $form.customMinutes)
                         .textFieldStyle(.roundedBorder).frame(width: 52)
                         .multilineTextAlignment(.trailing)
-                        .onSubmit(applyCustomIdle)
+                        .foregroundStyle(IdleMinutes.parse(form.customMinutes) == nil ? Color.red : .primary)
+                        .accessibilityLabel("Auto-stop minutes")
+                        .onChange(of: form.customMinutes) { applyCustomIdle() }
                         .hint(Help.autoStopCustom)
                     Text("min").font(.caption).foregroundStyle(.secondary)
-                    Button("Set", action: applyCustomIdle)
-                        .controlSize(.small)
-                        .disabled(IdleMinutes.parse(form.customMinutes) == nil
-                                  || IdleMinutes.parse(form.customMinutes) == model.autoStopMinutes)
                 }
                 Spacer(minLength: 0)
             }
@@ -548,7 +548,7 @@ struct SystemTab: View {
                     model.notify("Login item change failed: \(error.localizedDescription)")
                 }
                 form.loginEnabled = LoginItem.isEnabled
-                form.loginNeedsApproval = LoginItem.needsApproval
+                form.loginNeedsApproval = false
             }))
             .hint(Help.login)
             if form.loginNeedsApproval {
@@ -577,7 +577,11 @@ struct SystemTab: View {
         form.cpu = model.vm.cpus
         form.mem = model.vm.memGB
         form.loginEnabled = LoginItem.isEnabled
-        form.loginNeedsApproval = LoginItem.needsApproval
+        let enabled = form.loginEnabled
+        Task {
+            let pending = enabled ? await Task.detached { LoginItem.disabledInSettings() }.value : false
+            form.loginNeedsApproval = pending
+        }
         if !IdleMinutes.presets.contains(model.autoStopMinutes) {
             form.customIdle = true
             form.customMinutes = "\(model.autoStopMinutes)"

@@ -132,8 +132,13 @@ final class LogStore {
         }
         // The window may have closed while we waited for the inspect call.
         guard !closed else { return }
-        var q = "follow=1&stdout=1&stderr=1&timestamps=1&tail=\(tail)"
-        if let ts = lastTimestamp, let since = Self.sinceParam(ts) { q += "&since=\(since)" }
+        var q = "follow=1&stdout=1&stderr=1&timestamps=1"
+        if let ts = lastTimestamp, let since = Self.sinceParam(ts) {
+            // Everything after the last line we have; `tail` would cut it.
+            q += "&tail=all&since=\(since)"
+        } else {
+            q += "&tail=\(tail)"
+        }
         status = "Live"
         let box = DemuxBox(LogDemuxer(tty: tty))
         handle = api.streamRaw("/containers/\(containerID)/logs?\(q)", onData: { [weak self] data in
