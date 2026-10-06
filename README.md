@@ -68,7 +68,13 @@ curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/in
 
 The installer downloads the latest release and installs ColimaBar in `/Applications`. If it cannot write to `/Applications`, it uses `~/Applications`. Then it opens ColimaBar. macOS does not show the "Apple could not verify" prompt for this download.
 
-If the [GitHub CLI](https://cli.github.com) (`gh`) is installed and logged in, the installer verifies the download before it installs it. If the check fails, the installer stops. Without `gh`, the installer tells you that it did not verify the download.
+If the [GitHub CLI](https://cli.github.com) (`gh`) 2.49 or later is installed and logged in to github.com, the installer verifies the download before it installs it. The check makes sure that the release workflow of this repository built the file. If the check fails, the installer stops. If `gh` cannot do the check, the installer tells you that it did not verify the download and continues. To stop in that case too, set `COLIMABAR_REQUIRE_VERIFY=1`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_REQUIRE_VERIFY=1 bash
+```
+
+To install a specific release, set `COLIMABAR_VERSION`, for example `COLIMABAR_VERSION=v0.4.0`. The installer supports v0.4.0 and later.
 
 ### The disk image
 
@@ -261,7 +267,7 @@ From a clone of the repository, run `scripts/uninstall.sh`. It does the same thi
 
 The script does these steps:
 
-- It quits ColimaBar and removes the login item.
+- It quits ColimaBar and removes the login item. If ColimaBar does not quit, the script stops and asks you to quit ColimaBar from its menu.
 - It switches the docker context back to `colima` and removes the `colimabar` context.
 - It clears the launchd `DOCKER_HOST` and the testcontainers `docker.host`.
 - It removes the `/var/run/docker.sock` symlink if ColimaBar created it. This step asks for your password.

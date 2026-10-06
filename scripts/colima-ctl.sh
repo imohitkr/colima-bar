@@ -193,7 +193,9 @@ case "$1" in
     ;;
 
   copy-env)
-    # ColimaBar's stable socket: auto-starts Colima, works even when ColimaBar is quit.
+    # ColimaBar's stable socket. While ColimaBar runs, it starts Colima on demand.
+    # After ColimaBar quits, the path links to Colima's socket. It still reaches
+    # Colima, but it does not start Colima.
     printf 'export DOCKER_HOST=unix://%s' "$HOME/.cache/colima-bar/docker.sock" | pbcopy ;;
 
   # Per-container actions: ctr-start|ctr-stop|ctr-restart|ctr-rm|ctr-logs|ctr-shell NAME

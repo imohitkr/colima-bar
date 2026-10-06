@@ -79,7 +79,8 @@ build/ColimaBar.app/Contents/MacOS/ColimaBar --snapshot /tmp/system.png System
 ## Coding conventions
 
 - Use Swift 5.10 and SwiftPM. Do not add third-party dependencies.
-- Use only Apple frameworks: AppKit, SwiftUI, Observation, Charts, UserNotifications and ServiceManagement.
+- Use only Apple frameworks: AppKit, SwiftUI, Observation, UserNotifications and ServiceManagement.
+- Draw graphs with SwiftUI `Shape` or `Path`. Do not use Swift Charts or `Canvas`, because they use a lot of graphics memory.
 - Keep UI state in the `@Observable` `ColimaModel`. Assign a property only when its value changes. This keeps the popover still and the redraws small.
 - Write tests with [Swift Testing](https://developer.apple.com/documentation/testing) (`@Suite`, `@Test`, `#expect`). Do not use XCTest.
 - Keep logic in small static functions that tests can call without a VM.

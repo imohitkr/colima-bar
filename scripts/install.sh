@@ -3,7 +3,11 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | bash
 #
-# Set COLIMABAR_VERSION=v0.4.0 to install a specific release.
+# Set COLIMABAR_VERSION=v0.4.0 to install a specific release (v0.4.0 or later).
+# If gh is installed and logged in to github.com, the installer verifies the
+# download and stops when the check fails. If gh cannot verify the download,
+# the installer prints a notice and continues. Set COLIMABAR_REQUIRE_VERIFY=1
+# to stop in that case too.
 # curl does not mark its downloads as quarantined, so macOS opens the app
 # without the Gatekeeper prompt that a browser download gets.
 set -euo pipefail
@@ -24,6 +28,15 @@ main() {
   if [ -n "$version" ] && ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "COLIMABAR_VERSION must look like v0.4.0, not: $version" >&2
     exit 1
+  fi
+  # Releases before v0.4.0 do not have ColimaBar.zip.
+  if [ -n "$version" ]; then
+    local vmajor vminor
+    IFS=. read -r vmajor vminor _ <<<"${version#v}"
+    if (( 10#$vmajor == 0 && 10#$vminor < 4 )); then
+      echo "The installer supports v0.4.0 and later, not $version. Download older releases from https://github.com/$repo/releases." >&2
+      exit 1
+    fi
   fi
   if [ -n "$version" ]; then
     url="https://github.com/$repo/releases/download/$version/ColimaBar.zip"
@@ -63,19 +76,54 @@ main() {
   trap 'rm -rf "$tmp"' EXIT
 
   echo "Downloading $url"
-  curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/ColimaBar.zip" "$url"
+  # No -f: the HTTP status lets us explain a missing release file.
+  local status
+  status=$(curl --proto '=https' --tlsv1.2 -L --progress-bar -w '%{http_code}' -o "$tmp/ColimaBar.zip" "$url") || {
+    echo "The download failed. Check your network connection, then run again." >&2
+    exit 1
+  }
+  if [ "$status" = 404 ] && [ -z "$version" ]; then
+    echo "No release with ColimaBar.zip found yet. See https://github.com/$repo/releases." >&2
+    exit 1
+  elif [ "$status" = 404 ]; then
+    echo "Release $version has no ColimaBar.zip. See https://github.com/$repo/releases." >&2
+    exit 1
+  elif [ "$status" != 200 ]; then
+    echo "The download failed with HTTP status $status. Try again later." >&2
+    exit 1
+  fi
 
   # CI attaches a build provenance attestation to each release file. It
-  # proves that this repo's workflow built the file. The check needs the
-  # GitHub CLI, so skip it with a notice when gh is missing or logged out.
-  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+  # proves that the release workflow (ci.yml) of this repo built the file on
+  # a GitHub-hosted runner, from the requested tag when one is set.
+  local workflow="$repo/.github/workflows/ci.yml"
+  local verify=(gh attestation verify "$tmp/ColimaBar.zip" --hostname github.com
+    --repo "$repo" --signer-workflow "$workflow" --deny-self-hosted-runners)
+  if [ -n "$version" ]; then
+    verify+=(--source-ref "refs/tags/$version")
+  fi
+  # gh 2.49 added the attestation command.
+  local skip=""
+  if ! command -v gh >/dev/null 2>&1; then
+    skip="gh is not installed"
+  elif ! gh attestation --help >/dev/null 2>&1; then
+    skip="gh is older than 2.49"
+  elif ! gh auth status --hostname github.com >/dev/null 2>&1; then
+    skip="gh is not logged in to github.com"
+  fi
+  if [ -z "$skip" ]; then
     echo "Verifying the download with gh attestation verify"
-    gh attestation verify "$tmp/ColimaBar.zip" --repo "$repo" >/dev/null || {
+    "${verify[@]}" >/dev/null || {
       echo "The download does not match a build from $repo. Stopping." >&2
       exit 1
     }
   else
-    echo "Did not verify the download (needs gh). To verify it, run: gh attestation verify ColimaBar.zip --repo $repo"
+    echo "Did not verify the download ($skip)."
+    echo "To verify it, download $url and run: gh attestation verify ColimaBar.zip --repo $repo --signer-workflow $workflow"
+    if [ "${COLIMABAR_REQUIRE_VERIFY:-}" = 1 ]; then
+      echo "COLIMABAR_REQUIRE_VERIFY=1 is set. Stopping." >&2
+      exit 1
+    fi
   fi
 
   ditto -x -k "$tmp/ColimaBar.zip" "$tmp"
