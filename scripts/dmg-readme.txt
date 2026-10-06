@@ -26,3 +26,6 @@ command in Terminal:
 Requirements: a Mac with Apple silicon, macOS 14 or later, and Colima.
 To install Colima, run: brew install colima docker
 More information: https://github.com/imohitkr/colima-bar
+
+ColimaBar is an independent project. It is not part of Colima, and the
+Colima maintainers do not support it. Report problems at the link above.

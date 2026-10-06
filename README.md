@@ -28,6 +28,9 @@ ColimaBar shows the state of your Colima VM and its containers in the menu bar.
 - **Live dashboard**: one dashboard shows containers grouped by Compose project, health, ports, CPU and memory per container, logs, images, volumes and VM settings.
 - **Quiet**: ColimaBar idles at about 0% CPU. It can stop the VM when it is idle. It sends a notification only when something fails.
 
+> [!NOTE]
+> ColimaBar is an independent community project. It is not part of [Colima](https://github.com/abiosoft/colima), and the Colima maintainers do not develop, support or endorse it. Report ColimaBar problems [here](https://github.com/imohitkr/colima-bar/issues), not in the Colima repository. Colima, Lima and Docker belong to their owners.
+
 ## Screenshots
 
 <table>
