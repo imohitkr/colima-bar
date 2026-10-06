@@ -65,8 +65,9 @@ final class ColimaModel {
         didSet { Defaults.set(hideIconWhenStopped, "hideIconWhenStopped") }
     }
     /// Set when the app is reopened from Spotlight/Finder while its icon is
-    /// hidden. Cleared when the VM next starts, so the icon hides again after
-    /// the following stop.
+    /// hidden. It keeps the icon visible until the dashboard opens. When the
+    /// last dashboard surface closes, or the VM starts, it clears, so the icon
+    /// hides again if Colima is still stopped.
     var revealIcon = false
 
     /// Only the menu bar icon hides; the process, the auto-start proxy and the
@@ -106,6 +107,7 @@ final class ColimaModel {
     var visibleCount = 0 {
         didSet {
             guard (oldValue > 0) != (visibleCount > 0) else { return }
+            if visibleCount == 0 { revealIcon = false }
             visibleCount > 0 ? becameVisible() : syncStatStreams()
         }
     }

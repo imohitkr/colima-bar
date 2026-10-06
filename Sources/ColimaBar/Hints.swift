@@ -129,7 +129,7 @@ enum Help {
     static let autoStop = "Stop the VM after it has been idle for the chosen time. Running containers and docker builds, pulls or pushes keep it awake. With auto-start on, the next docker command starts it again."
     static let autoStopMinutes = "How long the VM must have no running containers and no docker builds, pulls or pushes before it stops."
     static let autoStopCustom = "Type a number of minutes from 1 to 1440 (24 hours), then press Return or click Set."
-    static let hideIcon = "Hide the icon while Colima is stopped. ColimaBar keeps running, so docker still starts Colima. To show the icon, open ColimaBar from Spotlight."
+    static let hideIcon = "Hide the icon while Colima is stopped. ColimaBar keeps running, so docker still starts Colima. To show it, open ColimaBar from Spotlight."
 
     static let enableNotifications = "Open System Settings > Notifications > ColimaBar and turn on Allow Notifications."
 
