@@ -40,7 +40,8 @@ final class ColimaModel {
     @ObservationIgnored var dashboardTab: Tab = .containers {
         didSet {
             guard dashboardTab != oldValue, visibleCount > 0 else { return }
-            if Self.showsDiskUsage(dashboardTab) { requestDF() }
+            // An event changed disk use while no tab showed it: the rows are stale.
+            if Self.showsDiskUsage(dashboardTab) { requestDF(urgent: diskDirty) }
             if dashboardTab == .system { Task { await refreshRouting() } }
         }
     }
@@ -145,6 +146,7 @@ final class ColimaModel {
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     @ObservationIgnored private var tickSleep: Task<Void, Never>?  // the heartbeat's current sleep
     @ObservationIgnored private var containerRefresh: Task<Void, Never>?
+    @ObservationIgnored private var reloadPending = false  // an event since the last refresh changed containers
     @ObservationIgnored private var dfGate = DFGate()
     @ObservationIgnored private var dfToken = 0         // bumps when dfGate resets; older df tasks then stop
     @ObservationIgnored private var diskDirty = false   // an event changed images, volumes or disk use
@@ -153,6 +155,7 @@ final class ColimaModel {
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
     @ObservationIgnored private var isDebug = false
     @ObservationIgnored private var generation = 0     // bumps on profile switch; stale callbacks are ignored
+    @ObservationIgnored private var statusOrder = LatestOnly()   // drops `colima list` results older than the last applied
     @ObservationIgnored private var stopping = false   // an auto-stop check is confirming
     @ObservationIgnored private var localBusy: String? // VM action launched here, marker not written yet
     private let historyLen = 60
@@ -309,11 +312,12 @@ final class ColimaModel {
 
     // MARK: - Refresh
 
-    func refreshAll() async {
+    /// `urgentDF`: a user action changed disk use, so df skips the 30 s gap.
+    func refreshAll(urgentDF: Bool = false) async {
         await refreshStatus()
         if state == .running {
             await refreshContainers()
-            requestDF()
+            requestDF(urgent: urgentDF)
         }
     }
 
@@ -326,6 +330,10 @@ final class ColimaModel {
             return
         }
         let gen = generation
+        // The directory watcher and the heartbeat can both start a refresh.
+        // An older `colima list` can end later; its result must not undo a
+        // newer one (an old "Running" after a new "Stopped").
+        let seq = statusOrder.begin()
         let r = await Shell.run(["colima", "list", "-j"], timeout: 10)
         guard gen == generation else { return }
         // A slow or failed `colima list` says nothing about the VM: keep the
@@ -334,6 +342,7 @@ final class ColimaModel {
             log.error("colima list failed (status \(r.status)); keeping state")
             return
         }
+        guard statusOrder.apply(seq) else { return }
         let dec = JSONDecoder()
         let all = r.out.split(separator: "\n").compactMap { try? dec.decode(ColimaListJSON.self, from: Data($0.utf8)) }
         // The selected profile was deleted (`colima delete -p X`): fall back
@@ -361,7 +370,7 @@ final class ColimaModel {
             v.diskGB = Int((info.disk ?? 0) / (1 << 30))
             if newState == .running && (!wasRunning || v.driver.isEmpty) {
                 let s = await Shell.run(["colima", "status", "-j", "--profile", profile], timeout: 10)
-                guard gen == generation else { return }
+                guard gen == generation, statusOrder.isLatestApplied(seq) else { return }
                 if let st = try? dec.decode(ColimaStatusJSON.self, from: Data(s.out.utf8)) {
                     v.driver = st.driver ?? ""
                     v.mountType = st.mount_type ?? ""
@@ -451,18 +460,25 @@ final class ColimaModel {
     /// container layer for it, which can take seconds. So it runs only while
     /// a tab shows the data, one at a time, and at most once per 30 s (see
     /// DFGate). Requests in between join into one run.
-    func requestDF() {
+    ///
+    /// `urgent`: a user action (remove, prune, pull) changed disk use. The
+    /// run skips the 30 s gap, so the Images and Volumes rows update at once.
+    /// It still waits for a run in flight.
+    func requestDF(urgent: Bool = false) {
         guard wantsDF else { return }
-        scheduleDF(dfGate.request(now: Date()))
+        scheduleDF(dfGate.request(now: Date(), urgent: urgent))
     }
 
     private func scheduleDF(_ step: DFGate.Step) {
         guard case .run(let wait) = step else { return }
         let gen = generation
         let token = dfToken
+        let ticket = dfGate.ticket
         Task {
             if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
             guard gen == generation, token == dfToken else { return }
+            // An urgent request replaced this waiting run.
+            guard ticket == dfGate.ticket else { return }
             // The tab may have closed during the wait.
             guard wantsDF else { dfGate.skip(); return }
             dfGate.begin()
@@ -611,12 +627,18 @@ final class ColimaModel {
         return (named ?? "default") == profile
     }
 
+    /// Only this user's processes. Another account's `colima start` must not
+    /// delay auto-start.
+    nonisolated static func pgrepArguments(uid: uid_t) -> [String] {
+        ["-U", String(uid), "-f", "colima (start|restart)"]
+    }
+
     /// True while a `colima start` for this profile runs (e.g. from a terminal,
     /// which leaves no busy marker).
     nonisolated private static func colimaStartRunning(_ profile: String) -> Bool {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        p.arguments = ["-f", "colima (start|restart)"]
+        p.arguments = pgrepArguments(uid: getuid())
         let pipe = Pipe()
         p.standardOutput = pipe
         p.standardError = FileHandle.nullDevice
@@ -683,7 +705,7 @@ final class ColimaModel {
             if Date().timeIntervalSince(lastColima) >= Self.statusMaxAgeOnOpen { await refreshStatus() }
             if state == .running {
                 await refreshContainers()
-                requestDF()
+                requestDF(urgent: diskDirty)
             }
             if dashboardTab == .system { routing = await Routing.status() }
         }
@@ -732,21 +754,52 @@ final class ColimaModel {
 
     // MARK: - Events
 
-    /// The event types and actions that `handle` uses. dockerd drops all
-    /// others, so healthcheck exec events (several per second with many
-    /// containers) never wake the app. "health_status" makes dockerd match
-    /// every action by prefix, so it also matches "health_status: unhealthy".
-    /// No other action here is a prefix of an unwanted one.
-    nonisolated static let eventTypes = ["container", "image", "volume"]
-    nonisolated static let eventActions = [
-        // container
-        "create", "start", "restart", "die", "kill", "stop", "oom", "pause", "unpause",
-        "rename", "destroy", "health_status",
-        // image
-        "pull", "tag", "untag", "delete", "import", "load",
-        // all three types
-        "prune",
+    /// What an event makes `handle` do.
+    struct EventReaction: OptionSet, Sendable {
+        let rawValue: Int
+        static let containers = EventReaction(rawValue: 1)  // reload the container list
+        static let disk = EventReaction(rawValue: 2)        // df, images and volumes are stale
+    }
+
+    /// The events that `handle` reacts to, by type and action. The /events
+    /// filter is built from this table, so the filter and the handler cannot
+    /// drift apart. dockerd drops all other events, so healthcheck exec events
+    /// (several per second with many containers) never wake the app.
+    nonisolated static let eventReactions: [String: [String: EventReaction]] = [
+        "container": [
+            "create": [.containers, .disk], "destroy": [.containers, .disk], "prune": [.containers, .disk],
+            "start": .containers, "restart": .containers, "die": .containers, "kill": .containers,
+            "stop": .containers, "oom": .containers, "pause": .containers, "unpause": .containers,
+            "rename": .containers, "health_status": .containers,
+            // An untagged `docker commit` sends only this event.
+            "commit": .disk,
+        ],
+        "image": [
+            "pull": [.containers, .disk], "tag": [.containers, .disk], "untag": [.containers, .disk],
+            "delete": [.containers, .disk], "import": [.containers, .disk], "load": [.containers, .disk],
+            "prune": [.containers, .disk],
+        ],
+        "volume": [
+            "create": [.containers, .disk], "destroy": [.containers, .disk], "prune": [.containers, .disk],
+        ],
+        // `docker builder prune` changes the build cache.
+        "builder": ["prune": .disk],
     ]
+
+    /// The reaction to one event. Health events have a status after a colon
+    /// ("health_status: unhealthy"); the part before the colon decides.
+    nonisolated static func reaction(type: String, action: String) -> EventReaction {
+        guard let actions = eventReactions[type] else { return [] }
+        if let r = actions[action] { return r }
+        guard let colon = action.firstIndex(of: ":") else { return [] }
+        return actions[String(action[..<colon])] ?? []
+    }
+
+    /// "health_status" makes dockerd match every action by prefix, so it also
+    /// matches "health_status: unhealthy". No other action here is a prefix
+    /// of an unwanted one.
+    nonisolated static let eventTypes = eventReactions.keys.sorted()
+    nonisolated static let eventActions = Set(eventReactions.values.flatMap(\.keys)).sorted()
 
     nonisolated static var eventFilter: String {
         let f = ["type": eventTypes, "event": eventActions]
@@ -802,14 +855,19 @@ final class ColimaModel {
                 Notifier.shared.post("Healthcheck is failing", title: name, container: ctr, profile: profile)
             }
         }
+        let reaction = Self.reaction(type: ev.Type ?? "", action: action)
+        if reaction.contains(.disk) { diskDirty = true }
+        guard !reaction.isEmpty else { return }
+        if reaction.contains(.containers) { reloadPending = true }
         // Coalesce a burst of events (compose up/down) into one refresh.
-        let touchesDisk = ev.Type != "container" || ["create", "destroy"].contains(action)
-        if touchesDisk { diskDirty = true }
         containerRefresh?.cancel()
         containerRefresh = Task {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
-            await refreshContainers()
+            if reloadPending {
+                reloadPending = false
+                await refreshContainers()
+            }
             if diskDirty { requestDF() }
         }
     }
@@ -840,13 +898,19 @@ final class ColimaModel {
             // placeholder, but only if a newer action hasn't replaced it.
             if p == profile, localBusy == label { localBusy = nil }
             busy = readBusy()
-            await refreshAll()
+            await refreshAll(urgentDF: Self.changesDisk(args.first ?? ""))
         }
     }
 
     /// Actions that start, stop or restart the VM. The UI shows them as busy
     /// right away, not on the next 1s tick, so a second click can't race them.
     private static let vmActions: Set<String> = ["start", "stop", "restart", "resources", "rosetta", "k8s", "disk", "auto-stop"]
+
+    /// Actions that change disk use. When one ends, df runs at once, so a
+    /// removed image or volume leaves its row and a second Remove can't fail.
+    nonisolated static func changesDisk(_ action: String) -> Bool {
+        ["ctr-rm", "img-rm", "img-pull", "vol-rm", "prune", "stop-all"].contains(action)
+    }
 
     private static func busyLabel(_ action: String) -> String {
         switch action {
@@ -963,7 +1027,8 @@ final class ColimaModel {
 
 /// Decides when the next `/system/df` runs. At most one runs at a time, and
 /// a new one starts at least `minGap` after the last one ended. Requests that
-/// come in meanwhile join into one more run after the gap.
+/// come in meanwhile join into one more run after the gap. An urgent request
+/// skips the gap, but it still waits for the run in flight.
 struct DFGate {
     enum Step: Equatable {
         case none
@@ -974,13 +1039,23 @@ struct DFGate {
     private(set) var scheduled = false   // a run waits for the gap or is in flight
     private(set) var inFlight = false
     private(set) var again = false       // requested while a run was in flight
+    private(set) var againUrgent = false // an urgent request came while a run was in flight
     private(set) var lastEnd: Date?
+    /// Bumps each time a run is scheduled. A waiting run whose ticket is no
+    /// longer current was replaced by an urgent run and must not start.
+    private(set) var ticket = 0
 
-    mutating func request(now: Date) -> Step {
-        if inFlight { again = true; return .none }
-        if scheduled { return .none }     // the waiting run covers this request
+    mutating func request(now: Date, urgent: Bool = false) -> Step {
+        if inFlight {
+            again = true
+            if urgent { againUrgent = true }
+            return .none
+        }
+        // The waiting run covers a normal request. An urgent one replaces it.
+        if scheduled, !urgent { return .none }
         scheduled = true
-        let wait = lastEnd.map { max(0, minGap - now.timeIntervalSince($0)) } ?? 0
+        ticket += 1
+        let wait = urgent ? 0 : lastEnd.map { max(0, minGap - now.timeIntervalSince($0)) } ?? 0
         return .run(after: wait)
     }
 
@@ -993,15 +1068,41 @@ struct DFGate {
         scheduled = false
         lastEnd = now
         guard again else { return .none }
+        let urgent = againUrgent
         again = false
-        return request(now: now)
+        againUrgent = false
+        return request(now: now, urgent: urgent)
     }
 
     /// The waiting run did not start because nothing shows the data now.
     mutating func skip() {
         scheduled = false
         again = false
+        againUrgent = false
     }
+}
+
+/// Orders results of calls that can overlap: each call takes a number, and
+/// a result applies only if no newer call's result applied first.
+struct LatestOnly {
+    private(set) var started = 0
+    private(set) var applied = 0
+
+    mutating func begin() -> Int {
+        started += 1
+        return started
+    }
+
+    /// True if the result of call `seq` may apply. It then becomes the last
+    /// applied result.
+    mutating func apply(_ seq: Int) -> Bool {
+        guard seq > applied else { return false }
+        applied = seq
+        return true
+    }
+
+    /// True if call `seq` applied last, so its later steps may still apply.
+    func isLatestApplied(_ seq: Int) -> Bool { seq == applied }
 }
 
 /// Watches the directories that change when any Colima profile starts,

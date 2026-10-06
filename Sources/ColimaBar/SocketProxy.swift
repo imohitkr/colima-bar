@@ -313,11 +313,16 @@ final class SocketProxy: @unchecked Sendable {
             // A client that sends nothing closes after idleTimeout. splice()
             // removes the timeout again before it streams.
             UnixSocket.setTimeout(client, idleTimeout)
-            var buf = [UInt8](repeating: 0, count: 8192)
-            var n = read(client, &buf, buf.count)
-            while n < 0, errno == EINTR { n = read(client, &buf, buf.count) }
-            guard n > 0 else { close(client); close(up); return }
-            splice(client, up, initial: Data(buf[0..<n]), work: Self.isWork(Self.requestLine(buf, n)))
+            let first = withUnsafeTemporaryAllocation(byteCount: 8192, alignment: 16) { buf -> (Data, Bool)? in
+                guard let base = buf.baseAddress else { return nil }
+                var n = read(client, base, buf.count)
+                while n < 0, errno == EINTR { n = read(client, base, buf.count) }
+                guard n > 0 else { return nil }
+                let chunk = UnsafeRawBufferPointer(rebasing: buf[0..<n])
+                return (Data(chunk), Self.isWork(Self.lastRequestLine(chunk)))
+            }
+            guard let first else { close(client); close(up); return }
+            splice(client, up, initial: first.0, work: first.1)
             return
         case .failed(let err):
             refuse(client, err)
@@ -435,10 +440,63 @@ final class SocketProxy: @unchecked Sendable {
     /// known method, a space and a "/" path. Body bytes (a build context tar
     /// that starts with "Dockerfile", JSON, HTTP/2 frames) give "".
     static func requestLine(_ buf: [UInt8], _ n: Int) -> String {
-        let head = buf[0..<min(n, 512)]
-        guard let space = head.prefix(8).firstIndex(of: 0x20), space + 1 < head.endIndex, head[space + 1] == 0x2F,
+        buf.withUnsafeBytes { requestLine(UnsafeRawBufferPointer(rebasing: $0[0..<min(max(n, 0), $0.count)])) }
+    }
+
+    /// requestLine for raw bytes. It reads at most the first 512 bytes and
+    /// copies nothing except the line it returns.
+    static func requestLine(_ chunk: UnsafeRawBufferPointer) -> String {
+        let head = UnsafeRawBufferPointer(rebasing: chunk.prefix(512))
+        guard let space = head.prefix(8).firstIndex(of: 0x20), space + 1 < head.count, head[space + 1] == 0x2F,
               methods.contains(String(decoding: head[..<space], as: UTF8.self)) else { return "" }
         return String(decoding: head.prefix { $0 != 0x0D && $0 != 0x0A }, as: UTF8.self)
+    }
+
+    /// The request line of the last request that starts in a chunk, or "" if
+    /// the chunk does not start a request. A client can send several requests
+    /// in one write, for example a pull and then a poll; the last one decides.
+    /// It goes from head to head and skips each body by its Content-Length.
+    /// It stops at a chunked body, at a head that the chunk cuts off, or at
+    /// bytes that do not start a request. So body bytes never count as a request.
+    static func lastRequestLine(_ chunk: UnsafeRawBufferPointer) -> String {
+        var line = requestLine(chunk)
+        guard !line.isEmpty, let base = chunk.baseAddress else { return line }
+        var start = 0
+        while true {
+            // The end of this request's head.
+            guard let found = memmem(base + start, chunk.count - start, "\r\n\r\n", 4) else { break }
+            let headEnd = base.distance(to: UnsafeRawPointer(found)) + 4
+            guard let body = bodyLength(UnsafeRawBufferPointer(rebasing: chunk[start..<headEnd])),
+                  body < chunk.count - headEnd else { break }
+            let next = requestLine(UnsafeRawBufferPointer(rebasing: chunk[(headEnd + body)...]))
+            guard !next.isEmpty else { break }
+            line = next
+            start = headEnd + body
+        }
+        return line
+    }
+
+    /// The body size that a request head announces: its Content-Length, or 0
+    /// without one. nil for a chunked body or a bad Content-Length.
+    static func bodyLength(_ head: UnsafeRawBufferPointer) -> Int? {
+        func hasName(_ line: Slice<UnsafeRawBufferPointer>, _ name: StaticString) -> Bool {
+            let n = UnsafeRawBufferPointer(start: name.utf8Start, count: name.utf8CodeUnitCount)
+            guard line.count > n.count, line[line.startIndex + n.count] == 0x3A else { return false }
+            return zip(line, n).allSatisfy { $0 | 0x20 == $1 }   // the names are lower case
+        }
+        var length = 0
+        var i = 0
+        while i < head.count {
+            let end = head[i...].firstIndex(of: 0x0A) ?? head.count
+            let line = head[i..<end]
+            i = end + 1
+            if hasName(line, "transfer-encoding") { return nil }
+            guard hasName(line, "content-length") else { continue }
+            let value = line.dropFirst("content-length:".utf8.count).filter { $0 != 0x20 && $0 != 0x09 && $0 != 0x0D }
+            guard !value.isEmpty, value.count <= 15, value.allSatisfy({ $0 >= 0x30 && $0 <= 0x39 }) else { return nil }
+            length = value.reduce(0) { $0 * 10 + Int($1 - 0x30) }
+        }
+        return length
     }
 
     /// The method and path of a request line, without the query string.
@@ -548,9 +606,8 @@ final class SocketProxy: @unchecked Sendable {
     /// pulls once and then polls GET /containers/json on the same connection;
     /// the poll must not keep the VM awake.
     ///
-    /// The buffer lives on this thread's stack, not in the heap. The stack
-    /// goes away with the thread, so a burst of connections leaves no
-    /// freed buffers behind in the heap.
+    /// Each direction allocates one buffer for the whole connection. It is
+    /// freed when the copy ends.
     private func copy(from src: Int32, to dst: Int32, conn: Int, classify: Bool = false) {
         withUnsafeTemporaryAllocation(byteCount: Self.bufferSize, alignment: 16) { buf in
             guard let base = buf.baseAddress else { return }
@@ -560,9 +617,9 @@ final class SocketProxy: @unchecked Sendable {
                 if n < 0, errno == EINTR { continue }
                 if n <= 0 { break }
                 if classify {
-                    // requestLine reads at most the first 512 bytes.
-                    let head = Array(UnsafeRawBufferPointer(rebasing: buf[0..<min(n, 512)]))
-                    let line = Self.requestLine(head, head.count)
+                    // Reads the bytes in place. A chunk with several requests
+                    // takes the work flag of the last one.
+                    let line = Self.lastRequestLine(UnsafeRawBufferPointer(rebasing: buf[0..<n]))
                     if !line.isEmpty {
                         let work = Self.isWork(line)
                         lock.withLock { conns[conn]?.work = work }

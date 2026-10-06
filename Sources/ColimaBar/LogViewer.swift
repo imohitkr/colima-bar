@@ -144,21 +144,50 @@ enum LogFilter {
         return m.matches(text)
     }
 
+    /// The UTF-8 forms of the scalars whose lower case contains the first
+    /// non-ASCII scalar of `needle` (a lower-cased query), and of that scalar
+    /// itself. String.lowercased() maps each scalar on its own, so a line
+    /// whose lower case contains the needle has one of these. Empty if the
+    /// needle is ASCII.
+    static func prefilter(_ needle: String) -> [[UInt8]] {
+        let scalars = needle.unicodeScalars.filter { !$0.isASCII }
+        guard let c = scalars.first(where: { $0.properties.isCased }) ?? scalars.first else { return [] }
+        return ([c] + (lowerSources[c] ?? [])).map { Array(String($0).utf8) }
+    }
+
+    /// For each non-ASCII scalar, the scalars whose lower case contains it
+    /// ("å" <- "Å", "Å" (Angstrom sign)). Built once, on the first non-ASCII
+    /// query. Planes 2 and up have no cased letters (a test checks this).
+    static let lowerSources: [Unicode.Scalar: [Unicode.Scalar]] = {
+        var out: [Unicode.Scalar: [Unicode.Scalar]] = [:]
+        for v in UInt32(0x80)..<0x20000 {
+            guard let s = Unicode.Scalar(v), s.properties.changesWhenLowercased else { continue }
+            for l in s.properties.lowercaseMapping.unicodeScalars where !l.isASCII { out[l, default: []].append(s) }
+        }
+        return out
+    }()
+
     /// Holds the query and a scratch buffer for many lines. Not thread-safe.
     struct Matcher {
         let needle: [UInt8]
         private let needleASCII: Bool   // false if the query has non-ASCII cased letters
+        /// For the slow path: the UTF-8 forms of every letter that lower-cases
+        /// to the query's first non-ASCII letter. A line with none of them
+        /// can't match, so it is not lower-cased.
+        private let prefilter: [[UInt8]]
         private var scratch: [UInt8] = []
 
         init(query: String) { self.init(needle: LogFilter.needle(query)) }
 
         init(needle: [UInt8]) {
             self.needle = needle
+            let text = String(decoding: needle, as: UTF8.self)
             // Only letters with an upper and a lower case need the slow path.
             // Emoji, CJK and symbols in the query do not.
-            needleASCII = !String(decoding: needle, as: UTF8.self).contains {
+            needleASCII = !text.contains {
                 !$0.isASCII && $0.lowercased() != $0.uppercased()
             }
+            prefilter = needleASCII ? [] : LogFilter.prefilter(text)
         }
 
         mutating func matches(_ text: String) -> Bool {
@@ -170,7 +199,9 @@ enum LogFilter {
         }
 
         private mutating func scan(_ hay: UnsafeBufferPointer<UInt8>) -> Bool {
-            guard hay.count >= needle.count else { return false }
+            // Lower-casing can make a line longer ("İ" becomes "i" and a
+            // combining dot), so a short line can still match on the slow path.
+            guard hay.count >= needle.count || !needleASCII else { return false }
             if scratch.count < hay.count { scratch = [UInt8](repeating: 0, count: max(hay.count, 256)) }
             let found = scratch.withUnsafeMutableBufferPointer { out in
                 Self.fold(hay, into: out)
@@ -180,8 +211,12 @@ enum LogFilter {
             }
             if found || needleASCII { return found }
             // Only ASCII bytes change above. Lower-case non-ASCII letters too,
-            // but only for lines that have non-ASCII bytes.
+            // but only for lines that have non-ASCII bytes and one of the
+            // prefilter letters.
             guard hay.contains(where: { $0 >= 0x80 }) else { return false }
+            if !prefilter.isEmpty, !prefilter.contains(where: { p in
+                p.withUnsafeBufferPointer { memmem(hay.baseAddress, hay.count, $0.baseAddress, $0.count) != nil }
+            }) { return false }
             let lower = Array(String(decoding: hay, as: UTF8.self).lowercased().utf8)
             return lower.withUnsafeBufferPointer { l in
                 needle.withUnsafeBufferPointer { n in

@@ -142,7 +142,7 @@ enum Help {
 
     // Footer
     static let ssh = "Open a shell in the Colima VM, in iTerm."
-    static let copyEnv = "Copy 'export DOCKER_HOST=…' for the ColimaBar socket, for scripts or shells that do not read the docker context. It starts Colima on demand and works when ColimaBar is quit."
+    static let copyEnv = "Copy 'export DOCKER_HOST=…' for the ColimaBar socket, for scripts or shells that do not read the docker context. It starts Colima on demand while ColimaBar runs. After you quit ColimaBar, it still reaches Colima."
     static let config = "Open colima.yaml, the configuration file of the VM, in your text editor."
     static let log = "Open the Colima log in Console. This helps when start or stop fails."
     static let window = "Open the dashboard in a resizable window that stays open."

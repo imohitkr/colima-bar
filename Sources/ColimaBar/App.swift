@@ -586,8 +586,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         w.makeKeyAndOrderFront(nil)
     }
 
-    /// Counts the window in visibleCount exactly once while it is open and not
-    /// minimized, however it was opened, minimized or closed.
+    /// Counts the window in visibleCount exactly once while it is open, not
+    /// minimized and not hidden behind other windows, however that changed.
     private func setWindowCounted(_ on: Bool) {
         guard windowCounted != on else { return }
         windowCounted = on
@@ -608,6 +608,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
     func windowDidMiniaturize(_ n: Notification) { setWindowCounted(false) }
     func windowDidDeminiaturize(_ n: Notification) { setWindowCounted(true) }
+
+    /// A window fully behind other windows, or on a locked or sleeping
+    /// screen, stops counting, so stat streams and the fast heartbeat stop.
+    func windowDidChangeOcclusionState(_ n: Notification) {
+        guard let w = n.object as? NSWindow, w === window else { return }
+        setWindowCounted(Self.windowCounts(visible: w.occlusionState.contains(.visible),
+                                           miniaturized: w.isMiniaturized, debug: Self.isDebugRun))
+    }
+
+    /// Whether the dashboard window counts in visibleCount. A debug snapshot
+    /// window sits off screen, so it always counts while open.
+    nonisolated static func windowCounts(visible: Bool, miniaturized: Bool, debug: Bool) -> Bool {
+        !miniaturized && (visible || debug)
+    }
 }
 
 /// Debug snapshots only: a window that may be taller than the screen, so a

@@ -102,10 +102,10 @@ import Testing
     @Test func listsTheTypesAndActionsTheHandlerUses() throws {
         let f = try decoded()
         #expect(Set(f.keys) == ["type", "event"])
-        #expect(Set(f["type"] ?? []) == ["container", "image", "volume"])
+        #expect(Set(f["type"] ?? []) == ["builder", "container", "image", "volume"])
         let actions = Set(f["event"] ?? [])
         for a in ["create", "start", "restart", "die", "stop", "kill", "oom", "pause", "unpause", "rename",
-                  "destroy", "health_status", "pull", "tag", "untag", "delete", "import", "load", "prune"] {
+                  "destroy", "health_status", "pull", "tag", "untag", "delete", "import", "load", "prune", "commit"] {
             #expect(actions.contains(a), "\(a)")
         }
     }
@@ -118,7 +118,7 @@ import Testing
             #expect(passes(a), "\(a)")
         }
         for a in ["exec_create: sh -c true", "exec_start: sh -c true", "exec_die", "exec_detach", "top",
-                  "attach", "detach", "commit", "copy", "export", "resize", "update", "mount", "unmount",
+                  "attach", "detach", "copy", "export", "resize", "update", "mount", "unmount",
                   "archive-path", "extract-to-dir", "push", "save"] {
             #expect(!passes(a), "\(a)")
         }
