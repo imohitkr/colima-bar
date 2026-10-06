@@ -159,7 +159,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
             // Away from the mouse pointer, so no hover hint shows up in the shot.
             window?.setFrameOrigin(NSPoint(x: -4000, y: -4000))
-            DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            // COLIMABAR_SNAPSHOT_DELAY: wait longer so the sparklines fill up.
+            let delay = ProcessInfo.processInfo.environment["COLIMABAR_SNAPSHOT_DELAY"].flatMap(Double.init) ?? 6
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
                 if let v = self?.window?.contentView { self?.snapshot(v, to: args[i + 1]) }
                 NSApp.terminate(nil)
             }
