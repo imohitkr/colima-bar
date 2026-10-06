@@ -27,17 +27,17 @@ For screenshots, use a debug run: `build/ColimaBar.app/Contents/MacOS/ColimaBar 
 
 ## Layout
 
-- `Sources/ColimaBar/App.swift`: app delegate, menu bar icon, popover, dashboard window, debug flags.
-- `Sources/ColimaBar/ColimaModel.swift`: the `@Observable` model, auto-start wake and auto-stop.
-- `Sources/ColimaBar/DashboardView.swift`, `Tabs.swift`: the dashboard UI.
-- `Sources/ColimaBar/LogViewer.swift`: log windows.
-- `Sources/ColimaBar/DockerAPI.swift`: Docker Engine API client over the unix socket.
-- `Sources/ColimaBar/SocketProxy.swift`: the auto-start proxy.
-- `Sources/ColimaBar/Routing.swift`: docker routes and the login item.
-- `Sources/ColimaBar/Shell.swift`: paths and the process runner.
-- `Sources/ColimaBar/Models.swift`: data types and parsers.
-- `Sources/ColimaBar/Notifier.swift`, `Hints.swift`, `Updater.swift`: notifications, hover hints, release check.
-- `Tests/ColimaBarTests/`: Swift Testing tests.
+Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds one type, or one type and its small private helpers. The file has the name of the type. An extension file has the name `Type+Topic.swift`.
+
+- `App/`: the app delegate with the menu bar icon, popover, dashboard window and debug flags (`AppDelegate.swift`). Other files hold the restart after an update (`AppDelegate+Relaunch.swift`), the main menu and the debug snapshots.
+- `Model/`: the `@Observable` model with auto-start wake and auto-stop (`ColimaModel.swift`). Its static rules are in `ColimaModel+Rules.swift`, `ColimaModel+Events.swift` and `ColimaModel+StartDetection.swift`. The folder also has the row types (`Models.swift`), `DFGate`, `LatestOnly`, `VMState` and `IdleMinutes`.
+- `Docker/`: the Docker Engine API client over the unix socket (`DockerAPI.swift`) and the JSON wire types (`DockerJSON.swift`).
+- `Proxy/`: the auto-start proxy (`SocketProxy.swift`), its HTTP parsers (`SocketProxy+HTTP.swift`) and the unix socket helpers (`UnixSocket.swift`).
+- `System/`: paths, the process runner, docker routes, the login item, notifications, the release check, `UserDefaults` access, the Colima directory watcher and the open file limit.
+- `Logs/`: log windows: the line parsers, the filter, the buffer, `LogStore`, `LogView` and `LogWindows`.
+- `Views/`: the dashboard UI. `Dashboard/` has the frame, header, footer and live tiles. `Containers/` and `System/` have those tabs. `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), the hint text (`Help.swift`) and small shared views.
+- `Support/`: small helpers with no app state: `Parse`, byte formatting and bounded concurrency.
+- `Tests/ColimaBarTests/`: Swift Testing tests, in the same folders as the sources. `TestSupport/` has the shared fakes and helpers.
 - `scripts/`: `colima-ctl.sh`, the installer, the uninstall script, the icon generator.
 
 ## Invariants
@@ -56,6 +56,11 @@ Do not break these rules.
 ## Tests
 
 - Use Swift Testing (`@Suite`, `@Test`, `#expect`). Do not use XCTest.
+- Name each test file `<TypeOrFeature>Tests.swift`, with one file and one suite for each unit. Give the suite the same name as the file.
+- Put shared fakes and helpers in `Tests/ColimaBarTests/TestSupport/`, for example `FakeDaemon`, `BusyUpstream`, `waitUntil` and `TestSocketPath`. Do not copy them into test files.
+- Get each test socket path from `TestSocketPath.unique()`. Suites run in parallel, so a fixed path can collide.
+- If a test must wait for a condition, poll it with `waitUntil`. Do not use a fixed sleep before a check.
+- Do not name files, suites or tests after review rounds or fixes. Name them after the behavior that they check.
 - If you change logic, add or update tests.
 - Do not write tests that depend on exact timing. If a test must measure time, use a generous bound.
 - Do not start or stop the user's Colima VM in automated runs.
@@ -72,7 +77,7 @@ Use a light form of ASD-STE100 for docs, comments, hints, notifications, error m
 - Use plain words. Do not use filler.
 - Keep code, identifiers and command output exact.
 
-If you add or change a control, update its hint in `Hints.swift`. If you change behavior that users see, update `README.md`.
+If you add or change a control, update its hint text in `Views/Shared/Help.swift`. If you change behavior that users see, update `README.md`.
 
 ## Commits and pull requests
 

@@ -12,7 +12,7 @@
 - [ ] `make lint` passes.
 - [ ] I ran the app (`./build.sh install` or a `--snapshot` run).
 - [ ] I added screenshots for UI changes.
-- [ ] I updated the README and the hover hints in `Hints.swift`, if needed.
+- [ ] I updated the README and the hover hints in `Help.swift`, if needed.
 
 ## Risk
 

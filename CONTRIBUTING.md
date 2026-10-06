@@ -59,22 +59,19 @@ build/ColimaBar.app/Contents/MacOS/ColimaBar --snapshot /tmp/system.png System
 
 ## Project layout
 
+Each source file holds one type, or one type and its small private helpers. The file has the name of the type. An extension file has the name `Type+Topic.swift`.
+
 | Path | Contents |
 |---|---|
-| `Sources/ColimaBar/App.swift` | App delegate: menu bar icon, popover, dashboard window, right-click menu and debug flags. |
-| `Sources/ColimaBar/ColimaModel.swift` | The `@Observable` model. It is the single source of truth for the dashboard, auto-start and auto-stop. |
-| `Sources/ColimaBar/DashboardView.swift` | Dashboard frame: header, live tiles, tab picker, profile picker and footer. |
-| `Sources/ColimaBar/Tabs.swift` | The Containers, Images, Volumes and System tabs. |
-| `Sources/ColimaBar/LogViewer.swift` | Log windows: stream demuxing, the log buffer, search and filters. |
-| `Sources/ColimaBar/DockerAPI.swift` | A small Docker Engine API client over the unix socket. |
-| `Sources/ColimaBar/SocketProxy.swift` | The auto-start proxy on `~/.cache/colima-bar/docker.sock`, and unix socket helpers. |
-| `Sources/ColimaBar/Routing.swift` | Docker routes (`DOCKER_HOST`, docker context, testcontainers) and the login item. |
-| `Sources/ColimaBar/Shell.swift` | File paths, and the runner for `colima` and `colima-ctl.sh`. |
-| `Sources/ColimaBar/Models.swift` | Data types, JSON decoding and parsers. |
-| `Sources/ColimaBar/Notifier.swift` | Native notifications and alert throttling. |
-| `Sources/ColimaBar/Hints.swift` | The hover hint text for each control (`Help`) and the hint bar. |
-| `Sources/ColimaBar/Updater.swift` | The daily check for a new release. |
-| `Tests/ColimaBarTests/` | Unit tests (Swift Testing). |
+| `Sources/ColimaBar/App/` | App delegate (`AppDelegate.swift`): menu bar icon, popover, dashboard window, right-click menu and debug flags. Also the restart after an update, the main menu and debug snapshots. |
+| `Sources/ColimaBar/Model/` | The `@Observable` model (`ColimaModel.swift`). It is the single source of truth for the dashboard, auto-start and auto-stop. Its static rules are in `ColimaModel+*.swift`. Also the row types and small state machines (`DFGate`, `LatestOnly`). |
+| `Sources/ColimaBar/Docker/` | A small Docker Engine API client over the unix socket, and the JSON wire types. |
+| `Sources/ColimaBar/Proxy/` | The auto-start proxy on `~/.cache/colima-bar/docker.sock`, its HTTP parsers and the unix socket helpers. |
+| `Sources/ColimaBar/System/` | File paths, the runner for `colima` and `colima-ctl.sh`, docker routes (`DOCKER_HOST`, docker context, testcontainers), the login item, notifications and alert throttling, the daily release check, `UserDefaults` access, the Colima directory watcher and the open file limit. |
+| `Sources/ColimaBar/Logs/` | Log windows: stream demuxing, the log buffer, search and filters. |
+| `Sources/ColimaBar/Views/` | The dashboard UI. `Dashboard/` has the frame, header, live tiles, profile picker and footer. `Containers/`, `System/`, `ImagesTab.swift` and `VolumesTab.swift` are the tabs. `Shared/` has the hover hint text (`Help.swift`), the hint bar and small shared views. |
+| `Sources/ColimaBar/Support/` | Small helpers with no app state: YAML lookup, byte formatting and bounded concurrency. |
+| `Tests/ColimaBarTests/` | Unit tests (Swift Testing), in the same folders as the sources. `TestSupport/` has the shared fakes and helpers. |
 | `scripts/colima-ctl.sh` | VM actions, confirm dialogs and `colima.yaml` changes. The app bundle contains it. |
 | `scripts/install.sh` | The installer. |
 | `scripts/uninstall.sh` | The uninstall script. The app bundle contains it. |
@@ -95,9 +92,13 @@ build/ColimaBar.app/Contents/MacOS/ColimaBar --snapshot /tmp/system.png System
 - Write tests with [Swift Testing](https://developer.apple.com/documentation/testing) (`@Suite`, `@Test`, `#expect`). Do not use XCTest.
 - Keep logic in small static functions that tests can call without a VM.
 - Do not make tests depend on exact timing. If a test must measure time, use a generous bound.
+- Name each test file `<TypeOrFeature>Tests.swift`, with one file and one suite for each unit. Give the suite the same name as the file.
+- Put shared fakes and helpers in `Tests/ColimaBarTests/TestSupport/`. Do not copy them into test files. Get each test socket path from `TestSocketPath.unique()`.
+- If a test must wait for a condition, poll it with `waitUntil`. Do not use a fixed sleep before a check.
+- Do not name files, suites or tests after review rounds or fixes. Name them after the behavior that they check.
 - Put a `///` doc comment on each type and on each non-obvious function. Explain why the code does something, not only what it does.
 - Keep inline comments short, for example `// retry on 503`.
-- If you add or change a control, add or update its hover hint in `Hints.swift`.
+- If you add or change a control, add or update its hover hint text in `Views/Shared/Help.swift`.
 - If you change behavior that users see, update `README.md`.
 
 ## Report a bug
