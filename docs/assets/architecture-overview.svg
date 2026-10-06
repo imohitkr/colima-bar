@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="680" viewBox="0 0 1040 680" role="img" aria-labelledby="t d">
+<title id="t">ColimaBar architecture overview</title>
+<desc id="d">Docker clients connect to the ColimaBar socket proxy, which splices to the Colima Docker socket. ColimaModel drives the proxy wake, the Docker API client, the shell runner, the docker routes and the dashboard views.</desc>
+
+<style>
+  :root {
+    --bg: #ffffff; --edge: #d1d9e0; --panel: #f6f8fa; --box: #ffffff; --stroke: #d1d9e0;
+    --text: #1f2328; --muted: #59636e; --line: #818b98;
+    --accent: #0969da; --accent-bg: #ddf4ff; --green: #1a7f37; --green-bg: #dafbe1;
+    --amber: #9a6700; --amber-bg: #fff8c5; --purple: #8250df; --purple-bg: #fbefff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --edge: #3d444d; --panel: #151b23; --box: #0d1117; --stroke: #3d444d;
+      --text: #f0f6fc; --muted: #9198a1; --line: #656c76;
+      --accent: #4493f8; --accent-bg: #0f2a4d; --green: #3fb950; --green-bg: #12301b;
+      --amber: #d29922; --amber-bg: #3a2c05; --purple: #ab7df8; --purple-bg: #2b1b4a;
+    }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; fill: var(--text); }
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  .title { font-size: 20px; font-weight: 600; }
+  .sub { font-size: 13px; fill: var(--muted); }
+  .h { font-size: 12px; font-weight: 600; letter-spacing: .06em; fill: var(--muted); }
+  .b { font-size: 14px; font-weight: 600; }
+  .s { font-size: 12px; fill: var(--muted); }
+  .xs { font-size: 12px; fill: var(--muted); }
+  .card { fill: var(--bg); stroke: var(--edge); }
+  .panel { fill: var(--panel); stroke: var(--stroke); }
+  .box { fill: var(--box); stroke: var(--stroke); }
+  .key { fill: var(--accent-bg); stroke: var(--accent); }
+  .vm { fill: var(--green-bg); stroke: var(--green); }
+  .tool { fill: var(--amber-bg); stroke: var(--amber); }
+  .ui { fill: var(--purple-bg); stroke: var(--purple); }
+  .flow { stroke: var(--accent); stroke-width: 2; fill: none; }
+  .ctl { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .dash { stroke-dasharray: 5 4; }
+  .head-flow { fill: var(--accent); }
+  .head-ctl { fill: var(--line); }
+  .accent { fill: var(--accent); }
+  .green { fill: var(--green); }
+  .life { stroke: var(--stroke); stroke-width: 1.5; stroke-dasharray: 4 5; }
+  .gate { fill: var(--amber-bg); stroke: var(--amber); stroke-dasharray: 5 4; }
+  .num { fill: var(--accent); }
+  .numt { fill: #ffffff; font-size: 12px; font-weight: 700; }
+</style>
+<defs>
+  <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path class="head-flow" d="M0,0 L10,5 L0,10 z"/>
+  </marker>
+  <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path class="head-ctl" d="M0,0 L10,5 L0,10 z"/>
+  </marker>
+</defs>
+
+<rect class="card" x="0.5" y="0.5" width="1039" height="679" rx="14"/>
+<text class="title" x="32" y="46" text-anchor="start">ColimaBar at a glance</text>
+<text class="sub" x="32" y="68" text-anchor="start">One process: a socket proxy for auto-start, and a model that drives the dashboard.</text>
+<text class="h" x="32" y="124" text-anchor="start">DOCKER CLIENTS</text>
+<text class="h" x="830" y="124" text-anchor="start">COLIMA AND HOST</text>
+<rect class="panel" x="262" y="100" width="528" height="556" rx="14"/>
+<text class="b" x="286" y="128" text-anchor="start">ColimaBar.app</text>
+<text class="xs mono" x="392" y="128" text-anchor="start">Sources/ColimaBar</text>
+<rect class="box" x="32" y="144" width="190" height="44" rx="10"/>
+<text class="b" x="127.0" y="171.0" text-anchor="middle">docker CLI</text>
+<path class="flow" d="M222,166 C252,166 252,186 284,186" marker-end="url(#af)"/>
+<rect class="box" x="32" y="202" width="190" height="44" rx="10"/>
+<text class="b" x="127.0" y="229.0" text-anchor="middle">IDE test runners</text>
+<path class="flow" d="M222,224 C252,224 252,186 284,186" marker-end="url(#af)"/>
+<rect class="box" x="32" y="260" width="190" height="44" rx="10"/>
+<text class="b" x="127.0" y="287.0" text-anchor="middle">testcontainers</text>
+<path class="flow" d="M222,282 C252,282 252,186 284,186" marker-end="url(#af)"/>
+<rect class="box" x="32" y="318" width="190" height="44" rx="10"/>
+<text class="b" x="127.0" y="345.0" text-anchor="middle">Scripts and SDKs</text>
+<path class="flow" d="M222,340 C252,340 252,186 284,186" marker-end="url(#af)"/>
+<rect class="key" x="286" y="148" width="480" height="76" rx="10"/>
+<text class="b" x="526.0" y="174.5" text-anchor="middle">SocketProxy</text>
+<text class="s mono" x="526.0" y="191.5" text-anchor="middle">~/.cache/colima-bar/docker.sock</text>
+<text class="xs" x="526.0" y="207.5" text-anchor="middle">answers /_ping · starts the VM · splices bytes</text>
+<rect class="vm" x="830" y="148" width="178" height="182" rx="10"/>
+<text class="b" x="919.0" y="219.5" text-anchor="middle">Colima VM</text>
+<text class="s" x="919.0" y="236.5" text-anchor="middle">Docker socket</text>
+<text class="xs mono" x="919.0" y="252.5" text-anchor="middle">~/.config/colima/</text>
+<text class="xs mono" x="919.0" y="268.5" text-anchor="middle">PROFILE/docker.sock</text>
+<path class="flow" d="M766,186 L828,186" marker-end="url(#af)"/>
+<rect class="box" x="286" y="266" width="274" height="252" rx="10"/>
+<text class="b" x="423.0" y="355.0" text-anchor="middle">ColimaModel</text>
+<text class="xs mono" x="423.0" y="371.0" text-anchor="middle">@Observable</text>
+<text class="s" x="423.0" y="388.0" text-anchor="middle">single source of truth</text>
+<text class="s" x="423.0" y="405.0" text-anchor="middle">heartbeat and VM state</text>
+<text class="s" x="423.0" y="422.0" text-anchor="middle">auto-start wake</text>
+<text class="s" x="423.0" y="439.0" text-anchor="middle">auto-stop idle check</text>
+<path class="ctl dash" d="M423,226 L423,264" marker-end="url(#ac)"/>
+<text class="xs mono" x="432" y="250" text-anchor="start">wakeForProxy()</text>
+<rect class="box" x="600" y="266" width="166" height="72" rx="10"/>
+<text class="b" x="683.0" y="299.0" text-anchor="middle">DockerAPI</text>
+<text class="xs" x="683.0" y="315.0" text-anchor="middle">events · stats · lists</text>
+<path class="ctl" d="M560,302 L598,302" marker-end="url(#ac)"/>
+<rect class="box" x="600" y="356" width="166" height="72" rx="10"/>
+<text class="b" x="683.0" y="389.0" text-anchor="middle">Shell</text>
+<text class="xs" x="683.0" y="405.0" text-anchor="middle">colima · colima-ctl.sh</text>
+<path class="ctl" d="M560,392 L598,392" marker-end="url(#ac)"/>
+<rect class="tool" x="830" y="356" width="178" height="72" rx="10"/>
+<text class="b" x="919.0" y="381.0" text-anchor="middle">colima CLI</text>
+<text class="xs" x="919.0" y="397.0" text-anchor="middle">list · status</text>
+<text class="xs" x="919.0" y="413.0" text-anchor="middle">actions via colima-ctl.sh</text>
+<path class="ctl" d="M766,392 L828,392" marker-end="url(#ac)"/>
+<rect class="box" x="600" y="446" width="166" height="72" rx="10"/>
+<text class="b" x="683.0" y="479.0" text-anchor="middle">Routing</text>
+<text class="xs" x="683.0" y="495.0" text-anchor="middle">docker routes</text>
+<path class="ctl" d="M560,482 L598,482" marker-end="url(#ac)"/>
+<rect class="tool" x="830" y="446" width="178" height="72" rx="10"/>
+<text class="b" x="919.0" y="471.0" text-anchor="middle">Docker routes</text>
+<text class="xs" x="919.0" y="487.0" text-anchor="middle">docker context · launchctl</text>
+<text class="xs" x="919.0" y="503.0" text-anchor="middle">testcontainers</text>
+<path class="ctl" d="M766,482 L828,482" marker-end="url(#ac)"/>
+<path class="ctl" d="M766,302 L828,302" marker-end="url(#ac)"/>
+<rect class="ui" x="286" y="560" width="480" height="72" rx="10"/>
+<text class="b" x="526.0" y="593.0" text-anchor="middle">Views</text>
+<text class="xs" x="526.0" y="609.0" text-anchor="middle">dashboard · notifications · log windows</text>
+<path class="ctl" d="M423,518 L423,558" marker-end="url(#ac)"/>
+<path class="flow" d="M32,560 L72,560" marker-end="url(#af)"/>
+<text class="xs" x="82" y="564" text-anchor="start">docker traffic</text>
+<path class="ctl" d="M32,588 L72,588" marker-end="url(#ac)"/>
+<text class="xs" x="82" y="592" text-anchor="start">calls and data</text>
+</svg>

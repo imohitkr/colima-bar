@@ -61,30 +61,9 @@ build/ColimaBar.app/Contents/MacOS/ColimaBar --snapshot /tmp/system.png System
 
 ## Project layout
 
-Each source file holds one type, or one type and its small private helpers. The file has the name of the type. An extension file has the name `Type+Topic.swift`.
+[ARCHITECTURE.md](ARCHITECTURE.md) describes the design and has a code map of each folder and its key types.
 
-| Path | Contents |
-|---|---|
-| `Sources/ColimaBar/App/` | App delegate (`AppDelegate.swift`): menu bar icon, popover, dashboard window, right-click menu and debug flags. Also the restart after an update, the main menu and debug snapshots. |
-| `Sources/ColimaBar/Model/` | The `@Observable` model (`ColimaModel.swift`). It is the single source of truth for the dashboard, auto-start and auto-stop. Its static rules are in `ColimaModel+*.swift`. Also the row types and small state machines (`DFGate`, `LatestOnly`). |
-| `Sources/ColimaBar/Docker/` | A small Docker Engine API client over the unix socket, and the JSON wire types. |
-| `Sources/ColimaBar/Proxy/` | The auto-start proxy on `~/.cache/colima-bar/docker.sock`, its HTTP parsers and the unix socket helpers. |
-| `Sources/ColimaBar/System/` | File paths, the runner for `colima` and `colima-ctl.sh`, docker routes (`DOCKER_HOST`, docker context, testcontainers), the login item, notifications and alert throttling, the daily release check, `UserDefaults` access, the Colima directory watcher and the open file limit. |
-| `Sources/ColimaBar/Logs/` | Log windows: stream demuxing, the log buffer, search and filters. |
-| `Sources/ColimaBar/Views/` | The dashboard UI. `Dashboard/` has the frame, header, live tiles, profile picker and footer. `Containers/`, `System/`, `ImagesTab.swift` and `VolumesTab.swift` are the tabs. `Shared/` has the hover hint text (`Help.swift`), the hint bar and small shared views. |
-| `Sources/ColimaBar/Support/` | Small helpers with no app state: YAML lookup, byte formatting and bounded concurrency. |
-| `Tests/ColimaBarTests/` | Unit tests (Swift Testing), in the same folders as the sources. `TestSupport/` has the shared fakes and helpers. |
-| `scripts/colima-ctl.sh` | VM actions, confirm dialogs and `colima.yaml` changes. The app bundle contains it. |
-| `scripts/install.sh` | The installer. |
-| `scripts/uninstall.sh` | The uninstall script. The app bundle contains it. |
-| `scripts/make-icon.swift` | Draws `Resources/AppIcon.icns`. |
-| `scripts/dmg-readme.txt` | The "Read Me First" file in the disk image. |
-| `build.sh` | Builds the app bundle, the disk image and the tests. |
-| `Makefile` | Shortcuts for build, test, lint and format. |
-| `.swift-format` | The `swift format` rules. |
-| `.github/workflows/ci.yml` | CI and the release job. |
-| `.github/actions/setup-swift/` | Installs the Swift.org toolchain with swiftly for the macOS CI jobs. |
-| `legacy/` | The old SwiftBar plugin. The app does not use it. |
+Each source file holds one type, or one type and its small private helpers. The file has the name of the type. An extension file has the name `Type+Topic.swift`.
 
 ## Coding conventions
 
@@ -102,20 +81,12 @@ Each source file holds one type, or one type and its small private helpers. The 
 - Put a `///` doc comment on each type and on each non-obvious function. Explain why the code does something, not only what it does.
 - Keep inline comments short, for example `// retry on 503`.
 - If you add or change a control, add or update its hover hint text in `Views/Shared/Help.swift`.
-- If you change behavior that users see, update `README.md`.
+- If you change behavior that users see, update the user guide in `docs/`. Update `README.md` only if the summary changes.
+- If you change the design, update `ARCHITECTURE.md`.
 
 ## Report a bug
 
-Open a [bug report](https://github.com/imohitkr/colima-bar/issues/new/choose). Include this information:
-
-- The macOS version.
-- The ColimaBar version. The dashboard footer and the right-click menu show it.
-- The output of `colima version`.
-- The runtime and the profile, if it is not `default`.
-- The steps that cause the problem, what you expected and what happened.
-- The relevant lines from `~/.cache/colima-bar/ctl.log`. This file contains the output of VM actions.
-
-Remove secrets, tokens and private host names from logs before you post them.
+Open a [bug report](https://github.com/imohitkr/colima-bar/issues/new?template=bug_report.yml). [Troubleshooting](docs/troubleshooting.md#report-a-bug) lists the information to include.
 
 ## Pull requests
 
@@ -123,8 +94,9 @@ Remove secrets, tokens and private host names from logs before you post them.
 2. Keep each pull request small and about one change.
 3. If you change logic, add or update tests.
 4. Run `make check` and `make build` before you push.
-5. Open the pull request. Fill in the template: What, Why and How tested.
-6. If you change the UI, add screenshots. Use `--snapshot` to make them.
+5. Add a line under `[Unreleased]` in [CHANGELOG.md](CHANGELOG.md) for each change that users see.
+6. Open the pull request. Fill in the template: What, Why and How tested.
+7. If you change the UI, add screenshots. Use `--snapshot` to make them.
 
 CI runs `swift format lint`, ShellCheck, actionlint, `swift test` and `./build.sh` on each pull request. The macOS jobs use Swift 6.4.0 from swift.org. CI must pass before a maintainer merges.
 
@@ -142,7 +114,7 @@ Use a light form of [ASD-STE100 Simplified Technical English](https://www.asd-st
 - Use the active voice with a clear subject.
 - Use the imperative for instructions: "Run `make check` before you push."
 - Put conditions before commands: "If the VM is stopped, start it."
-- Use one term for one concept. Use the README terms: dashboard, auto-start, auto-stop, the installer, the disk image, profile, VM.
+- Use one term for one concept. Use the terms of the docs: dashboard, auto-start, auto-stop, the installer, the disk image, the login item, profile, VM.
 - Use plain words: "use", not "utilize"; "before", not "prior to".
 - Do not use filler such as "basically", "simply" or "in order to".
 
@@ -156,6 +128,8 @@ The maintainer makes each release:
 2. CI runs the tests and builds `ColimaBar.dmg` and `ColimaBar.zip`.
 3. CI signs a build provenance attestation for both files.
 4. CI publishes the GitHub release with generated notes.
+
+Before the tag, the maintainer moves the `[Unreleased]` entries in `CHANGELOG.md` to a new version section.
 
 Contributors do not need to change version numbers. The version comes from the tag.
 

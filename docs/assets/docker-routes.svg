@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="470" viewBox="0 0 1040 470" role="img" aria-labelledby="t d">
+<title id="t">Docker routes to the ColimaBar socket</title>
+<desc id="d">Each kind of docker client reaches the ColimaBar socket through its own route. ColimaBar sets the routes when it starts and each time the VM starts. While ColimaBar runs, the socket is the auto-start proxy. When ColimaBar quits, the socket is a symlink to the Colima socket.</desc>
+
+<style>
+  :root {
+    --bg: #ffffff; --edge: #d1d9e0; --panel: #f6f8fa; --box: #ffffff; --stroke: #d1d9e0;
+    --text: #1f2328; --muted: #59636e; --line: #818b98;
+    --accent: #0969da; --accent-bg: #ddf4ff; --green: #1a7f37; --green-bg: #dafbe1;
+    --amber: #9a6700; --amber-bg: #fff8c5; --purple: #8250df; --purple-bg: #fbefff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117; --edge: #3d444d; --panel: #151b23; --box: #0d1117; --stroke: #3d444d;
+      --text: #f0f6fc; --muted: #9198a1; --line: #656c76;
+      --accent: #4493f8; --accent-bg: #0f2a4d; --green: #3fb950; --green-bg: #12301b;
+      --amber: #d29922; --amber-bg: #3a2c05; --purple: #ab7df8; --purple-bg: #2b1b4a;
+    }
+  }
+  text { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif; fill: var(--text); }
+  .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  .title { font-size: 20px; font-weight: 600; }
+  .sub { font-size: 13px; fill: var(--muted); }
+  .h { font-size: 12px; font-weight: 600; letter-spacing: .06em; fill: var(--muted); }
+  .b { font-size: 14px; font-weight: 600; }
+  .s { font-size: 12px; fill: var(--muted); }
+  .xs { font-size: 12px; fill: var(--muted); }
+  .card { fill: var(--bg); stroke: var(--edge); }
+  .panel { fill: var(--panel); stroke: var(--stroke); }
+  .box { fill: var(--box); stroke: var(--stroke); }
+  .key { fill: var(--accent-bg); stroke: var(--accent); }
+  .vm { fill: var(--green-bg); stroke: var(--green); }
+  .tool { fill: var(--amber-bg); stroke: var(--amber); }
+  .ui { fill: var(--purple-bg); stroke: var(--purple); }
+  .flow { stroke: var(--accent); stroke-width: 2; fill: none; }
+  .ctl { stroke: var(--line); stroke-width: 1.5; fill: none; }
+  .dash { stroke-dasharray: 5 4; }
+  .head-flow { fill: var(--accent); }
+  .head-ctl { fill: var(--line); }
+  .accent { fill: var(--accent); }
+  .green { fill: var(--green); }
+  .life { stroke: var(--stroke); stroke-width: 1.5; stroke-dasharray: 4 5; }
+  .gate { fill: var(--amber-bg); stroke: var(--amber); stroke-dasharray: 5 4; }
+  .num { fill: var(--accent); }
+  .numt { fill: #ffffff; font-size: 12px; font-weight: 700; }
+</style>
+<defs>
+  <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path class="head-flow" d="M0,0 L10,5 L0,10 z"/>
+  </marker>
+  <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path class="head-ctl" d="M0,0 L10,5 L0,10 z"/>
+  </marker>
+</defs>
+
+<rect class="card" x="0.5" y="0.5" width="1039" height="469" rx="14"/>
+<text class="title" x="32" y="46" text-anchor="start">Docker routes</text>
+<text class="sub" x="32" y="68" text-anchor="start">Every client reaches the ColimaBar socket. ColimaBar sets the routes when it starts and each time the VM starts.</text>
+<text class="h" x="32" y="112" text-anchor="start">CLIENT</text>
+<text class="h" x="262" y="112" text-anchor="start">ROUTE</text>
+<rect class="box" x="32" y="126" width="196" height="44" rx="10"/>
+<text class="b" x="130.0" y="153.0" text-anchor="middle">docker CLI</text>
+<path class="flow" d="M228,148 L260,148" marker-end="url(#af)"/>
+<rect class="key" x="262" y="130" width="236" height="36" rx="18"/>
+<text class="xs mono" x="380" y="153" text-anchor="middle">docker context colimabar</text>
+<path class="flow" d="M498,148 C530,148 530,270 562,270" marker-end="url(#af)"/>
+<rect class="box" x="32" y="188" width="196" height="44" rx="10"/>
+<text class="b" x="130.0" y="215.0" text-anchor="middle">IDEs and Dock apps</text>
+<path class="flow" d="M228,210 L260,210" marker-end="url(#af)"/>
+<rect class="key" x="262" y="192" width="236" height="36" rx="18"/>
+<text class="xs mono" x="380" y="215" text-anchor="middle">launchctl DOCKER_HOST</text>
+<path class="flow" d="M498,210 C530,210 530,270 562,270" marker-end="url(#af)"/>
+<rect class="box" x="32" y="250" width="196" height="44" rx="10"/>
+<text class="b" x="130.0" y="277.0" text-anchor="middle">testcontainers</text>
+<path class="flow" d="M228,272 L260,272" marker-end="url(#af)"/>
+<rect class="key" x="262" y="254" width="236" height="36" rx="18"/>
+<text class="xs mono" x="380" y="277" text-anchor="middle">~/.testcontainers.properties</text>
+<path class="flow" d="M498,272 C530,272 530,270 562,270" marker-end="url(#af)"/>
+<rect class="box" x="32" y="312" width="196" height="44" rx="10"/>
+<text class="b" x="130.0" y="339.0" text-anchor="middle">Scripts and shells</text>
+<path class="flow" d="M228,334 L260,334" marker-end="url(#af)"/>
+<rect class="key" x="262" y="316" width="236" height="36" rx="18"/>
+<text class="xs mono" x="380" y="339" text-anchor="middle">DOCKER_HOST in ~/.zshrc</text>
+<path class="flow" d="M498,334 C530,334 530,270 562,270" marker-end="url(#af)"/>
+<rect class="box" x="32" y="374" width="196" height="44" rx="10"/>
+<text class="b" x="130.0" y="401.0" text-anchor="middle">Tools that use /var/run</text>
+<path class="flow" d="M228,396 L260,396" marker-end="url(#af)"/>
+<rect class="key" x="262" y="378" width="236" height="36" rx="18"/>
+<text class="xs mono" x="380" y="401" text-anchor="middle">/var/run/docker.sock link</text>
+<path class="flow" d="M498,396 C530,396 530,270 562,270" marker-end="url(#af)"/>
+<text class="xs" x="380" y="367" text-anchor="middle">you add it (optional)</text>
+<text class="xs" x="380" y="429" text-anchor="middle">optional, needs admin</text>
+<rect class="key" x="564" y="220" width="176" height="100" rx="10"/>
+<text class="b" x="652.0" y="259.0" text-anchor="middle">ColimaBar socket</text>
+<text class="xs mono" x="652.0" y="275.0" text-anchor="middle">~/.cache/colima-bar/</text>
+<text class="xs mono" x="652.0" y="291.0" text-anchor="middle">docker.sock</text>
+<rect class="vm" x="870" y="220" width="138" height="100" rx="10"/>
+<text class="b" x="939.0" y="259.0" text-anchor="middle">Colima socket</text>
+<text class="xs mono" x="939.0" y="275.0" text-anchor="middle">PROFILE/</text>
+<text class="xs mono" x="939.0" y="291.0" text-anchor="middle">docker.sock</text>
+<path class="flow" d="M740,250 C790,190 820,190 868,250" marker-end="url(#af)"/>
+<text class="xs" x="805" y="184" text-anchor="middle">ColimaBar runs</text>
+<text class="s" x="805" y="198" text-anchor="middle">proxy with auto-start</text>
+<path class="ctl dash" d="M740,290 C790,350 820,350 868,290" marker-end="url(#ac)"/>
+<text class="xs" x="805" y="362" text-anchor="middle">ColimaBar quits</text>
+<text class="s" x="805" y="376" text-anchor="middle">symlink, no auto-start</text>
+</svg>

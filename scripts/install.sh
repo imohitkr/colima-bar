@@ -4,8 +4,8 @@
 #   curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | bash
 #
 # Set COLIMABAR_VERSION=v0.4.0 to install a specific release (v0.4.0 or later).
-# If gh is installed and logged in to github.com, the installer verifies the
-# download and stops when the check fails. If gh cannot verify the download,
+# If gh 2.68 or later is installed and logged in to github.com, the installer
+# verifies the download and stops when the check fails. If gh cannot verify the download,
 # the installer prints a notice and continues. Set COLIMABAR_REQUIRE_VERIFY=1
 # to stop in that case too.
 # curl does not mark its downloads as quarantined, so macOS opens the app
@@ -17,6 +17,27 @@ wait_for_exit() {
     pgrep -U "$(id -u)" -xq ColimaBar || return 0
     sleep 0.5
   done
+}
+
+# Prints the X.Y.Z version from "gh version X.Y.Z (date)", the first line
+# of gh --version. Prints nothing if that line has another format.
+gh_version() {
+  local first
+  first=$(gh --version 2>/dev/null | head -n 1) || return 0
+  if [[ "$first" =~ ^gh\ version\ v?([0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    echo "${BASH_REMATCH[1]}"
+  fi
+}
+
+# Succeeds if version $1 is $2 or later. Both have the form X.Y.Z.
+# Compares each part as a number, so 2.100.0 is later than 2.68.0.
+version_at_least() {
+  local a1 a2 a3 b1 b2 b3
+  IFS=. read -r a1 a2 a3 <<<"$1"
+  IFS=. read -r b1 b2 b3 <<<"$2"
+  (( 10#$a1 != 10#$b1 )) && { (( 10#$a1 > 10#$b1 )); return; }
+  (( 10#$a2 != 10#$b2 )) && { (( 10#$a2 > 10#$b2 )); return; }
+  (( 10#$a3 >= 10#$b3 ))
 }
 
 # Everything runs inside main, so a partly downloaded script does nothing.
@@ -110,12 +131,16 @@ main() {
   local verify=(gh attestation verify "$tmp/ColimaBar.zip" --hostname github.com
     --repo "$repo" --signer-workflow "$workflow" --deny-self-hosted-runners
     --source-ref "refs/tags/$version")
-  # gh 2.49 added the attestation command.
-  local skip=""
+  # gh 2.68 is the first version that has all these flags. With an older gh,
+  # verify fails on an unknown flag, which looks like a bad download.
+  local skip="" ghv=""
+  command -v gh >/dev/null 2>&1 && ghv=$(gh_version)
   if ! command -v gh >/dev/null 2>&1; then
     skip="gh is not installed"
-  elif ! gh attestation --help >/dev/null 2>&1; then
-    skip="gh is older than 2.49"
+  elif [ -z "$ghv" ]; then
+    skip="cannot read the gh version; gh 2.68 or later is needed"
+  elif ! version_at_least "$ghv" 2.68.0; then
+    skip="gh $ghv is too old; gh 2.68 or later is needed"
   elif ! gh auth status --hostname github.com >/dev/null 2>&1; then
     skip="gh is not logged in to github.com"
   fi

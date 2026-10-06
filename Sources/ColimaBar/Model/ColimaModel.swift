@@ -883,9 +883,9 @@ final class ColimaModel {
 
     /// Runs a colima-ctl.sh action in a terminal window.
     func terminal(_ action: CtlAction, _ args: String..., profile p: String? = nil) {
-        func quoted(_ s: String) -> String { "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'" }
         let words = [Paths.ctl, action.rawValue] + args
-        Shell.inTerminal("COLIMABAR_PROFILE=\(quoted(p ?? profile)) " + words.map(quoted).joined(separator: " "))
+        Shell.inTerminal(
+            "COLIMABAR_PROFILE=\(Shell.quote(p ?? profile)) " + words.map(Shell.quote).joined(separator: " "))
     }
 
     func open(port: Int) {

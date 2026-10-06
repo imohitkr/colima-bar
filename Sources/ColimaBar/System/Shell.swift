@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 
 /// Thread-safe stdout accumulator for Shell.run.
@@ -124,14 +125,27 @@ enum Shell {
         return h
     }
 
+    /// Single-quotes a word for the shell.
+    static func quote(_ s: String) -> String { "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'" }
+
+    /// The bundle ID of iTerm2. Launch Services finds the app by this ID in
+    /// /Applications, ~/Applications or any other folder.
+    static let iTermBundleID = "com.googlecode.iterm2"
+
     /// Runs `command` in a new iTerm window, falling back to Terminal.app
     /// when iTerm isn't installed.
     static func inTerminal(_ command: String) {
+        let iTerm = NSWorkspace.shared.urlForApplication(withBundleIdentifier: iTermBundleID) != nil
+        let script = terminalScript(command, iTerm: iTerm)
+        Task { _ = await run(["osascript", "-e", script]) }
+    }
+
+    /// The AppleScript that runs `command` in a new iTerm window when `iTerm`
+    /// is true, else in a new Terminal.app window.
+    static func terminalScript(_ command: String, iTerm: Bool) -> String {
         let escaped = command.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        let iTerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
-        let script =
-            iTerm
+        return iTerm
             ? """
             tell application "iTerm"
                 activate
@@ -145,6 +159,5 @@ enum Shell {
                 do script "\(escaped)"
             end tell
             """
-        Task { _ = await run(["osascript", "-e", script]) }
     }
 }

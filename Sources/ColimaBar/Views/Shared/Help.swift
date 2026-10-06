@@ -36,9 +36,9 @@ enum Help {
     static let unhealthy = "The HEALTHCHECK fails. The container runs, but it probably does not work. Check its logs."
     static let starting = "The HEALTHCHECK has not passed yet. The container is still starting."
     static let logs =
-        "Open a live log window for this container, with search, follow, a stderr filter and copy. To follow the logs in iTerm, use the ••• menu."
+        "Open a live log window for this container, with search, follow, a stderr filter and copy. To follow the logs in a terminal window, use the ••• menu."
     static let shell =
-        "Open an interactive shell in the container, in iTerm. The shell is bash if the container has it, otherwise sh."
+        "Open an interactive shell in the container, in iTerm, or in Terminal when iTerm is not installed. The shell is bash if the container has it, otherwise sh."
     static let ctrRestart = "Restart this container. Docker keeps its filesystem and volumes."
     static let ctrStop = "Stop this container (SIGTERM, then SIGKILL after 10s). You can start it again."
     static let ctrStart = "Start this stopped container again with its original settings."
@@ -126,6 +126,8 @@ enum Help {
     // App
     static let checkUpdates =
         "Ask GitHub one time each day if a newer ColimaBar release exists. ColimaBar sends one notification for a new version. Then it shows a button at the bottom of the dashboard."
+    static let uninstallConfirm =
+        "ColimaBar opens a terminal window (iTerm or Terminal) and runs its uninstall script. The script removes the app, the login item and ColimaBar's docker routes. Docker clients then connect to Colima directly. Colima, your containers and your images stay."
     static func version(_ v: String) -> String { "ColimaBar \(v). Click to check for a new version." }
     static func update(_ v: String) -> String {
         "ColimaBar \(v) is available. Click to open the release page and download it."
@@ -133,10 +135,10 @@ enum Help {
     static let notify =
         "Send an alert when a container exits with an error, runs out of memory or fails its healthcheck. ColimaBar ignores testcontainers containers. Failed actions always send an alert."
     static let login =
-        "Start ColimaBar when you log in. If it crashes, start it again immediately. Thus the docker socket continues to work."
+        "Start ColimaBar when you log in. If it crashes, start it again immediately. Thus the ColimaBar socket continues to work."
 
     // Footer
-    static let ssh = "Open a shell in the Colima VM, in iTerm."
+    static let ssh = "Open a shell in the Colima VM, in iTerm, or in Terminal when iTerm is not installed."
     static let copyEnv =
         "Copy 'export DOCKER_HOST=…' for the ColimaBar socket, for scripts or shells that do not read the docker context. It starts Colima on demand while ColimaBar runs. After you quit ColimaBar, it still reaches Colima."
     static let config = "Open colima.yaml, the configuration file of the VM, in your text editor."
