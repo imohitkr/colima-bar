@@ -8,7 +8,7 @@ All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md). To repor
 
 - A Mac with Apple silicon
 - macOS 14 or later
-- The Xcode Command Line Tools. You do not need Xcode.
+- Swift 6.4. Use the Xcode Command Line Tools with Swift 6.4, or install Swift 6.4 with [swiftly](https://www.swift.org/install/macos/). You do not need Xcode. To check the version, run `swift --version`.
 - [Colima](https://github.com/abiosoft/colima) and the docker CLI, for manual tests. To install them, run `brew install colima docker`.
 
 ## Build, run and test
@@ -17,7 +17,7 @@ All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md). To repor
 |---|---|
 | `make build` | Builds `build/ColimaBar.app` with SwiftPM and signs it ad-hoc (`./build.sh`). |
 | `make test` | Runs the test suite (`swift test`). |
-| `make lint` | Checks the Swift format with `swift format lint --strict`. If `shellcheck` is installed, it also checks the shell scripts. |
+| `make lint` | Checks the Swift format with `swift format lint --strict`, the shell scripts with ShellCheck and the workflows with actionlint. |
 | `make fmt` | Formats the Swift code in place with `swift format`. |
 | `make check` | Runs `make lint`, then `make test`. |
 | `make install` | Builds the app, installs it in `~/Applications` and opens it (`./build.sh install`). |
@@ -26,7 +26,9 @@ All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md). To repor
 
 Run `make` with no target to list all targets. The Make targets call `./build.sh` and `swift`, so you can also run those commands directly.
 
-`.swift-format` holds the format rules. `swift format` comes with the Swift toolchain in the Command Line Tools. Run `make fmt` before you commit. CI fails if `make lint` reports a finding. To check the shell scripts locally, install ShellCheck with `brew install shellcheck`.
+`.swift-format` holds the format rules. `swift format` comes with the Swift toolchain. Run `make fmt` before you commit. CI fails if `make lint` reports a finding.
+
+CI uses these lint tools: `swift format` from Swift 6.4.0 (the `swift:6.4.0` image), ShellCheck 0.11.0 and actionlint 1.7.12. `make lint` uses your local `shellcheck` and `actionlint` if they are installed (`brew install shellcheck actionlint`). If they are not installed, it runs the same pinned images as CI with docker. If docker does not work, it skips those checks. Colima shares only your home folder with its VM by default, so keep the repository in your home folder.
 
 `make install` quits the running ColimaBar and replaces it. Use it when you want to test the full app with the login item and auto-start.
 
@@ -81,11 +83,12 @@ Each source file holds one type, or one type and its small private helpers. The 
 | `Makefile` | Shortcuts for build, test, lint and format. |
 | `.swift-format` | The `swift format` rules. |
 | `.github/workflows/ci.yml` | CI and the release job. |
+| `.github/actions/setup-swift/` | Installs the Swift.org toolchain with swiftly for the macOS CI jobs. |
 | `legacy/` | The old SwiftBar plugin. The app does not use it. |
 
 ## Coding conventions
 
-- Use Swift 5.10 and SwiftPM. Do not add third-party dependencies.
+- Use Swift 6.4 and SwiftPM, in the Swift 6 language mode. Do not add third-party dependencies.
 - Use only Apple frameworks: AppKit, SwiftUI, Observation, UserNotifications and ServiceManagement.
 - Draw graphs with SwiftUI `Shape` or `Path`. Do not use Swift Charts or `Canvas`, because they use a lot of graphics memory.
 - Keep UI state in the `@Observable` `ColimaModel`. Assign a property only when its value changes. This keeps the popover still and the redraws small.
@@ -123,7 +126,7 @@ Remove secrets, tokens and private host names from logs before you post them.
 5. Open the pull request. Fill in the template: What, Why and How tested.
 6. If you change the UI, add screenshots. Use `--snapshot` to make them.
 
-CI runs `swift format lint`, ShellCheck, `swift test` and `./build.sh` on each pull request. CI must pass before a maintainer merges.
+CI runs `swift format lint`, ShellCheck, actionlint, `swift test` and `./build.sh` on each pull request. The macOS jobs use Swift 6.4.0 from swift.org. CI must pass before a maintainer merges.
 
 ## Commit messages
 

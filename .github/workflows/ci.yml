@@ -16,26 +16,33 @@ concurrency:
 permissions:
   contents: read
 
+# The exact Swift.org toolchain for the macOS jobs. GitHub's Xcode images do not
+# have it yet. If you change it, also change the swift image tag in the lint job.
+env:
+  SWIFT_VERSION: 6.4.0
+
 # Actions are pinned to full commit SHAs, so a moved tag cannot change them.
 jobs:
   build:
-    runs-on: macos-15
-    timeout-minutes: 20
+    runs-on: macos-26
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0   # git describe for the version
           persist-credentials: false
 
+      # Installs Swift $SWIFT_VERSION with swiftly and fails on any other version.
+      - uses: ./.github/actions/setup-swift
+        with:
+          version: ${{ env.SWIFT_VERSION }}
+
       # Tag builds start clean, so a poisoned cache cannot reach a release.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           path: .build
-          key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
-
-      - name: Toolchain
-        run: swift --version
+          key: spm-${{ runner.os }}-swift-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
 
       - name: Test
         run: swift test
@@ -43,10 +50,16 @@ jobs:
       - name: Build app
         run: ./build.sh
 
-  # The same check as `make lint`. The rules are in .swift-format.
+  # The same Swift format check as `make lint`. The rules are in .swift-format.
+  # The official Swift image on Linux costs less than a macOS runner.
   lint:
-    runs-on: macos-15
+    runs-on: ubuntu-latest
     timeout-minutes: 10
+    container:
+      # Dependabot cannot update this image. To update it, change the tag to
+      # the new SWIFT_VERSION and the digest to the multi-arch index digest from
+      # `docker buildx imagetools inspect swift:<version>`.
+      image: swift:6.4.0@sha256:4601bf61dab9485a3e93087770b72d268737e945a5b000e2286b6cc48bb048b6
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -58,10 +71,17 @@ jobs:
       - name: swift-format
         run: swift format lint --strict --recursive Sources Tests Package.swift
 
-  # Ubuntu runners have shellcheck preinstalled and cost less than macOS.
-  shellcheck:
+  # ShellCheck for the shell scripts, and actionlint for the workflows. The
+  # actionlint image also runs ShellCheck on each `run:` block.
+  scripts-and-workflows:
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      # Dependabot cannot update images in `docker run`. To update one, change
+      # the tag and the digest here and in the Makefile. Use the multi-arch
+      # index digest from `docker buildx imagetools inspect <image>:<tag>`.
+      SHELLCHECK_IMAGE: koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d
+      ACTIONLINT_IMAGE: rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -69,14 +89,19 @@ jobs:
 
       - name: shellcheck
         run: |
-          shellcheck --version
-          shellcheck scripts/*.sh build.sh
+          docker run --rm "$SHELLCHECK_IMAGE" --version
+          docker run --rm -v "$PWD:/src:ro" -w /src "$SHELLCHECK_IMAGE" scripts/*.sh build.sh
+
+      - name: actionlint
+        run: |
+          docker run --rm "$ACTIONLINT_IMAGE" -version
+          docker run --rm -v "$PWD:/src:ro" -w /src "$ACTIONLINT_IMAGE" -color
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, lint, shellcheck]
-    runs-on: macos-15
-    timeout-minutes: 20
+    needs: [build, lint, scripts-and-workflows]
+    runs-on: macos-26
+    timeout-minutes: 30
     permissions:
       contents: write       # create the release
       id-token: write       # sign the provenance attestation
@@ -86,6 +111,10 @@ jobs:
         with:
           fetch-depth: 0   # git describe for the version
           persist-credentials: false
+
+      - uses: ./.github/actions/setup-swift
+        with:
+          version: ${{ env.SWIFT_VERSION }}
 
       # Stable asset names, so releases/latest/download/ColimaBar.{dmg,zip}
       # always points at the newest version (install.sh and the README use it).

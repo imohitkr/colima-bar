@@ -145,10 +145,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         done([.banner, .sound, .list])
     }
 
+    // The async form of the delegate method: macOS calls its completion handler
+    // when this method returns. The handler is not Sendable, so the Swift 6
+    // language mode does not let a main actor closure capture it.
     nonisolated func userNotificationCenter(
-        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
-        withCompletionHandler done: @escaping () -> Void
-    ) {
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse
+    ) async {
         let info = response.notification.request.content.userInfo
         let action = response.actionIdentifier
         let id = info["id"] as? String ?? ""
@@ -158,14 +160,13 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let link = (info["url"] as? String).flatMap(URL.init(string:)).flatMap {
             $0.scheme?.lowercased() == "https" ? $0 : nil
         }
-        Task { @MainActor in
+        await MainActor.run {
             if let link { NSWorkspace.shared.open(link) }
             if !id.isEmpty {
                 // Clicking the banner itself also opens the logs.
                 self.onContainerAction?(
                     NotificationAction(identifier: action), ContainerRef(id: id, name: name), profile)
             }
-            done()
         }
     }
 }

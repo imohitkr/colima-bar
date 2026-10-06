@@ -1,5 +1,7 @@
 # Opens pull requests when a new version of a SHA-pinned action is available.
 # ColimaBar has no package dependencies, so only GitHub Actions is listed.
+# Dependabot cannot update the Docker images in ci.yml (a job `container:`
+# and `docker run` lines). Comments in ci.yml say how to update them.
 version: 2
 updates:
   - package-ecosystem: github-actions

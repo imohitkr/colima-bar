@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Testing
+import os
 
 @testable import ColimaBar
 
@@ -124,9 +125,10 @@ import Testing
         }
         #expect(waitUntil { woke.value == 1 }, "the first request did not start a wake")
         let second = DispatchSemaphore(value: 0)
-        var secondReply = ""
+        let secondReply = OSAllocatedUnfairLock(initialState: "")
         DispatchQueue.global().async {
-            secondReply = roundTrip(stable, "GET /v1.54/info HTTP/1.1\r\nHost: d\r\n\r\n")
+            let reply = roundTrip(stable, "GET /v1.54/info HTTP/1.1\r\nHost: d\r\n\r\n")
+            secondReply.withLock { $0 = reply }
             second.signal()
         }
         // Nothing signals that the proxy holds the second request, so give it
@@ -136,6 +138,6 @@ import Testing
         release.signal()
         #expect(first.wait(timeout: .now() + 5) == .success)
         #expect(second.wait(timeout: .now() + 5) == .success)
-        #expect(secondReply.contains("hello"))
+        #expect(secondReply.withLock { $0 }.contains("hello"))
     }
 }

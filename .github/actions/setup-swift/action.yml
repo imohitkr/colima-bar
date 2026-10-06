@@ -1,0 +1,63 @@
+name: Set up Swift
+description: >-
+  Install one exact Swift.org toolchain with swiftly and put it on PATH for the
+  later steps of the job. macOS runners only.
+inputs:
+  version:
+    description: The exact Swift version, for example 6.4.0.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Install swiftly and Swift ${{ inputs.version }}
+      shell: bash
+      env:
+        SWIFT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        pkg="$RUNNER_TEMP/swiftly.pkg"
+        # HTTPS only, from download.swift.org, with no redirects.
+        curl --fail --silent --show-error --proto '=https' --tlsv1.2 \
+          --output "$pkg" https://download.swift.org/swiftly/darwin/swiftly.pkg
+        # Install only a package that Swift Open Source signed and Apple notarized.
+        sig=$(pkgutil --check-signature "$pkg")
+        echo "$sig"
+        grep -q 'Developer ID Installer: Swift Open Source (V9AUD2URP3)' <<<"$sig"
+        grep -q 'Notarization: trusted by the Apple notary service' <<<"$sig"
+        installer -pkg "$pkg" -target CurrentUserHomeDirectory
+
+        "$HOME/.swiftly/bin/swiftly" init --assume-yes --no-modify-profile \
+          --skip-install --quiet-shell-followup
+        # shellcheck disable=SC1091  # swiftly init writes env.sh
+        . "${SWIFTLY_HOME_DIR:-$HOME/.swiftly}/env.sh"
+        swiftly install "$SWIFT_VERSION" --assume-yes
+        swiftly use --global-default --assume-yes "$SWIFT_VERSION"
+
+        # Later steps find the swiftly proxies (swift, swiftc) before Xcode.
+        echo "$SWIFTLY_BIN_DIR" >>"$GITHUB_PATH"
+        for var in SWIFTLY_HOME_DIR SWIFTLY_BIN_DIR SWIFTLY_TOOLCHAINS_DIR; do
+          if [ -n "${!var:-}" ]; then echo "$var=${!var}" >>"$GITHUB_ENV"; fi
+        done
+
+    - name: Check the Swift version
+      shell: bash
+      env:
+        SWIFT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        swift --version
+        swiftly use --print-location
+        if [ "$(command -v swift)" != "$SWIFTLY_BIN_DIR/swift" ]; then
+          echo "::error::swift is $(command -v swift), not the swiftly proxy"
+          exit 1
+        fi
+        # Swift prints 6.4 for 6.4.0, so add a missing patch number.
+        actual=$(swift --version 2>&1 | sed -nE 's/.*Swift version ([0-9]+\.[0-9]+(\.[0-9]+)?).*/\1/p' | head -n 1)
+        case "$actual" in
+          *.*.*) ;;
+          *) actual="$actual.0" ;;
+        esac
+        if [ "$actual" != "$SWIFT_VERSION" ]; then
+          echo "::error::Swift is $actual, not $SWIFT_VERSION"
+          exit 1
+        fi

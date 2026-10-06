@@ -6,7 +6,7 @@ This file guides AI coding agents that work on this repository. Human contributo
 
 ColimaBar is a native macOS menu bar app for [Colima](https://github.com/abiosoft/colima). It shows the VM and its containers in a dashboard.
 Its proxy socket starts the VM when the first real docker request arrives (auto-start). It can stop an idle VM (auto-stop).
-It uses Swift 5.10 and SwiftPM with Command Line Tools only. It runs on Apple silicon with macOS 14 or later. It has no third-party dependencies.
+It uses Swift 6.4 and SwiftPM, in the Swift 6 language mode, with Command Line Tools only. It runs on Apple silicon with macOS 14 or later. It has no third-party dependencies.
 
 ## Commands
 
@@ -15,7 +15,7 @@ It uses Swift 5.10 and SwiftPM with Command Line Tools only. It runs on Apple si
 | `make build` | Build `build/ColimaBar.app`. |
 | `make test` | Run the tests. |
 | `timeout 300 swift test` | Run the tests with a time limit. On macOS, `timeout` comes from GNU coreutils and can be named `gtimeout`. |
-| `make lint` | Check the Swift format (`.swift-format`) and, if ShellCheck is installed, the shell scripts. |
+| `make lint` | Check the Swift format (`.swift-format`), the shell scripts (ShellCheck 0.11.0) and the workflows (actionlint 1.7.12). If ShellCheck or actionlint is not installed, it uses docker. If docker does not work, it skips that check. |
 | `make fmt` | Format the Swift code in place. |
 | `make check` | Run `make lint`, then `make test`. |
 | `make dmg` | Build the disk image. |

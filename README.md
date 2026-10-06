@@ -13,7 +13,7 @@
   <a href="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml"><img src="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
   <img src="https://img.shields.io/badge/Apple%20silicon-only-black?logo=apple" alt="Apple silicon only">
-  <img src="https://img.shields.io/badge/Swift-5.10-F05138?logo=swift&logoColor=white" alt="Swift 5.10">
+  <img src="https://img.shields.io/badge/Swift-6.4-F05138?logo=swift&logoColor=white" alt="Swift 6.4">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
   <a href="https://github.com/sponsors/imohitkr"><img src="https://img.shields.io/badge/sponsor-%E2%99%A5-ea4aaa?logo=githubsponsors&logoColor=white" alt="Sponsor"></a>
 </p>
@@ -109,7 +109,7 @@ Use `ColimaBar.zip` in place of `ColimaBar.dmg` for the zip file. Releases made 
 
 ### From source
 
-You need the Xcode Command Line Tools.
+You need Swift 6.4: the Xcode Command Line Tools with Swift 6.4, or Swift 6.4 from [swiftly](https://www.swift.org/install/macos/).
 
 ```sh
 git clone https://github.com/imohitkr/colima-bar && cd colima-bar
@@ -278,6 +278,7 @@ The script does these steps:
 
 ## Roadmap
 
+- Keep the logs of auto-removed containers (`--rm`, testcontainers) that fail, for a few minutes after they exit
 - kubectl context and namespace switcher
 - Global hotkey
 - Docker context switcher for remote daemons
