@@ -88,10 +88,19 @@ enum Routing {
 
     static func testcontainersHost() -> String? {
         guard let text = try? String(contentsOfFile: Paths.testcontainersProps, encoding: .utf8) else { return nil }
-        return text.split(separator: "\n").lazy
-            .map { $0.trimmingCharacters(in: .whitespaces) }
-            .first { $0.hasPrefix("docker.host=") }
-            .map { String($0.dropFirst("docker.host=".count)) }
+        return text.split(separator: "\n").lazy.compactMap { dockerHostValue($0) }.first
+    }
+
+    /// The value of a `docker.host` line in a Java properties file, or nil.
+    /// Java allows spaces around the key and `=` or `:` as the separator, so
+    /// this matches `^\s*docker\.host\s*[=:]\s*(.*)$`. A `#` comment line
+    /// doesn't match.
+    nonisolated static func dockerHostValue<S: StringProtocol>(_ line: S) -> String? {
+        var rest = line.drop { $0 == " " || $0 == "\t" }
+        guard rest.hasPrefix("docker.host") else { return nil }
+        rest = rest.dropFirst("docker.host".count).drop { $0 == " " || $0 == "\t" }
+        guard let sep = rest.first, sep == "=" || sep == ":" else { return nil }
+        return rest.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Sets docker.host unless the user already points it somewhere that
@@ -102,7 +111,7 @@ enum Routing {
         guard current != stableHost else { return }
         var lines = ((try? String(contentsOfFile: Paths.testcontainersProps, encoding: .utf8)) ?? "")
             .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("docker.host=") }
+            .filter { dockerHostValue($0) == nil }
         while lines.last == "" { lines.removeLast() }
         lines.append("docker.host=\(stableHost)")
         // Write through a symlink (dotfile managers) and keep the file's mode;
@@ -175,17 +184,23 @@ enum LoginItem {
     /// The job is loaded in launchd (running or not).
     static var isLoaded: Bool { launchctl(["print", "\(domain)/\(label)"]).ok }
 
-    /// On: writes the plist and, if the job isn't loaded, bootstraps it, which
-    /// starts the agent (RunAtLoad) and the agent takes over from this copy.
+    /// On: writes the plist and loads the job, which starts the agent
+    /// (RunAtLoad). The agent then takes over from this copy, the same way as
+    /// at launch: it quits this copy and waits for it to exit. If launchd
+    /// refuses the job, this copy keeps running unsupervised.
+    /// The job can still be loaded when the agent turned launch at login off
+    /// and then quit. A copy started by hand reloads it, so launchd reads the
+    /// new plist and starts the agent. The agent itself only writes the plist:
+    /// its job is still loaded and keeps it alive.
     /// Off: removes the plist, so it won't start at the next login. When this
     /// copy *is* the agent, the job stays loaded until logout: unloading it
     /// would kill this process (and the proxy) on the spot.
     static func set(_ on: Bool) throws {
         if on {
             try writePlist()
-            guard !isLoaded else { return }
-            let r = launchctl(["bootstrap", domain, plistPath])
-            if !r.ok { log.error("launchctl bootstrap failed: \(r.out, privacy: .public)") }
+            if AppDelegate.isLaunchAgent { return }
+            if isLoaded { launchctl(["bootout", "\(domain)/\(label)"]) }
+            bootstrap()
         } else {
             try? FileManager.default.removeItem(atPath: plistPath)
             if !AppDelegate.isLaunchAgent { launchctl(["bootout", "\(domain)/\(label)"]) }
@@ -210,7 +225,22 @@ enum LoginItem {
         log.notice("login agent points at another binary; updating it")
         try? writePlist()
         launchctl(["bootout", "\(domain)/\(label)"])
-        launchctl(["bootstrap", domain, plistPath])
+        bootstrap()
+    }
+
+    /// Loads the job. Right after a bootout, launchd can still be removing
+    /// the old job and refuse the bootstrap for a moment, so retry briefly.
+    @discardableResult
+    private static func bootstrap() -> Bool {
+        var r = launchctl(["bootstrap", domain, plistPath])
+        var tries = 0
+        while !r.ok, !isLoaded, tries < 10 {
+            usleep(200_000)
+            r = launchctl(["bootstrap", domain, plistPath])
+            tries += 1
+        }
+        if !r.ok, !isLoaded { log.error("launchctl bootstrap failed: \(r.out, privacy: .public)") }
+        return r.ok || isLoaded
     }
 
     /// Asks launchd to start the agent now, loading it first if needed.

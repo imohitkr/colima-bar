@@ -78,9 +78,17 @@ enum Shell {
                 p.standardError = args.first == Paths.ctl ? ctlLogHandle() : FileHandle.nullDevice
                 p.standardInput = FileHandle.nullDevice
                 let out = OutputBuffer()
+                // Only this handler reads the pipe, so reads never overlap.
+                // Empty data means EOF: every writer has closed the pipe.
+                let eof = DispatchSemaphore(value: 0)
                 pipe.fileHandleForReading.readabilityHandler = { h in
                     let d = h.availableData
-                    if !d.isEmpty { out.append(d) }
+                    if d.isEmpty {
+                        h.readabilityHandler = nil
+                        eof.signal()
+                    } else {
+                        out.append(d)
+                    }
                 }
                 let exited = DispatchSemaphore(value: 0)
                 p.terminationHandler = { _ in exited.signal() }
@@ -96,17 +104,11 @@ enum Shell {
                         exited.wait()
                     }
                 }
-                // Let the last buffered output arrive, then stop reading. No
-                // blocking read: an orphaned grandchild may keep the pipe open.
-                usleep(100_000)
-                pipe.fileHandleForReading.readabilityHandler = nil
-                let fd = pipe.fileHandleForReading.fileDescriptor
-                _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
-                var buf = [UInt8](repeating: 0, count: 65536)
-                while true {
-                    let n = read(fd, &buf, buf.count)
-                    if n <= 0 { break }
-                    out.append(Data(buf[0..<n]))
+                // Wait for the handler to read the last output and see EOF. An
+                // orphaned grandchild may keep the pipe open, so wait 0.5 s at
+                // most and drop any output that arrives later.
+                if eof.wait(timeout: .now() + 0.5) == .timedOut {
+                    pipe.fileHandleForReading.readabilityHandler = nil
                 }
                 cont.resume(returning: Result(status: p.terminationStatus, out: out.string))
             }

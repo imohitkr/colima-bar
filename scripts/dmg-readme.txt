@@ -6,21 +6,23 @@ ColimaBar
 
 First launch
 ------------
-ColimaBar is not notarized by Apple. The first time you open it, macOS shows
-"Apple could not verify ColimaBar". Do this one time:
+Apple does not notarize ColimaBar. Thus the first launch shows
+"Apple could not verify ColimaBar". Do these steps one time:
 
 1. Click Done.
 2. Open System Settings > Privacy & Security.
 3. Scroll down. Next to "ColimaBar was blocked", click Open Anyway.
 4. Enter your password, then click Open Anyway again.
 
-Or run this command in Terminal, then open ColimaBar:
+As an alternative, run this command in Terminal, then open ColimaBar:
 
     xattr -dr com.apple.quarantine /Applications/ColimaBar.app
 
-To skip these steps, install with the one-line installer instead:
+The installer does not need these steps. To use the installer, run this
+command in Terminal:
 
     curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | bash
 
-Requirements: a Mac with Apple silicon, macOS 14 or later, Colima (brew install colima docker).
-More: https://github.com/imohitkr/colima-bar
+Requirements: a Mac with Apple silicon, macOS 14 or later, and Colima.
+To install Colima, run: brew install colima docker
+More information: https://github.com/imohitkr/colima-bar

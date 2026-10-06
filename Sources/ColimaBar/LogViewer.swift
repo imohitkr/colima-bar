@@ -20,11 +20,12 @@ struct LogLine: Identifiable, Equatable {
 
 /// Docker multiplexes stdout/stderr of non-TTY containers into frames:
 /// [stream(1), 0, 0, 0, size(4, big-endian)] + payload. TTY containers send
-/// raw text. Keeps partial lines per stream between reads.
+/// raw text. Keeps partial lines per stream between reads as raw bytes, so a
+/// UTF-8 character split across reads or frames stays intact.
 struct LogDemuxer {
     let tty: Bool
     private var buffer = Data()
-    private var partial: [Bool: String] = [false: "", true: ""]
+    private var partial: [Bool: Data] = [false: Data(), true: Data()]
 
     init(tty: Bool) { self.tty = tty }
 
@@ -32,7 +33,7 @@ struct LogDemuxer {
     mutating func feed(_ data: Data) -> [(String, Bool)] {
         var out: [(String, Bool)] = []
         if tty {
-            split(String(decoding: data, as: UTF8.self), stderr: false, into: &out)
+            split(data, stderr: false, into: &out)
             return out
         }
         buffer.append(data)
@@ -42,18 +43,24 @@ struct LogDemuxer {
             guard buffer.count >= 8 + size else { break }
             let payload = buffer[(b + 8)..<(b + 8 + size)]
             let isErr = buffer[b] == 2
-            split(String(decoding: payload, as: UTF8.self), stderr: isErr, into: &out)
+            split(payload, stderr: isErr, into: &out)
             buffer.removeSubrange(b..<(b + 8 + size))
         }
         return out
     }
 
-    private mutating func split(_ s: String, stderr: Bool, into out: inout [(String, Bool)]) {
-        var text = (partial[stderr] ?? "") + s
-        var parts = text.components(separatedBy: "\n")
-        text = parts.removeLast()
-        partial[stderr] = text
-        for p in parts { out.append((p.hasSuffix("\r") ? String(p.dropLast()) : p, stderr)) }
+    /// Splits on "\n" at the byte level and decodes only whole lines.
+    private mutating func split(_ bytes: Data, stderr: Bool, into out: inout [(String, Bool)]) {
+        var pending = partial[stderr] ?? Data()
+        pending.append(bytes)
+        var start = pending.startIndex
+        while let nl = pending[start...].firstIndex(of: 0x0A) {
+            var end = nl
+            if end > start, pending[end - 1] == 0x0D { end -= 1 }   // drop "\r"
+            out.append((String(decoding: pending[start..<end], as: UTF8.self), stderr))
+            start = nl + 1
+        }
+        partial[stderr] = Data(pending[start...])
     }
 }
 
@@ -121,15 +128,22 @@ final class LogStore {
 
     private func connect(tail: Int) async {
         guard !closed else { return }
-        var tty = false
-        if let r = await api.get("/containers/\(containerID)/json"), r.ok,
-           let j = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
-           let config = j["Config"] as? [String: Any] {
-            tty = config["Tty"] as? Bool ?? false
-        } else {
+        // No reply means the socket refused or timed out, for example while
+        // `colima restart` runs. Only HTTP 404 means the container is gone.
+        guard let r = await api.get("/containers/\(containerID)/json") else {
+            reconnect(tail: tail, status: "Docker is not reachable. Retrying…")
+            return
+        }
+        if r.status == 404 {
             status = "This container has been removed, so its logs are gone."
             return
         }
+        guard r.ok, let j = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
+              let config = j["Config"] as? [String: Any] else {
+            reconnect(tail: tail, status: "Docker could not inspect the container (HTTP \(r.status)). Retrying…")
+            return
+        }
+        let tty = config["Tty"] as? Bool ?? false
         // The window may have closed while we waited for the inspect call.
         guard !closed else { return }
         var q = "follow=1&stdout=1&stderr=1&timestamps=1"
@@ -214,11 +228,16 @@ final class LogStore {
     /// Stream ends when the container stops or restarts: keep the window and
     /// reconnect from the last timestamp once it's back.
     private func ended() {
+        reconnect(tail: 0, status: "Container stopped. Waiting for it to start…")
+    }
+
+    /// Shows `status` and tries again after 2 s. A closed window stops the loop.
+    private func reconnect(tail: Int, status: String) {
         guard !closed else { return }
-        status = "Container stopped. Waiting for it to start…"
+        self.status = status
         Task {
             try? await Task.sleep(for: .seconds(2))
-            await connect(tail: 0)
+            await connect(tail: tail)
         }
     }
 

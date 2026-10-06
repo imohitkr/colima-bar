@@ -40,6 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     /// launchd sets XPC_SERVICE_NAME to the job label for the login agent.
     static let isLaunchAgent = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == LoginItem.label
+    /// An older copy started this one to replace itself after an update
+    /// (see relaunchIfUpdated()).
+    static let isReplacement = CommandLine.arguments.contains("--replace")
+    private var relaunching = false
 
     func applicationWillFinishLaunching(_ note: Notification) {
         // Before launch completes, so a notification click that launched us
@@ -154,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// One instance only, and when launch at login is on, the one running is
     /// the launchd agent (KeepAlive relaunches it after a crash).
     /// - The agent copy takes over from a copy started by hand.
+    /// - A replacement copy (`--replace`) takes over from the older copy.
     /// - A copy started by hand while the agent is enabled asks launchd to
     ///   start the agent instead, then exits.
     /// - Otherwise a second copy sends the running one a reopen event (which
@@ -161,16 +166,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func ensureSingleSupervisedInstance() {
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
             .filter { $0 != .current }
-        if Self.isLaunchAgent {
+        if Self.isLaunchAgent || Self.isReplacement {
+            // Quitting runs the other copy's shutdown, which frees the proxy
+            // socket before this copy starts listening on it.
             for other in others { other.terminate() }
             let deadline = Date().addingTimeInterval(5)
             while others.contains(where: { !$0.isTerminated }), Date() < deadline {
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             }
             for other in others where !other.isTerminated { other.forceTerminate() }
-            return
-        }
-        if let other = others.first {
+            if Self.isLaunchAgent { return }
+        } else if let other = others.first {
             if let url = other.bundleURL {
                 // openApplication on a running app delivers a reopen event.
                 NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
@@ -385,12 +391,57 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // macOS persists isVisible per status item; don't start hidden next time.
         item?.isVisible = true
         if !Self.isDebugRun { model.shutdown() }
+        // A non-zero exit makes launchd start the agent again (KeepAlive).
+        if relaunching, Self.isLaunchAgent { exit(EX_TEMPFAIL) }
+    }
+
+    /// CFBundleShortVersionString as it is on disk now. Bundle.main caches
+    /// the Info.plist it read at launch.
+    nonisolated static func onDiskVersion(of bundle: URL) -> String? {
+        let plist = NSDictionary(contentsOf: bundle.appendingPathComponent("Contents/Info.plist"))
+        return plist?["CFBundleShortVersionString"] as? String
+    }
+
+    /// An update (DMG, installer) replaces the bundle while this process
+    /// runs. Opening the app then only sends a reopen event to this old
+    /// process, so the new version never starts. Restart into the new code:
+    /// - The agent quits with a non-zero exit, and launchd starts it again.
+    /// - A copy started by hand opens a new instance with `--replace`, then
+    ///   quits. The new instance waits until this copy has quit (and freed
+    ///   the proxy socket) instead of sending it a reopen event.
+    /// Returns true if a restart has begun.
+    private func relaunchIfUpdated() -> Bool {
+        guard !Self.isDebugRun, !relaunching,
+              let onDisk = Self.onDiskVersion(of: Bundle.main.bundleURL), onDisk != Self.version
+        else { return false }
+        relaunching = true
+        log.notice("bundle on disk is \(onDisk, privacy: .public), running \(Self.version, privacy: .public); restarting")
+        if Self.isLaunchAgent {
+            NSApp.terminate(nil)
+            return true
+        }
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.createsNewApplicationInstance = true
+        cfg.arguments = ["--replace"]
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { [weak self] _, error in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if let error {
+                    // Keep this copy running, so the proxy stays up.
+                    self.log.error("couldn't start the new version: \(error.localizedDescription, privacy: .public)")
+                    self.relaunching = false
+                    return
+                }
+                NSApp.terminate(nil)
+            }
+        }
+        return true
     }
 
     /// Opening the app again (Spotlight, Finder, `open -a ColimaBar`) brings a
     /// hidden icon back and opens the dashboard so Colima can be started.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        guard item != nil else { return false }
+        guard item != nil, !relaunchIfUpdated() else { return false }
         // Only override the option while the icon is actually hidden;
         // otherwise the next stop would leave it visible.
         if model.iconHidden { model.revealIcon = true }

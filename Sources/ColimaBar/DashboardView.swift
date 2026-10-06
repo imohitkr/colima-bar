@@ -174,6 +174,12 @@ struct FooterView: View {
             IconButton("doc.text", Help.config) { model.ctl("config") }
             IconButton("list.bullet.rectangle", Help.log) { model.ctl("logs") }
             Spacer()
+            Button { Task { await Updater.shared.check(manual: true) } } label: {
+                Text("v\(AppDelegate.version)").font(.caption2.monospacedDigit())
+                    .lineLimit(1).truncationMode(.middle).frame(maxWidth: 120)
+            }
+            .buttonStyle(.borderless).foregroundStyle(.secondary)
+            .hint(Help.version(AppDelegate.version))
             if let r = Updater.shared.available {
                 Button { Updater.shared.openReleasePage() } label: {
                     Label("Update \(r.version)", systemImage: "arrow.down.circle.fill")

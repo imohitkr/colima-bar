@@ -178,7 +178,11 @@ final class ColimaModel {
         }
         if visibleCount > 0 { publishStats() }
 
-        if n % (visibleCount > 0 ? 3 : 10) == 0 {
+        // A containerd profile has no docker socket, so a ping says nothing
+        // about it. Refresh its state only when it is 60 s old.
+        if !hasDockerSocket {
+            if Date().timeIntervalSince(lastColima) > 60 { await refreshStatus() }
+        } else if n % (visibleCount > 0 ? 3 : 10) == 0 {
             let ping = await api.get("/_ping", timeout: 2)
             let up = ping?.ok ?? false
             if let v = ping?.headers["api-version"], v != proxy.apiVersion {
@@ -193,6 +197,15 @@ final class ColimaModel {
             }
         }
         checkIdle()
+    }
+
+    /// False when the profile's runtime is known and isn't docker (e.g.
+    /// containerd): then no docker socket answers, so ColimaBar doesn't ping
+    /// it, stream its events or list its containers.
+    private var hasDockerSocket: Bool { Self.hasDockerSocket(runtime: vm.runtime) }
+
+    nonisolated static func hasDockerSocket(runtime: String) -> Bool {
+        runtime.isEmpty || runtime == "docker"
     }
 
     /// The selected profile's busy marker, or the label of an action this app
@@ -330,6 +343,7 @@ final class ColimaModel {
     /// True if the list was refreshed from the daemon.
     @discardableResult
     func refreshContainers() async -> Bool {
+        guard hasDockerSocket else { return false }
         let gen = generation
         guard let r = await api.get("/containers/json?all=1"), r.ok, gen == generation, state == .running,
               let list = try? JSONDecoder().decode([APIContainer].self, from: r.body) else { return false }
@@ -417,7 +431,7 @@ final class ColimaModel {
             return false
         }
         // Only the docker runtime has a docker socket to wait for.
-        if !vm.runtime.isEmpty, vm.runtime != "docker" {
+        if !hasDockerSocket {
             log.notice("profile \(p, privacy: .public) uses the \(self.vm.runtime, privacy: .public) runtime; not auto-starting")
             return false
         }
@@ -594,6 +608,7 @@ final class ColimaModel {
     // MARK: - Events
 
     private func startEvents() {
+        guard hasDockerSocket else { return }
         let filters = DockerAPI.q(#"{"type":["container","image","volume"]}"#)
         let gen = generation
         events = api.stream("/events?filters=\(filters)", onLine: { [weak self] line in

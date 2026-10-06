@@ -113,6 +113,29 @@ import Testing
         #expect(d.feed(Data("a\r\nb\n".utf8)).map(\.0) == ["a", "b"])
     }
 
+    @Test func ttyKeepsMultibyteCharacterSplitAcrossReads() {
+        var d = LogDemuxer(tty: true)
+        let bytes = Data("héllo ✓\n".utf8)
+        let cut = bytes.firstIndex(of: 0xC3)! + 1      // inside "é"
+        #expect(d.feed(bytes.prefix(cut)).isEmpty)
+        #expect(d.feed(bytes.dropFirst(cut)).map(\.0) == ["héllo ✓"])
+    }
+
+    @Test func framesKeepMultibyteCharacterSplitAcrossFrames() {
+        var d = LogDemuxer(tty: false)
+        let bytes = Data("✓ok\n".utf8)
+        var first = frame(1, ""), second = frame(1, "")
+        first.append(bytes.prefix(1)); first[7] = 1      // first byte of "✓"
+        second.append(bytes.dropFirst(1)); second[7] = UInt8(bytes.count - 1)
+        #expect(d.feed(first).isEmpty)
+        #expect(d.feed(second).map(\.0) == ["✓ok"])
+    }
+
+    @Test func keepsEmptyLines() {
+        var d = LogDemuxer(tty: true)
+        #expect(d.feed(Data("a\n\nb\n".utf8)).map(\.0) == ["a", "", "b"])
+    }
+
     @Test @MainActor func clockTrimsNanoseconds() {
         let t = LogStore.clock("2026-10-02T14:03:11.123456789Z")
         #expect(t.count == 12)          // HH:mm:ss.SSS in local time
