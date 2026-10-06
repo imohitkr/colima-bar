@@ -12,7 +12,8 @@
 - [ ] `make lint` passes.
 - [ ] I ran the app (`./build.sh install` or a `--snapshot` run).
 - [ ] I added screenshots for UI changes.
-- [ ] I updated the README and the hover hints in `Help.swift`, if needed.
+- [ ] I updated the docs (`docs/`, `README.md`, `ARCHITECTURE.md`) and the hover hints in `Help.swift`, if needed.
+- [ ] I added a line under `[Unreleased]` in `CHANGELOG.md`, if users see the change.
 
 ## Risk
 

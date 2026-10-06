@@ -27,18 +27,11 @@ For screenshots, use a debug run: `build/ColimaBar.app/Contents/MacOS/ColimaBar 
 
 ## Layout
 
-Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds one type, or one type and its small private helpers. The file has the name of the type. An extension file has the name `Type+Topic.swift`.
+[ARCHITECTURE.md](ARCHITECTURE.md) has the code map of `Sources/ColimaBar/` and the main data flows. Read it before a large change.
 
-- `App/`: the app delegate with the menu bar icon, popover, dashboard window and debug flags (`AppDelegate.swift`). Other files hold the restart after an update (`AppDelegate+Relaunch.swift`), the main menu and the debug snapshots.
-- `Model/`: the `@Observable` model with auto-start wake and auto-stop (`ColimaModel.swift`). Its static rules are in `ColimaModel+Rules.swift`, `ColimaModel+Events.swift` and `ColimaModel+StartDetection.swift`. The folder also has the row types (`Models.swift`), `DFGate`, `LatestOnly`, `VMState` and `IdleMinutes`.
-- `Docker/`: the Docker Engine API client over the unix socket (`DockerAPI.swift`) and the JSON wire types (`DockerJSON.swift`).
-- `Proxy/`: the auto-start proxy (`SocketProxy.swift`), its HTTP parsers (`SocketProxy+HTTP.swift`) and the unix socket helpers (`UnixSocket.swift`).
-- `System/`: paths, the process runner, docker routes, the login item, notifications, the release check, `UserDefaults` access, the Colima directory watcher and the open file limit.
-- `Logs/`: log windows: the line parsers, the filter, the buffer, `LogStore`, `LogView` and `LogWindows`.
-- `Views/`: the dashboard UI. `Dashboard/` has the frame, header, footer and live tiles. `Containers/` and `System/` have those tabs. `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), the hint text (`Help.swift`) and small shared views.
-- `Support/`: small helpers with no app state: `Parse`, byte formatting and bounded concurrency.
-- `Tests/ColimaBarTests/`: Swift Testing tests, in the same folders as the sources. `TestSupport/` has the shared fakes and helpers.
-- `scripts/`: `colima-ctl.sh`, the installer, the uninstall script, the icon generator.
+Each file holds one type, or one type and its small private helpers. The file has the name of the type. An extension file has the name `Type+Topic.swift`. Tests in `Tests/ColimaBarTests/` use the same folders as the sources.
+
+User guides live in `docs/`. `README.md` is a short summary for users.
 
 ## Invariants
 
@@ -73,14 +66,15 @@ Use a light form of ASD-STE100 for docs, comments, hints, notifications, error m
 - Write one idea per sentence. Keep instructions to about 20 words.
 - Use the active voice and the imperative for instructions.
 - Put conditions before commands.
-- Use one term for one concept. Use the README terms: dashboard, auto-start, auto-stop, the installer, the disk image, profile, VM.
+- Use one term for one concept. Use the terms of the docs: dashboard, auto-start, auto-stop, the installer, the disk image, the login item, profile, VM.
 - Use plain words. Do not use filler.
 - Keep code, identifiers and command output exact.
 
-If you add or change a control, update its hint text in `Views/Shared/Help.swift`. If you change behavior that users see, update `README.md`.
+If you add or change a control, update its hint text in `Views/Shared/Help.swift`. If you change behavior that users see, update the user guide in `docs/`, and `README.md` if the summary changes. If you change the design, update `ARCHITECTURE.md`.
 
 ## Commits and pull requests
 
 - Write the commit subject in the imperative mood, for example "Fix the log viewer scroll". In the body, explain why.
 - Keep each pull request small and about one change. Fill in the pull request template.
+- Add a line under `[Unreleased]` in `CHANGELOG.md` for each change that users see.
 - Do not add AI attribution anywhere. This includes `Co-Authored-By` trailers for an AI, "Generated with" lines and similar notes in code, docs, commits or pull requests.
