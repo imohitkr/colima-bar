@@ -7,6 +7,15 @@ struct LogLine: Identifiable, Equatable {
     let time: String     // HH:mm:ss.SSS, local time
     let text: String
     let stderr: Bool
+    let lower: String    // text lower-cased once, for filtering
+
+    init(id: Int, time: String, text: String, stderr: Bool) {
+        self.id = id
+        self.time = time
+        self.text = text
+        self.stderr = stderr
+        self.lower = text.lowercased()
+    }
 }
 
 /// Docker multiplexes stdout/stderr of non-TTY containers into frames:
@@ -55,11 +64,15 @@ final class LogStore {
     let containerID: String
     let name: String
     var lines: [LogLine] = []
-    var search = ""
+    /// `lines` after the search and stderr filters. Kept up to date
+    /// incrementally: new lines are filtered once as they arrive, and only a
+    /// filter change re-filters everything.
+    private(set) var visible: [LogLine] = []
+    var search = "" { didSet { if search != oldValue { refilter() } } }
     var follow = true
     var showTime = true
     var wrap = true
-    var stderrOnly = false
+    var stderrOnly = false { didSet { if stderrOnly != oldValue { refilter() } } }
     var status = "Connecting…"
 
     @ObservationIgnored private let api: DockerAPI
@@ -77,9 +90,13 @@ final class LogStore {
         self.name = name
     }
 
-    var visible: [LogLine] {
+    private func matches(_ l: LogLine, _ q: String) -> Bool {
+        (!stderrOnly || l.stderr) && (q.isEmpty || l.lower.contains(q))
+    }
+
+    private func refilter() {
         let q = search.lowercased()
-        return lines.filter { (!stderrOnly || $0.stderr) && (q.isEmpty || $0.text.lowercased().contains(q)) }
+        visible = lines.filter { matches($0, q) }
     }
 
     func start() {
@@ -93,7 +110,10 @@ final class LogStore {
         handle = nil
     }
 
-    func clear() { lines.removeAll() }
+    func clear() {
+        lines.removeAll()
+        visible.removeAll()
+    }
 
     var allText: String {
         visible.map { showTime ? "\($0.time)  \($0.text)" : $0.text }.joined(separator: "\n")
@@ -110,17 +130,48 @@ final class LogStore {
             status = "This container has been removed, so its logs are gone."
             return
         }
+        // The window may have closed while we waited for the inspect call.
+        guard !closed else { return }
         var q = "follow=1&stdout=1&stderr=1&timestamps=1&tail=\(tail)"
-        if let since = lastTimestamp { q += "&since=\(DockerAPI.q(since))" }
+        if let ts = lastTimestamp, let since = Self.sinceParam(ts) { q += "&since=\(since)" }
         status = "Live"
         let box = DemuxBox(LogDemuxer(tty: tty))
         handle = api.streamRaw("/containers/\(containerID)/logs?\(q)", onData: { [weak self] data in
             let lines = box.feed(data)
             guard !lines.isEmpty else { return }
             Task { @MainActor in self?.receive(lines) }
-        }, onEnd: { [weak self] in
-            Task { @MainActor in self?.ended() }
+        }, onEnd: { [weak self] h in
+            Task { @MainActor in
+                guard let self, self.handle === h else { return }
+                if let s = h.status, !(200..<300).contains(s) {
+                    self.status = "Docker refused the log request (HTTP \(s))."
+                    return
+                }
+                self.ended()
+            }
         })
+    }
+
+    /// The Engine API takes `since` as UNIX "seconds.nanoseconds", not the
+    /// RFC 3339 timestamps it prints. `since` is inclusive, so this adds 1 ns
+    /// to skip the line we already have.
+    static func sinceParam(_ ts: String) -> String? {
+        let parts = ts.split(separator: ".", maxSplits: 1)
+        var base = String(parts[0])
+        var frac = ""
+        if parts.count == 2 {
+            let rest = parts[1]
+            frac = String(rest.prefix { $0.isNumber })
+            base += String(rest.drop { $0.isNumber })   // the zone suffix, e.g. "Z"
+        }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime]
+        guard let date = f.date(from: base) else { return nil }
+        var secs = Int64(date.timeIntervalSince1970.rounded())
+        var nanos = Int64(String((frac + "000000000").prefix(9))) ?? 0
+        nanos += 1
+        if nanos >= 1_000_000_000 { nanos -= 1_000_000_000; secs += 1 }
+        return "\(secs).\(String(format: "%09lld", nanos))"
     }
 
     private func receive(_ raw: [(String, Bool)]) {
@@ -142,9 +193,16 @@ final class LogStore {
         Task {
             try? await Task.sleep(for: .milliseconds(100))
             flushScheduled = false
+            let q = search.lowercased()
             lines.append(contentsOf: pending)
+            visible.append(contentsOf: pending.filter { matches($0, q) })
             pending.removeAll()
-            if lines.count > maxLines { lines.removeFirst(lines.count - maxLines) }
+            if lines.count > maxLines {
+                lines.removeFirst(lines.count - maxLines)
+                if let first = lines.first?.id {
+                    visible.removeFirst(visible.firstIndex(where: { $0.id >= first }) ?? visible.count)
+                }
+            }
         }
     }
 

@@ -47,8 +47,9 @@ cat > "$APP/Contents/Info.plist" <<EOF
 </plist>
 EOF
 
-# Login agent (registered via SMAppService): starts at login and relaunches
-# after a crash; a normal Quit (exit 0) is left alone.
+# Legacy SMAppService agent plist (v0.2.0 and earlier). ColimaBar no longer
+# registers it; it stays in the bundle only so SMAppService can find and
+# unregister an old registration (LoginItem.migrate).
 cat > "$APP/Contents/Library/LaunchAgents/${ID}.agent.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -56,15 +57,12 @@ cat > "$APP/Contents/Library/LaunchAgents/${ID}.agent.plist" <<EOF
 <dict>
   <key>Label</key><string>${ID}.agent</string>
   <key>BundleProgram</key><string>Contents/MacOS/ColimaBar</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-  <key>ProcessType</key><string>Interactive</string>
-  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>RunAtLoad</key><false/>
 </dict>
 </plist>
 EOF
 
-# Ad-hoc signature: required for SMAppService and notifications.
+# Ad-hoc signature: required for notifications.
 codesign --force --sign - "$APP" >/dev/null
 echo "built $APP ($VERSION)"
 

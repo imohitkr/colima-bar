@@ -61,7 +61,7 @@ xattr -dr com.apple.quarantine ~/Applications/ColimaBar.app
 ## Features
 
 - **Auto-start on demand**: every docker client goes through ColimaBar's socket, which boots Colima when a real request arrives (see below)
-- **Auto-stop when idle** (opt-in): stop the VM after 15/30/60 min with no running containers
+- **Auto-stop when idle** (opt-in): stop the VM after 5, 15, 30 or 60 minutes, or a custom time, with no running containers and no docker builds, pulls or pushes
 - **Hide the icon while Colima is stopped** (opt-in): the icon leaves the menu bar, but ColimaBar keeps running, so a docker command still starts Colima. Open ColimaBar from Spotlight to show the icon again.
 - **Live usage**: aggregate container CPU and memory as a share of the VM, with 60-second sparklines
 - **Containers**: grouped by Compose project (start/stop/restart a whole project), health badges, per-container CPU/mem, `localhost` port links, restart/stop/start/remove, shell, filter, "running only"

@@ -53,8 +53,13 @@ final class ColimaModel {
     var autoStop = Defaults.bool("autoStop") ?? false {
         didSet { Defaults.set(autoStop, "autoStop"); idleSince = nil }
     }
-    var autoStopMinutes = Defaults.int("autoStopMinutes") ?? 30 {
-        didSet { Defaults.set(autoStopMinutes, "autoStopMinutes"); idleSince = nil }
+    var autoStopMinutes = Defaults.int("autoStopMinutes").map { min(max($0, 1), 1440) } ?? 30 {
+        didSet {
+            let v = min(max(autoStopMinutes, IdleMinutes.range.lowerBound), IdleMinutes.range.upperBound)
+            if v != autoStopMinutes { autoStopMinutes = v; return }
+            Defaults.set(autoStopMinutes, "autoStopMinutes")
+            idleSince = nil
+        }
     }
     var hideIconWhenStopped = Defaults.bool("hideIconWhenStopped") ?? false {
         didSet { Defaults.set(hideIconWhenStopped, "hideIconWhenStopped") }
@@ -68,14 +73,31 @@ final class ColimaModel {
     /// light heartbeat keep running so `docker` still wakes the VM.
     var iconHidden: Bool {
         Self.hidesIcon(enabled: hideIconWhenStopped, revealed: revealIcon, state: state,
-                       busy: busy != nil, dashboardOpen: visibleCount > 0)
+                       busy: busy != nil, dashboardOpen: visibleCount > 0,
+                       otherProfileRunning: profiles.contains { $0.running && $0.name != profile })
     }
 
-    /// The icon hides only when the VM is known to be stopped and nothing is
-    /// in progress. Unknown and not-installed states keep it visible.
-    nonisolated static func hidesIcon(enabled: Bool, revealed: Bool, state: VMState,
-                                      busy: Bool, dashboardOpen: Bool) -> Bool {
-        enabled && !revealed && state == .stopped && !busy && !dashboardOpen
+    /// The icon hides only when the VM is known to be stopped, nothing is in
+    /// progress and no other profile's VM runs. Unknown and not-installed
+    /// states keep it visible.
+    nonisolated static func hidesIcon(enabled: Bool, revealed: Bool, state: VMState, busy: Bool,
+                                      dashboardOpen: Bool, otherProfileRunning: Bool = false) -> Bool {
+        enabled && !revealed && state == .stopped && !busy && !dashboardOpen && !otherProfileRunning
+    }
+
+    /// The first time the icon ever hides, say where it went and how to get it
+    /// back. Only once per user, not once per hide or per launch.
+    func noteIconHiddenOnce() {
+        // Another instance (during a launch handover) may have just set the
+        // flag: re-read it from disk, and claim it atomically with a file.
+        CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
+        guard !Defaults.bool("toldIconHidden").orFalse else { return }
+        let marker = "\(Paths.cacheDir)/told-icon-hidden"
+        let fd = Darwin.open(marker, O_CREAT | O_EXCL | O_WRONLY, 0o600)
+        Defaults.set(true, "toldIconHidden")
+        guard fd >= 0 else { return }   // someone else claimed it first
+        close(fd)
+        Notifier.shared.post("The icon is hidden while Colima is stopped. It comes back when Colima starts. To show it now, open ColimaBar from Spotlight.")
     }
 
     /// Number of dashboard surfaces (popover, window) currently on screen.
@@ -104,6 +126,8 @@ final class ColimaModel {
     private var lastColima = Date.distantPast
     private var isDebug = false
     private var generation = 0                 // bumps on profile switch; stale callbacks are ignored
+    private var stopping = false               // an auto-stop check is confirming
+    private var localBusy: String?             // VM action launched here, marker not written yet
     private let historyLen = 60
 
     init() {
@@ -143,7 +167,7 @@ final class ColimaModel {
     /// 1s heartbeat. Cheap work only: a stat() of the busy marker, publishing
     /// the stat streams' latest numbers, and a socket /_ping every few seconds.
     private func tick(_ n: Int) async {
-        let b = Self.readBusy()
+        let b = readBusy()
         if b != busy {
             let finished = busy != nil && b == nil
             busy = b
@@ -168,16 +192,23 @@ final class ColimaModel {
         checkIdle()
     }
 
+    /// The selected profile's busy marker, or the label of an action this app
+    /// just launched whose script hasn't written its marker yet.
+    private func readBusy() -> String? {
+        Self.readBusyMarker(profile) ?? localBusy
+    }
+
     /// The busy marker colima-ctl.sh writes while a long action runs. One left
     /// behind by a killed script is ignored after 20 minutes.
-    private static func readBusy() -> String? {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: Paths.busy),
+    nonisolated private static func readBusyMarker(_ profile: String) -> String? {
+        let path = Paths.busy(profile)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
               let mtime = attrs[.modificationDate] as? Date else { return nil }
         if Date().timeIntervalSince(mtime) > 20 * 60 {
-            try? FileManager.default.removeItem(atPath: Paths.busy)
+            try? FileManager.default.removeItem(atPath: path)
             return nil
         }
-        return (try? String(contentsOfFile: Paths.busy, encoding: .utf8))?
+        return (try? String(contentsOfFile: path, encoding: .utf8))?
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Working"
     }
 
@@ -200,8 +231,22 @@ final class ColimaModel {
         let gen = generation
         let r = await Shell.run(["colima", "list", "-j"], timeout: 10)
         guard gen == generation else { return }
+        // A slow or failed `colima list` says nothing about the VM: keep the
+        // current state instead of treating it as "stopped".
+        guard r.ok else {
+            log.error("colima list failed (status \(r.status)); keeping state")
+            return
+        }
         let dec = JSONDecoder()
         let all = r.out.split(separator: "\n").compactMap { try? dec.decode(ColimaListJSON.self, from: Data($0.utf8)) }
+        // The selected profile was deleted (`colima delete -p X`): fall back
+        // to default, so auto-start never provisions a fresh VM under the old
+        // name. profile's didSet switches over and refreshes again.
+        if profile != "default", !all.isEmpty, !all.contains(where: { ($0.name ?? "default") == profile }) {
+            log.notice("profile \(self.profile, privacy: .public) no longer exists; switching to default")
+            profile = "default"
+            return
+        }
         set(\.profiles, all.map {
             ProfileRow(name: $0.name ?? "default", running: $0.status == "Running", cpus: $0.cpus ?? 0,
                        memGB: Int(($0.memory ?? 0) / (1 << 30)))
@@ -219,6 +264,7 @@ final class ColimaModel {
             v.diskGB = Int((info.disk ?? 0) / (1 << 30))
             if newState == .running && (!wasRunning || v.driver.isEmpty) {
                 let s = await Shell.run(["colima", "status", "-j", "--profile", profile], timeout: 10)
+                guard gen == generation else { return }
                 if let st = try? dec.decode(ColimaStatusJSON.self, from: Data(s.out.utf8)) {
                     v.driver = st.driver ?? ""
                     v.mountType = st.mount_type ?? ""
@@ -238,6 +284,7 @@ final class ColimaModel {
             if !wasRunning {
                 revealIcon = false
                 await refreshContainers()
+                guard gen == generation else { return }
                 // `colima start` switches the docker context back to colima.
                 if !isDebug { Task {
                     await Routing.apply()
@@ -278,7 +325,7 @@ final class ColimaModel {
 
     func refreshContainers() async {
         let gen = generation
-        guard let r = await api.get("/containers/json?all=1"), r.ok, gen == generation,
+        guard let r = await api.get("/containers/json?all=1"), r.ok, gen == generation, state == .running,
               let list = try? JSONDecoder().decode([APIContainer].self, from: r.body) else { return }
         let mapped = list.map { c in
             Container(id: c.Id, name: c.Names.first.map { String($0.drop { $0 == "/" }) } ?? String(c.Id.prefix(12)),
@@ -340,29 +387,118 @@ final class ColimaModel {
 
     // MARK: - Auto-start / auto-stop
 
-    /// Called by the proxy (off the main thread) when a docker request arrives
-    /// while the VM is down: start it and wait until its socket answers.
+    /// Called by the proxy when a docker request arrives while the VM is down:
+    /// start it and return once Docker is really ready.
+    ///
+    /// "The socket accepts connections" is not ready: Lima's ssh tunnel opens
+    /// it seconds before dockerd, and Colima's provisioning restarts dockerd
+    /// and containerd a few times. A request in that window fails with
+    /// "Unavailable: error reading from server: EOF". So this waits for
+    /// `colima start` to exit, then for several successes in a row on an
+    /// endpoint that goes through containerd.
     private func wakeForProxy() async -> Bool {
-        let socket = Paths.socket(profile)
-        if UnixSocket.canConnect(socket) { return true }
-        log.notice("auto-starting profile \(self.profile, privacy: .public)")
-        if busy == nil {
-            Task { _ = await Shell.run([Paths.ctl, "start"], timeout: 600, extraEnv: ["COLIMABAR_PROFILE": profile]) }
+        let p = profile
+        let probe = DockerAPI(socketPath: Paths.socket(p))
+        // GET /images/json is served by containerd's image store.
+        let probePath = "/images/json?filters=" + DockerAPI.q(#"{"reference":["colimabar-readiness-probe"]}"#)
+        func ready() async -> Bool { await probe.get(probePath, timeout: 3)?.ok ?? false }
+
+        if readBusy() == nil, await ready() { return true }
+        if profile != "default", !profiles.isEmpty, !profiles.contains(where: { $0.name == p }) {
+            Notifier.shared.post("Profile \(p) doesn't exist, so it wasn't started.")
+            return false
         }
-        for _ in 0..<300 {
+        func startInFlight() async -> Bool {
+            if readBusy() != nil { return true }
+            return await Task.detached { Self.colimaStartRunning(p) }.value
+        }
+        // A start/stop is already running (menu, auto-stop, a terminal): let it
+        // finish instead of racing it.
+        for _ in 0..<600 {
+            guard await startInFlight() else { break }
             try? await Task.sleep(for: .seconds(1))
-            if UnixSocket.canConnect(socket) {
+        }
+        if !(await ready()) {
+            log.notice("auto-starting profile \(p, privacy: .public)")
+            setBusyNow("Starting")
+            let r = await Shell.run([Paths.ctl, "start"], timeout: 600,
+                                    extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
+            localBusy = nil
+            if !r.ok { log.error("auto-start: colima-ctl.sh start exited \(r.status)") }
+        }
+        var streak = 0
+        for _ in 0..<120 {
+            streak = await ready() ? streak + 1 : 0
+            if streak >= 3 {
+                // Refresh the cached API version from the real daemon (a Colima
+                // update can change it) before more pings are answered locally.
+                if let v = await probe.get("/_ping", timeout: 3)?.headers["api-version"] {
+                    proxy.apiVersion = v
+                    Defaults.set(v, "apiVersion")
+                }
                 Task { await refreshAll() }
                 return true
             }
+            try? await Task.sleep(for: .milliseconds(500))
         }
-        Notifier.shared.post("Colima didn't start within 5 minutes. Check the Colima log.")
+        Notifier.shared.post("Colima didn't become ready. Check the Colima log.")
+        return false
+    }
+
+    /// Whether a `ps` command line is a `colima start`/`restart` in progress for
+    /// `profile`. `colima start -f` is a long-lived foreground supervisor (e.g.
+    /// a launchd job), not a start in progress.
+    nonisolated static func isStartInProgress(command: String, profile: String) -> Bool {
+        let words = command.split(whereSeparator: \.isWhitespace).map(String.init)
+        guard let i = words.firstIndex(where: { $0 == "colima" || $0.hasSuffix("/colima") }),
+              i + 1 < words.count, ["start", "restart"].contains(words[i + 1]) else { return false }
+        if words.contains("-f") || words.contains("--foreground") { return false }
+        var named: String?
+        for (j, w) in words.enumerated() {
+            if (w == "--profile" || w == "-p"), j + 1 < words.count { named = words[j + 1] }
+            if w.hasPrefix("--profile=") { named = String(w.dropFirst("--profile=".count)) }
+        }
+        // `colima start NAME` also selects a profile.
+        if named == nil, i + 2 < words.count, !words[i + 2].hasPrefix("-") { named = words[i + 2] }
+        return (named ?? "default") == profile
+    }
+
+    /// True while a `colima start` for this profile runs (e.g. from a terminal,
+    /// which leaves no busy marker).
+    nonisolated private static func colimaStartRunning(_ profile: String) -> Bool {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        p.arguments = ["-f", "colima (start|restart)"]
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return false }
+        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return false }
+        // pgrep prints pids only; check each command line for the profile.
+        for pid in out.split(separator: "\n") {
+            let ps = Process()
+            ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+            ps.arguments = ["-o", "command=", "-p", String(pid)]
+            let pp = Pipe()
+            ps.standardOutput = pp
+            ps.standardError = FileHandle.nullDevice
+            guard (try? ps.run()) != nil else { continue }
+            let cmd = String(decoding: pp.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            ps.waitUntilExit()
+            if isStartInProgress(command: cmd, profile: profile) { return true }
+        }
         return false
     }
 
     /// Stops the VM once it has had no running containers for the chosen time.
+    /// Builds, pulls and pushes show no running container, so live docker
+    /// traffic through the proxy also counts as "not idle".
     private func checkIdle() {
-        guard autoStop, state == .running, busy == nil, running.isEmpty else {
+        guard autoStop, state == .running, busy == nil, !stopping, running.isEmpty,
+              proxy.activeTransfers() == 0 else {
             if idleSince != nil { idleSince = nil }
             return
         }
@@ -370,7 +506,19 @@ final class ColimaModel {
             idleSince = Date()
             return
         }
-        if Date().timeIntervalSince(since) >= Double(autoStopMinutes * 60) {
+        guard Date().timeIntervalSince(since) >= Double(autoStopMinutes * 60) else { return }
+        // The list can be stale (events missed during a reconnect): confirm
+        // with a fresh one right before stopping.
+        stopping = true
+        let gen = generation
+        Task {
+            defer { stopping = false }
+            await refreshContainers()
+            guard gen == generation, autoStop, state == .running, busy == nil,
+                  running.isEmpty, proxy.activeTransfers() == 0 else {
+                idleSince = nil
+                return
+            }
             idleSince = nil
             log.notice("auto-stopping idle profile \(self.profile, privacy: .public)")
             ctl("auto-stop", "\(autoStopMinutes)")
@@ -407,9 +555,10 @@ final class ColimaModel {
                     guard let self, self.generation == gen else { return }
                     self.latest[id] = stat
                 }
-            }, onEnd: { [weak self] in
+            }, onEnd: { [weak self] handle in
                 Task { @MainActor in
-                    guard let self, self.generation == gen else { return }
+                    // Only clear the entry if it's still this stream, not a newer one.
+                    guard let self, self.generation == gen, self.statStreams[id] === handle else { return }
                     self.statStreams[id] = nil
                     self.latest[id] = nil
                 }
@@ -438,13 +587,16 @@ final class ColimaModel {
                 guard let self, self.generation == gen else { return }
                 self.handle(ev)
             }
-        }, onEnd: { [weak self] in
+        }, onEnd: { [weak self] handle in
             // VM stopped or socket hiccup: the heartbeat's ping reconnects.
             Task { @MainActor in
-                guard let self, self.generation == gen else { return }
+                guard let self, self.generation == gen, self.events === handle else { return }
                 self.events = nil
             }
         })
+        // Events that happened while no stream was open are lost: reload the
+        // list so a container started in that gap isn't missed.
+        Task { await refreshContainers() }
     }
 
     private func handle(_ ev: DockerEvent) {
@@ -459,11 +611,11 @@ final class ColimaModel {
             let name = attrs["name"] ?? "container"
             let ctr = (id: id, name: name)
             if action == "oom" {
-                Notifier.shared.post("Killed: out of memory", title: name, container: ctr)
+                Notifier.shared.post("Killed: out of memory", title: name, container: ctr, profile: profile)
             } else if action == "die", let code = attrs["exitCode"], !["0", "130", "137", "143"].contains(code) {
-                Notifier.shared.post("Exited with code \(code)", title: name, container: ctr)
+                Notifier.shared.post("Exited with code \(code)", title: name, container: ctr, profile: profile)
             } else if action == "health_status: unhealthy" {
-                Notifier.shared.post("Healthcheck is failing", title: name, container: ctr)
+                Notifier.shared.post("Healthcheck is failing", title: name, container: ctr, profile: profile)
             }
         }
         // Coalesce a burst of events (compose up/down) into one refresh.
@@ -484,16 +636,41 @@ final class ColimaModel {
     /// dialogs, config edits, the busy marker and notifications), then refreshes.
     func ctl(_ args: String...) {
         let p = profile
+        if Self.vmActions.contains(args.first ?? "") { setBusyNow(Self.busyLabel(args.first!)) }
         Task {
             let r = await Shell.run([Paths.ctl] + args, timeout: 900,
                                     extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
             // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
             // lines when ColimaBar runs it, so they arrive as native alerts.
+            var notified = false
             for line in r.out.split(separator: "\n") where line.hasPrefix("COLIMABAR_NOTIFY:") {
                 Notifier.shared.post(String(line.dropFirst("COLIMABAR_NOTIFY:".count)))
+                notified = true
             }
+            // Exit 2 = the user cancelled a confirm dialog or another action holds the lock.
+            if !r.ok, !notified, r.status != 2 {
+                Notifier.shared.post("\(args.first ?? "Action") failed (exit \(r.status)). See \(Paths.ctlLog).")
+            }
+            busy = readBusy()
             await refreshAll()
         }
+    }
+
+    /// Actions that start, stop or restart the VM. The UI shows them as busy
+    /// right away, not on the next 1s tick, so a second click can't race them.
+    private static let vmActions: Set<String> = ["start", "stop", "restart", "resources", "rosetta", "k8s", "disk", "auto-stop"]
+
+    private static func busyLabel(_ action: String) -> String {
+        switch action {
+        case "start": return "Starting"
+        case "stop", "auto-stop": return "Stopping"
+        default: return "Restarting"
+        }
+    }
+
+    private func setBusyNow(_ label: String) {
+        localBusy = label
+        if busy == nil { busy = label }
     }
 
     func record(_ title: String, _ body: String, containerID: String?) {
@@ -503,10 +680,17 @@ final class ColimaModel {
 
     func container(withID id: String) -> Container? { containers.first { $0.id == id } }
 
+    /// Client for a profile's socket: the live one for the selected profile.
+    private func api(for p: String) -> DockerAPI {
+        p == profile ? api : DockerAPI(socketPath: Paths.socket(p))
+    }
+
     /// Container lifecycle calls that need no confirmation go straight to the API.
-    func container(_ id: String, _ verb: String) {
+    /// The timeout covers containers with a long stop grace period.
+    func container(_ id: String, _ verb: String, profile p: String? = nil) {
+        let client = api(for: p ?? profile)
         Task {
-            let r = await api.post("/containers/\(id)/\(verb)", timeout: 60)
+            let r = await client.post("/containers/\(id)/\(verb)", timeout: verb == "start" ? 60 : 180)
             if !(r?.ok ?? false) {
                 let msg = r.flatMap { try? JSONDecoder().decode([String: String].self, from: $0.body)["message"] }
                 Notifier.shared.post("\(verb.capitalized) failed: \(msg ?? "no response from Docker")")
@@ -521,21 +705,26 @@ final class ColimaModel {
             .map(\.id)
         Task {
             await withTaskGroup(of: Void.self) { g in
-                for id in ids { g.addTask { [api] in _ = await api.post("/containers/\(id)/\(verb)", timeout: 60) } }
+                for id in ids { g.addTask { [api] in _ = await api.post("/containers/\(id)/\(verb)", timeout: 180) } }
             }
             await refreshContainers()
         }
     }
 
-    func openLogs(id: String, name: String) {
-        LogWindows.shared.open(api: api, id: id, name: name) { [weak self] in
-            self?.terminal("ctr-logs", name)
+    func openLogs(id: String, name: String, profile p: String? = nil) {
+        let target = p ?? profile
+        LogWindows.shared.open(api: api(for: target), id: id, name: name) { [weak self] in
+            self?.terminal(profile: target, ["ctr-logs", name])
         }
     }
 
     func terminal(_ args: String...) {
-        let quoted = ([Paths.ctl] + args).map { "'\($0.replacingOccurrences(of: "'", with: "'\\''"))'" }
-        Shell.inTerminal("COLIMABAR_PROFILE='\(profile)' " + quoted.joined(separator: " "))
+        terminal(profile: profile, args)
+    }
+
+    func terminal(profile p: String, _ args: [String]) {
+        func q(_ s: String) -> String { "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'" }
+        Shell.inTerminal("COLIMABAR_PROFILE=\(q(p)) " + ([Paths.ctl] + args).map(q).joined(separator: " "))
     }
 
     func open(port: Int) {
@@ -554,6 +743,10 @@ final class ColimaModel {
         arr.append(v)
         if arr.count > historyLen { arr.removeFirst(arr.count - historyLen) }
     }
+}
+
+extension Optional where Wrapped == Bool {
+    var orFalse: Bool { self ?? false }
 }
 
 /// Typed-ish UserDefaults access that distinguishes "unset" from false/0.

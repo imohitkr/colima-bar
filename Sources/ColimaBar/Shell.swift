@@ -6,11 +6,13 @@ enum Paths {
     static let home = FileManager.default.homeDirectoryForCurrentUser.path
     static let ctl = "\(home)/.local/bin/colima-ctl.sh"
     static let cacheDir = "\(home)/.cache/colima-bar"
-    static let busy = "\(cacheDir)/busy"
+    /// Busy marker colima-ctl.sh writes while a VM action runs, per profile.
+    static func busy(_ profile: String) -> String { "\(cacheDir)/busy.\(profile)" }
+    /// colima-ctl.sh's stderr (colima's own output included) when ColimaBar runs it.
+    static let ctlLog = "\(cacheDir)/ctl.log"
     /// The stable socket every docker client is pointed at: ColimaBar's
     /// auto-start proxy while it runs, a symlink to Colima's socket otherwise.
     static let proxySocket = "\(cacheDir)/docker.sock"
-    static let colimaLog = "/tmp/colima.err.log"
     static let testcontainersProps = "\(home)/.testcontainers.properties"
 
     static func profileDir(_ profile: String) -> String { "\(home)/.config/colima/\(profile)" }
@@ -18,6 +20,14 @@ enum Paths {
     static func socket(_ profile: String) -> String { "\(profileDir(profile))/docker.sock" }
     /// kubectl context Colima creates for a profile.
     static func kubeContext(_ profile: String) -> String { profile == "default" ? "colima" : "colima-\(profile)" }
+}
+
+/// Thread-safe stdout accumulator for Shell.run.
+final class OutputBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+    func append(_ d: Data) { lock.withLock { data.append(d) } }
+    var string: String { lock.withLock { String(decoding: data, as: UTF8.self) } }
 }
 
 /// Runs CLI tools with a pinned environment, so every call targets the same VM
@@ -47,8 +57,11 @@ enum Shell {
         var ok: Bool { status == 0 }
     }
 
-    /// Runs `args` off the main thread and returns its stdout. Kills the process
-    /// after `timeout` seconds so a wedged docker socket can't stall the UI.
+    /// Runs `args` off the main thread and returns its stdout. After `timeout`
+    /// seconds it sends SIGTERM (colima-ctl.sh then cleans up and stops its
+    /// children), and SIGKILL 10 s later. It returns when the process exits,
+    /// even if an orphaned grandchild still holds the stdout pipe.
+    /// colima-ctl.sh's stderr goes to Paths.ctlLog; other tools' is dropped.
     static func run(_ args: [String], timeout: TimeInterval = 20, extraEnv: [String: String] = [:]) async -> Result {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -58,21 +71,52 @@ enum Shell {
                 p.environment = env.merging(extraEnv) { $1 }
                 let pipe = Pipe()
                 p.standardOutput = pipe
-                p.standardError = FileHandle.nullDevice
+                p.standardError = args.first == Paths.ctl ? ctlLogHandle() : FileHandle.nullDevice
                 p.standardInput = FileHandle.nullDevice
+                let out = OutputBuffer()
+                pipe.fileHandleForReading.readabilityHandler = { h in
+                    let d = h.availableData
+                    if !d.isEmpty { out.append(d) }
+                }
+                let exited = DispatchSemaphore(value: 0)
+                p.terminationHandler = { _ in exited.signal() }
                 do { try p.run() } catch {
+                    pipe.fileHandleForReading.readabilityHandler = nil
                     cont.resume(returning: Result(status: -1, out: ""))
                     return
                 }
-                let timer = DispatchWorkItem { if p.isRunning { p.terminate() } }
-                DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: timer)
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                p.waitUntilExit()
-                timer.cancel()
-                cont.resume(returning: Result(status: p.terminationStatus,
-                                              out: String(decoding: data, as: UTF8.self)))
+                if exited.wait(timeout: .now() + timeout) == .timedOut {
+                    p.terminate()
+                    if exited.wait(timeout: .now() + 10) == .timedOut {
+                        kill(p.processIdentifier, SIGKILL)
+                        exited.wait()
+                    }
+                }
+                // Let the last buffered output arrive, then stop reading.
+                usleep(50_000)
+                pipe.fileHandleForReading.readabilityHandler = nil
+                if let rest = try? pipe.fileHandleForReading.readToEnd(), p.terminationReason == .exit,
+                   !rest.isEmpty, rest.count < 1 << 20 {
+                    out.append(rest)
+                }
+                cont.resume(returning: Result(status: p.terminationStatus, out: out.string))
             }
         }
+    }
+
+    /// Append handle for Paths.ctlLog; the log is cut back once it passes 1 MB.
+    private static func ctlLogHandle() -> FileHandle {
+        let fm = FileManager.default
+        if let size = (try? fm.attributesOfItem(atPath: Paths.ctlLog))?[.size] as? Int, size > 1 << 20 {
+            try? fm.removeItem(atPath: Paths.ctlLog)
+        }
+        if !fm.fileExists(atPath: Paths.ctlLog) {
+            try? fm.createDirectory(atPath: Paths.cacheDir, withIntermediateDirectories: true)
+            fm.createFile(atPath: Paths.ctlLog, contents: nil, attributes: [.posixPermissions: 0o600])
+        }
+        guard let h = FileHandle(forWritingAtPath: Paths.ctlLog) else { return FileHandle.nullDevice }
+        h.seekToEndOfFile()
+        return h
     }
 
     /// Runs `command` in a new iTerm window, falling back to Terminal.app

@@ -43,82 +43,79 @@ final class DockerAPI: @unchecked Sendable {
         var buf = [UInt8](repeating: 0, count: 65536)
         while true {
             let n = read(fd, &buf, buf.count)
-            if n <= 0 { break }
+            if n == 0 { break }
+            if n < 0 {
+                if errno == EINTR { continue }
+                return nil   // read timeout (SO_RCVTIMEO) or error: not a complete reply
+            }
             data.append(buf, count: n)
         }
         guard let split = data.range(of: Data("\r\n\r\n".utf8)) else { return nil }
-        let head = String(decoding: data[..<split.lowerBound], as: UTF8.self)
-        let lines = head.components(separatedBy: "\r\n")
+        let (status, headers) = Self.parseHead(data[..<split.lowerBound])
+        var body = Data(data[split.upperBound...])
+        if headers["transfer-encoding"]?.lowercased() == "chunked" { body = Self.dechunk(body) }
+        return Response(status: status, headers: headers, body: body)
+    }
+
+    static func parseHead(_ raw: Data) -> (Int, [String: String]) {
+        let lines = String(decoding: raw, as: UTF8.self).components(separatedBy: "\r\n")
         let status = lines.first?.split(separator: " ", maxSplits: 2).dropFirst().first.flatMap { Int($0) } ?? 0
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":") else { continue }
             headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
         }
-        var body = Data(data[split.upperBound...])
-        if headers["transfer-encoding"]?.lowercased() == "chunked" { body = Self.dechunk(body) }
-        return Response(status: status, headers: headers, body: body)
+        return (status, headers)
     }
 
     /// Like `stream`, but hands over raw body bytes as they arrive (for log
     /// streams, whose frames are binary rather than newline-delimited).
     func streamRaw(_ path: String, onData: @escaping @Sendable (Data) -> Void,
-                   onEnd: @escaping @Sendable () -> Void) -> StreamHandle {
-        let handle = StreamHandle()
-        Thread.detachNewThread { [self] in
-            guard let fd = connect(timeout: 0) else { onEnd(); return }
-            guard handle.attach(fd) else { close(fd); return }
-            defer { handle.finish() }
-            guard send(fd, method: "GET", path: path) else { if !handle.cancelled { onEnd() }; return }
-            var pending = Data()
-            var headerDone = false
-            var buf = [UInt8](repeating: 0, count: 65536)
-            while true {
-                let n = read(fd, &buf, buf.count)
-                if n <= 0 { break }
-                if headerDone { onData(Data(buf[0..<n])); continue }
-                pending.append(buf, count: n)
-                guard let split = pending.range(of: Data("\r\n\r\n".utf8)) else { continue }
-                headerDone = true
-                let rest = Data(pending[split.upperBound...])
-                pending.removeAll()
-                if !rest.isEmpty { onData(rest) }
-            }
-            if !handle.cancelled { onEnd() }
-        }
-        return handle
+                   onEnd: @escaping @Sendable (StreamHandle) -> Void) -> StreamHandle {
+        openStream(path, onBody: onData, onEnd: onEnd)
     }
 
     /// Opens a long-lived request and calls `onLine` with each newline-delimited
     /// JSON object on a background thread. `onEnd` fires when the daemon closes
-    /// it (VM stopped, container gone) but not after `cancel()`.
+    /// it (VM stopped, container gone, or a non-2xx reply, see
+    /// `StreamHandle.status`) but never after `cancel()`. It receives the
+    /// handle, so owners can check it is still the one they track.
     func stream(_ path: String, onLine: @escaping @Sendable (Data) -> Void,
-                onEnd: @escaping @Sendable () -> Void) -> StreamHandle {
+                onEnd: @escaping @Sendable (StreamHandle) -> Void) -> StreamHandle {
+        let splitter = LineSplitter(onLine: onLine)
+        return openStream(path, onBody: { splitter.feed($0) }, onEnd: onEnd)
+    }
+
+    private func openStream(_ path: String, onBody: @escaping @Sendable (Data) -> Void,
+                            onEnd: @escaping @Sendable (StreamHandle) -> Void) -> StreamHandle {
         let handle = StreamHandle()
         Thread.detachNewThread { [self] in
-            guard let fd = connect(timeout: 0) else { onEnd(); return }
+            let end = { if !handle.cancelled { onEnd(handle) } }
+            guard let fd = connect(timeout: 0) else { end(); return }
             guard handle.attach(fd) else { close(fd); return }
             defer { handle.finish() }
-            guard send(fd, method: "GET", path: path) else { if !handle.cancelled { onEnd() }; return }
+            guard send(fd, method: "GET", path: path) else { end(); return }
             var pending = Data()
             var headerDone = false
             var buf = [UInt8](repeating: 0, count: 65536)
             while true {
                 let n = read(fd, &buf, buf.count)
+                if n < 0, errno == EINTR { continue }
                 if n <= 0 { break }
+                if headerDone { onBody(Data(buf[0..<n])); continue }
                 pending.append(buf, count: n)
-                if !headerDone {
-                    guard let split = pending.range(of: Data("\r\n\r\n".utf8)) else { continue }
-                    pending.removeSubrange(..<split.upperBound)
-                    headerDone = true
-                }
-                while let nl = pending.firstIndex(of: 0x0A) {
-                    let line = Data(pending[pending.startIndex..<nl])
-                    pending.removeSubrange(...nl)
-                    if !line.isEmpty { onLine(line) }
-                }
+                guard let split = pending.range(of: Data("\r\n\r\n".utf8)) else { continue }
+                headerDone = true
+                let (status, _) = Self.parseHead(pending[..<split.lowerBound])
+                handle.setStatus(status)
+                // An error reply is a JSON message, not stream data: feeding it
+                // to a frame or line parser would misread it.
+                guard (200..<300).contains(status) else { break }
+                let rest = Data(pending[split.upperBound...])
+                pending.removeAll()
+                if !rest.isEmpty { onBody(rest) }
             }
-            if !handle.cancelled { onEnd() }
+            end()
         }
         return handle
     }
@@ -160,11 +157,18 @@ final class DockerAPI: @unchecked Sendable {
 final class StreamHandle: @unchecked Sendable {
     private let lock = NSLock()
     private var fd: Int32 = -1
-    private(set) var cancelled = false
+    private var _cancelled = false
+    private var _status: Int?
+
+    var cancelled: Bool { lock.withLock { _cancelled } }
+    /// HTTP status of the reply, once its head has arrived.
+    var status: Int? { lock.withLock { _status } }
+
+    fileprivate func setStatus(_ s: Int) { lock.withLock { _status = s } }
 
     fileprivate func attach(_ fd: Int32) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if cancelled { return false }
+        if _cancelled { return false }
         self.fd = fd
         return true
     }
@@ -176,7 +180,25 @@ final class StreamHandle: @unchecked Sendable {
 
     func cancel() {
         lock.lock(); defer { lock.unlock() }
-        cancelled = true
+        _cancelled = true
         if fd >= 0 { shutdown(fd, SHUT_RDWR) }
+    }
+}
+
+/// Splits a byte stream into newline-delimited lines. Used from one reader
+/// thread only.
+final class LineSplitter: @unchecked Sendable {
+    private var pending = Data()
+    private let onLine: @Sendable (Data) -> Void
+
+    init(onLine: @escaping @Sendable (Data) -> Void) { self.onLine = onLine }
+
+    func feed(_ chunk: Data) {
+        pending.append(chunk)
+        while let nl = pending.firstIndex(of: 0x0A) {
+            let line = Data(pending[pending.startIndex..<nl])
+            pending.removeSubrange(...nl)
+            if !line.isEmpty { onLine(line) }
+        }
     }
 }

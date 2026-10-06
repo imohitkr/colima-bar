@@ -33,6 +33,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var item: NSStatusItem!
     private let popover = NSPopover()
     private var window: NSWindow?
+    private var windowCounted = false          // dashboard window counted in model.visibleCount
+    private var appliedHidden: Bool?           // last icon visibility we set
+    private var sigterm: DispatchSourceSignal?
+    private let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "app")
+
+    /// launchd sets XPC_SERVICE_NAME to the job label for the login agent.
+    static let isLaunchAgent = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == LoginItem.label
 
     func applicationWillFinishLaunching(_ note: Notification) {
         // Before launch completes, so a notification click that launched us
@@ -44,12 +51,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         Notifier.shared.onPermission = { [weak self] ok in
             if self?.model.notificationsAllowed != ok { self?.model.notificationsAllowed = ok }
         }
-        Notifier.shared.onContainerAction = { [weak self] action, id, name in
+        Notifier.shared.onContainerAction = { [weak self] action, id, name, profile in
             guard let self else { return }
+            // The alert may come from another profile than the one shown now.
+            let p = profile ?? self.model.profile
             if Notifier.isRestart(action) {
-                self.model.container(id, "restart")
+                self.model.container(id, "restart", profile: p)
             } else {
-                self.model.openLogs(id: id, name: name)
+                self.model.openLogs(id: id, name: name, profile: p)
             }
         }
     }
@@ -64,14 +73,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             return
         }
 
-        // One instance only: a second launch (Finder, `open`, the login agent)
-        // hands over to the running one and exits.
-        if !Self.isDebugRun,
-           let other = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
-            .first(where: { $0 != .current }) {
-            other.activate()
-            exit(0)
-        }
+        if !Self.isDebugRun { ensureSingleSupervisedInstance() }
+        installMainMenu()
+        handleSIGTERM()
 
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.target = self
@@ -99,6 +103,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if !Self.isDebugRun {
             LoginItem.migrate()
             registerLoginItemOnce()
+            Updater.shared.start()
         }
         if CommandLine.arguments.contains("--window") { showWindow() }
         // Debug: `--popover [PATH]` opens the popover on launch and, with a
@@ -142,6 +147,101 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 NSApp.terminate(nil)
             }
         }
+    }
+
+    /// One instance only, and when launch at login is on, the one running is
+    /// the launchd agent (KeepAlive relaunches it after a crash).
+    /// - The agent copy takes over from a copy started by hand.
+    /// - A copy started by hand while the agent is enabled asks launchd to
+    ///   start the agent instead, then exits.
+    /// - Otherwise a second copy sends the running one a reopen event (which
+    ///   brings a hidden icon back) and exits.
+    private func ensureSingleSupervisedInstance() {
+        let others = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
+            .filter { $0 != .current }
+        if Self.isLaunchAgent {
+            for other in others { other.terminate() }
+            let deadline = Date().addingTimeInterval(5)
+            while others.contains(where: { !$0.isTerminated }), Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+            }
+            for other in others where !other.isTerminated { other.forceTerminate() }
+            return
+        }
+        if let other = others.first {
+            if let url = other.bundleURL {
+                // openApplication on a running app delivers a reopen event.
+                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+            } else {
+                other.activate()
+            }
+            // Give the open request time to be sent before exiting.
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            exit(0)
+        }
+        guard LoginItem.isEnabled else { return }
+        LoginItem.refreshIfNeeded()
+        // Hand over only once the agent is seen running; if launchd refuses to
+        // start it, carry on as a normal instance so the proxy still runs.
+        if LoginItem.kickstart() {
+            let deadline = Date().addingTimeInterval(5)
+            while Date() < deadline {
+                let agentUp = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
+                    .contains { $0 != .current && !$0.isTerminated }
+                if agentUp { exit(0) }
+                RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+            }
+            log.error("login agent didn't start; running unsupervised")
+        }
+    }
+
+    /// Accessory apps show no menu bar, but key equivalents still route
+    /// through the main menu: without it ⌘C/⌘V/⌘A/⌘W do nothing.
+    private func installMainMenu() {
+        let main = NSMenu()
+        func submenu(_ title: String, _ items: [NSMenuItem]) {
+            let m = NSMenu(title: title)
+            items.forEach { m.addItem($0) }
+            let holder = NSMenuItem()
+            holder.submenu = m
+            main.addItem(holder)
+        }
+        submenu("ColimaBar", [NSMenuItem(title: "Quit ColimaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")])
+        let redo = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        submenu("Edit", [
+            NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"), redo, .separator(),
+            NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"),
+            NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"),
+            NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"),
+            NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"),
+        ])
+        submenu("Window", [
+            NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"),
+            NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"),
+        ])
+        NSApp.mainMenu = main
+    }
+
+    /// launchd stops the agent with SIGTERM (e.g. when launch at login is
+    /// turned off). Quit normally so the proxy socket is handed back.
+    private func handleSIGTERM() {
+        signal(SIGTERM, SIG_IGN)
+        let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        src.setEventHandler {
+            if LoginItem.relaunchAfterExit {
+                // Turned off launch at login from inside the agent: carry on
+                // as a normal app instead of disappearing.
+                let bundle = Bundle.main.bundlePath
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/bin/sh")
+                p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", bundle]
+                try? p.run()
+            }
+            NSApp.terminate(nil)
+        }
+        src.resume()
+        sigterm = src
     }
 
     private func snapshot(_ view: NSView, to path: String) {
@@ -188,10 +288,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             item.button?.setAccessibilityValue(model.busy ?? (model.state == .running
                 ? "\(model.running.count) containers running" : "stopped"))
             item.button?.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-            if item.isVisible == model.iconHidden {
-                item.isVisible = !model.iconHidden
-                Logger(subsystem: "com.imohitkr.ColimaBar", category: "app")
-                    .notice("menu bar icon \(self.item.isVisible ? "shown" : "hidden", privacy: .public)")
+            // Write isVisible only when our decision changes, so the system
+            // (or the user) hiding the item isn't undone on every refresh.
+            let hide = model.iconHidden
+            if appliedHidden != hide {
+                appliedHidden = hide
+                item.isVisible = !hide
+                log.notice("menu bar icon \(hide ? "hidden" : "shown", privacy: .public)")
+                if hide { model.noteIconHiddenOnce() }
             }
         } onChange: {
             // The app delegate lives for the whole process.
@@ -241,10 +345,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         auto.target = self
         auto.state = model.autoStart ? .on : .off
         menu.addItem(auto)
+        let hide = NSMenuItem(title: "Hide Icon While Colima Is Stopped", action: #selector(toggleHideIcon), keyEquivalent: "")
+        hide.target = self
+        hide.state = model.hideIconWhenStopped ? .on : .off
+        menu.addItem(hide)
         menu.addItem(.separator())
         let ver = NSMenuItem(title: "ColimaBar \(Self.version)", action: nil, keyEquivalent: "")
         ver.isEnabled = false
         menu.addItem(ver)
+        if let r = Updater.shared.available {
+            add("Download ColimaBar \(r.version)…", #selector(openUpdate))
+        } else {
+            add("Check for Updates…", #selector(checkUpdates))
+        }
         add("Quit ColimaBar", #selector(quit), key: "q")
         item.menu = menu
         item.button?.performClick(nil)
@@ -267,6 +380,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     @objc private func openWindowAction() { showWindow() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func toggleAutoStart() { model.autoStart.toggle() }
+    @objc private func toggleHideIcon() { model.hideIconWhenStopped.toggle() }
+    @objc private func checkUpdates() { Task { await Updater.shared.check(manual: true) } }
+    @objc private func openUpdate() { Updater.shared.openReleasePage() }
     @objc private func toggleLogin() {
         do { try LoginItem.set(!LoginItem.isEnabled) } catch {
             model.notify("Login item change failed: \(error.localizedDescription)")
@@ -282,13 +398,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// Opening the app again (Spotlight, Finder, `open -a ColimaBar`) brings a
     /// hidden icon back and opens the dashboard so Colima can be started.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        let wasHidden = model.iconHidden
         model.revealIcon = true
-        if wasHidden || !popover.isShown {
-            // Let the status item lay out before anchoring the popover to it.
-            DispatchQueue.main.async { [weak self] in
-                guard let self, !self.popover.isShown else { return }
+        appliedHidden = false
+        item.isVisible = true
+        // macOS places a just-shown status item asynchronously; anchor the
+        // popover once it is on screen, or fall back to the window.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard let self, !self.popover.isShown else { return }
+            if let w = self.item.button?.window, w.screen != nil, w.frame.maxY > 0 {
                 self.togglePopover()
+            } else {
+                self.showWindow()
             }
         }
         return false
@@ -319,15 +439,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             window = w
         }
         guard let w = window else { return }
-        if !w.isVisible {
-            model.visibleCount += 1
-            w.center()
-        }
+        if !w.isVisible, !w.isMiniaturized { w.center() }
+        setWindowCounted(true)
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
     }
 
-    func windowWillClose(_ n: Notification) {
-        model.visibleCount -= 1
+    /// Counts the window in visibleCount exactly once while it is open and not
+    /// minimized, however it was opened, minimized or closed.
+    private func setWindowCounted(_ on: Bool) {
+        guard windowCounted != on else { return }
+        windowCounted = on
+        model.visibleCount += on ? 1 : -1
     }
+
+    func windowWillClose(_ n: Notification) { setWindowCounted(false) }
+    func windowDidMiniaturize(_ n: Notification) { setWindowCounted(false) }
+    func windowDidDeminiaturize(_ n: Notification) { setWindowCounted(true) }
 }
