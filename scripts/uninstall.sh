@@ -8,14 +8,14 @@ STABLE="$HOME/.cache/colima-bar/docker.sock"
 wait_for_exit() {
   local i
   for i in $(seq 1 20); do
-    pgrep -xq ColimaBar || return 0
+    pgrep -U "$(id -u)" -xq ColimaBar || return 0
     sleep 0.5
   done
 }
 
 # Stop ColimaBar before you delete it. A running copy recreates the colimabar
 # context and the launchd DOCKER_HOST when the VM starts again.
-if pgrep -xq ColimaBar; then
+if pgrep -U "$(id -u)" -xq ColimaBar; then
   echo "Quitting the running ColimaBar"
   osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1
   wait_for_exit
@@ -25,11 +25,11 @@ launchctl bootout "gui/$(id -u)/com.imohitkr.ColimaBar.agent" 2>/dev/null
 launchctl bootout "gui/$(id -u)/com.imohitkr.ColimaBar.login" 2>/dev/null
 # The Apple event can fail (Automation permission, an open alert).
 # ColimaBar also quits cleanly on SIGTERM.
-if pgrep -xq ColimaBar; then
-  pkill -TERM -x ColimaBar 2>/dev/null
+if pgrep -U "$(id -u)" -xq ColimaBar; then
+  pkill -U "$(id -u)" -TERM -x ColimaBar 2>/dev/null
   wait_for_exit
 fi
-if pgrep -xq ColimaBar; then
+if pgrep -U "$(id -u)" -xq ColimaBar; then
   echo "ColimaBar is still running. Quit it from its menu, then run this script again." >&2
   exit 1
 fi

@@ -15,7 +15,7 @@ set -euo pipefail
 wait_for_exit() {
   local i
   for i in $(seq 1 20); do
-    pgrep -xq ColimaBar || return 0
+    pgrep -U "$(id -u)" -xq ColimaBar || return 0
     sleep 0.5
   done
 }
@@ -23,26 +23,37 @@ wait_for_exit() {
 # Everything runs inside main, so a partly downloaded script does nothing.
 main() {
   local repo="imohitkr/colima-bar"
-  local version="${COLIMABAR_VERSION:-}"
-  local url
+  local requested="${COLIMABAR_VERSION:-}"
+  local version="$requested"
+  local none_yet="No release with ColimaBar.zip found yet. See https://github.com/$repo/releases."
   if [ -n "$version" ] && ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     echo "COLIMABAR_VERSION must look like v0.4.0, not: $version" >&2
     exit 1
   fi
-  # Releases before v0.4.0 do not have ColimaBar.zip.
-  if [ -n "$version" ]; then
-    local vmajor vminor
-    IFS=. read -r vmajor vminor _ <<<"${version#v}"
-    if (( 10#$vmajor == 0 && 10#$vminor < 4 )); then
-      echo "The installer supports v0.4.0 and later, not $version. Download older releases from https://github.com/$repo/releases." >&2
+  # Without COLIMABAR_VERSION, find the tag of the latest release first. The
+  # download and the attestation check then both use that one tag.
+  if [ -z "$version" ]; then
+    local latest
+    latest=$(curl --proto '=https' --tlsv1.2 -fsS -o /dev/null -w '%{redirect_url}' \
+      "https://github.com/$repo/releases/latest") || latest=""
+    version="${latest##*/}"
+    if ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "$none_yet" >&2
       exit 1
     fi
   fi
-  if [ -n "$version" ]; then
-    url="https://github.com/$repo/releases/download/$version/ColimaBar.zip"
-  else
-    url="https://github.com/$repo/releases/latest/download/ColimaBar.zip"
+  # Releases before v0.4.0 do not have ColimaBar.zip.
+  local vmajor vminor
+  IFS=. read -r vmajor vminor _ <<<"${version#v}"
+  if (( 10#$vmajor == 0 && 10#$vminor < 4 )); then
+    if [ -z "$requested" ]; then
+      echo "$none_yet" >&2
+    else
+      echo "The installer supports v0.4.0 and later, not $version. Download older releases from https://github.com/$repo/releases." >&2
+    fi
+    exit 1
   fi
+  local url="https://github.com/$repo/releases/download/$version/ColimaBar.zip"
 
   [ "$(uname -s)" = Darwin ] || { echo "ColimaBar runs on macOS only." >&2; exit 1; }
   # uname -m says x86_64 under Rosetta; this sysctl is 1 on any Apple silicon Mac.
@@ -82,8 +93,8 @@ main() {
     echo "The download failed. Check your network connection, then run again." >&2
     exit 1
   }
-  if [ "$status" = 404 ] && [ -z "$version" ]; then
-    echo "No release with ColimaBar.zip found yet. See https://github.com/$repo/releases." >&2
+  if [ "$status" = 404 ] && [ -z "$requested" ]; then
+    echo "$none_yet" >&2
     exit 1
   elif [ "$status" = 404 ]; then
     echo "Release $version has no ColimaBar.zip. See https://github.com/$repo/releases." >&2
@@ -98,10 +109,8 @@ main() {
   # a GitHub-hosted runner, from the requested tag when one is set.
   local workflow="$repo/.github/workflows/ci.yml"
   local verify=(gh attestation verify "$tmp/ColimaBar.zip" --hostname github.com
-    --repo "$repo" --signer-workflow "$workflow" --deny-self-hosted-runners)
-  if [ -n "$version" ]; then
-    verify+=(--source-ref "refs/tags/$version")
-  fi
+    --repo "$repo" --signer-workflow "$workflow" --deny-self-hosted-runners
+    --source-ref "refs/tags/$version")
   # gh 2.49 added the attestation command.
   local skip=""
   if ! command -v gh >/dev/null 2>&1; then
@@ -135,17 +144,17 @@ main() {
   }
   xattr -dr com.apple.quarantine "$tmp/ColimaBar.app" 2>/dev/null || true
 
-  if pgrep -xq ColimaBar; then
+  if pgrep -U "$(id -u)" -xq ColimaBar; then
     echo "Quitting the running ColimaBar"
     osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1 || true
     wait_for_exit
     # The Apple event can fail (Automation permission, an open alert).
     # ColimaBar also quits cleanly on SIGTERM, so launchd does not relaunch it.
-    if pgrep -xq ColimaBar; then
-      pkill -TERM -x ColimaBar 2>/dev/null || true
+    if pgrep -U "$(id -u)" -xq ColimaBar; then
+      pkill -U "$(id -u)" -TERM -x ColimaBar 2>/dev/null || true
       wait_for_exit
     fi
-    if pgrep -xq ColimaBar; then
+    if pgrep -U "$(id -u)" -xq ColimaBar; then
       echo "ColimaBar is still running. Quit it from its menu, then run the installer again." >&2
       exit 1
     fi
