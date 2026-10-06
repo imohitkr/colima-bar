@@ -1,0 +1,76 @@
+name: Bug report
+description: Tell us about a problem in ColimaBar.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Search the open issues first, so you do not report the same problem two times.
+        To report a security problem, do not use this form. Read the [security policy](https://github.com/imohitkr/colima-bar/security/policy).
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      description: Apple menu > About This Mac.
+      placeholder: "15.1"
+    validations:
+      required: true
+  - type: input
+    id: colimabar
+    attributes:
+      label: ColimaBar version
+      description: The dashboard footer and the right-click menu show the version.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: textarea
+    id: colima
+    attributes:
+      label: Colima version
+      description: Paste the output of `colima version`.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: runtime
+    attributes:
+      label: Runtime and profile
+      description: The Colima runtime (docker or containerd) and the profile name.
+      placeholder: "docker, default"
+    validations:
+      required: false
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Tell us the steps that cause the problem.
+      placeholder: |
+        1. Stop Colima.
+        2. Run `docker ps` in Terminal.
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result
+      description: Tell us what you expected to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual result
+      description: Tell us what happened. Add screenshots if they help.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Log lines
+      description: |
+        Paste the relevant lines from `~/.cache/colima-bar/ctl.log`.
+        Remove secrets, tokens and private host names before you paste them.
+      render: text
+    validations:
+      required: false

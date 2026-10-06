@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest a new feature or a change to ColimaBar.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the idea. Read the Roadmap in the README first. The feature can already be on it.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Tell us the problem that you want to solve. Tell us when it occurs.
+      placeholder: When I use more than one profile, I cannot ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Tell us what ColimaBar must do. Add a sketch or a screenshot if it helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Tell us about other solutions or workarounds that you tried.
+    validations:
+      required: false

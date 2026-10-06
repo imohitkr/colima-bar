@@ -2,8 +2,8 @@
 # Builds ColimaBar.app with SwiftPM (Command Line Tools are enough, no Xcode).
 #   ./build.sh            build into ./build/ColimaBar.app
 #   ./build.sh test       run the test suite
-#   ./build.sh install    build, then install the app to ~/Applications and
-#                         scripts/colima-ctl.sh to ~/.local/bin, and relaunch
+#   ./build.sh install    build, install the app to ~/Applications, relaunch
+#   ./build.sh dmg        build, then package build/ColimaBar-<version>.dmg
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -26,6 +26,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
 cp "$BIN" "$APP/Contents/MacOS/ColimaBar"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+install -m 755 scripts/colima-ctl.sh scripts/uninstall.sh "$APP/Contents/Resources/"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
@@ -66,12 +67,26 @@ EOF
 codesign --force --sign - "$APP" >/dev/null
 echo "built $APP ($VERSION)"
 
+if [ "${1:-}" = dmg ]; then
+  # Drag-to-Applications disk image: the app, a link to /Applications and
+  # first-launch steps for macOS Gatekeeper (the app is not notarized).
+  DMG="build/ColimaBar-${VERSION}.dmg"
+  STAGE=$(mktemp -d)
+  trap 'rm -rf "$STAGE"' EXIT
+  cp -R "$APP" "$STAGE/"
+  ln -s /Applications "$STAGE/Applications"
+  cp scripts/dmg-readme.txt "$STAGE/Read Me First.txt"
+  rm -f "$DMG"
+  hdiutil create -quiet -volname "ColimaBar ${VERSION}" -srcfolder "$STAGE" \
+    -fs HFS+ -format UDZO -ov "$DMG"
+  echo "built $DMG"
+fi
+
 if [ "${1:-}" = install ]; then
-  mkdir -p ~/Applications ~/.local/bin
-  install -m 755 scripts/colima-ctl.sh ~/.local/bin/colima-ctl.sh
-  osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1 && sleep 1 || true
+  mkdir -p ~/Applications
+  if osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1; then sleep 1; fi
   rm -rf ~/Applications/ColimaBar.app
   cp -R "$APP" ~/Applications/
   open ~/Applications/ColimaBar.app
-  echo "installed ~/Applications/ColimaBar.app and ~/.local/bin/colima-ctl.sh"
+  echo "installed ~/Applications/ColimaBar.app"
 fi
