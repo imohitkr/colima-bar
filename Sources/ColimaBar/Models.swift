@@ -18,9 +18,24 @@ struct Container: Identifiable, Equatable {
     let status: String      // "Up 3 hours (healthy)"
     let ports: [Int]
     let project: String?    // docker compose project label
+    /// "healthy", "unhealthy", "health: starting" or nil. Parsed once here,
+    /// not on every read: rows read it several times per render.
+    let health: String?
+
+    init(id: String, name: String, image: String, state: String, status: String, ports: [Int], project: String?) {
+        self.id = id
+        self.name = name
+        self.image = image
+        self.state = state
+        self.status = status
+        self.ports = ports
+        self.project = project
+        health = Self.health(status: status)
+    }
 
     var isRunning: Bool { state == "running" || state == "restarting" || state == "paused" }
-    var health: String? {
+
+    static func health(status: String) -> String? {
         for h in ["unhealthy", "healthy", "health: starting"] where status.contains("(\(h))") { return h }
         return nil
     }

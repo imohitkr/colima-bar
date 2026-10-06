@@ -68,6 +68,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        // launchd starts apps with a limit of 256 open files. The proxy, stats
+        // streams and log windows can need more.
+        let files = FileLimit.raise()
+        log.info("open file limit: \(files)")
         if CommandLine.arguments.contains("--notify-test") {
             Task {
                 await Notifier.shared.selfTest()
@@ -175,7 +179,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 RunLoop.current.run(until: Date().addingTimeInterval(0.1))
             }
             for other in others where !other.isTerminated { other.forceTerminate() }
-            if Self.isLaunchAgent { return }
+            if Self.isLaunchAgent {
+                // Only rewrites an outdated plist; the agent never reloads itself.
+                LoginItem.refreshIfNeeded()
+                return
+            }
         } else if let other = others.first {
             if let url = other.bundleURL {
                 // openApplication on a running app delivers a reopen event.

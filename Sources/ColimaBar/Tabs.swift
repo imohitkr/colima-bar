@@ -7,9 +7,12 @@ struct ContainersTab: View {
     let model: ColimaModel
     @Bindable var ui: ViewState
 
+    // This body must not read stats or history: they change every second.
+    // Only StatCells reads them, so a tick redraws just those numbers.
     var body: some View {
         let groups = grouped
-        VStack(alignment: .leading, spacing: 6) {
+        // Lazy: opening the dashboard builds only the rows on screen.
+        LazyVStack(alignment: .leading, spacing: 6) {
             if groups.isEmpty {
                 Empty(text: model.containers.isEmpty ? "No containers" : "No matches")
             }
@@ -29,7 +32,7 @@ struct ContainersTab: View {
                 }
                 if !isCollapsed.wrappedValue {
                     ForEach(g.items) { c in
-                        ContainerRow(model: model, c: c, stat: model.stats[c.id])
+                        ContainerRow(model: model, c: c)
                     }
                 }
             }
@@ -128,7 +131,6 @@ struct AlertsStrip: View {
 struct ContainerRow: View {
     let model: ColimaModel
     let c: Container
-    let stat: Stat?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -160,15 +162,7 @@ struct ContainerRow: View {
                     .foregroundStyle(.blue)
                     .hint(Help.port(p))
             }
-            if c.isRunning {
-                // Fixed-width, right-aligned, monospaced: numbers tick in place.
-                Text(stat.map { String(format: "%.1f%%", $0.cpu) } ?? "–")
-                    .frame(width: 46, alignment: .trailing)
-                    .hint(Help.ctrCPU)
-                Text(stat.map { Fmt.bytes($0.memBytes) } ?? "–")
-                    .frame(width: 54, alignment: .trailing)
-                    .hint(Help.ctrMem)
-            }
+            if c.isRunning { StatCells(model: model, id: c.id) }
             actions
         }
         .font(.system(size: 11).monospacedDigit())
@@ -224,6 +218,24 @@ struct ContainerRow: View {
 
     private func healthColor(_ h: String) -> Color {
         h == "healthy" ? .green : h == "unhealthy" ? .red : .orange
+    }
+}
+
+/// A container's live CPU and memory. It is the only part of a row that
+/// reads `model.stats`, so a stats tick redraws these two cells, not the row.
+struct StatCells: View {
+    let model: ColimaModel
+    let id: String
+
+    var body: some View {
+        let stat = model.stats[id]
+        // Fixed-width, right-aligned, monospaced: numbers tick in place.
+        Text(stat.map { String(format: "%.1f%%", $0.cpu) } ?? "–")
+            .frame(width: 46, alignment: .trailing)
+            .hint(Help.ctrCPU)
+        Text(stat.map { Fmt.bytes($0.memBytes) } ?? "–")
+            .frame(width: 54, alignment: .trailing)
+            .hint(Help.ctrMem)
     }
 }
 

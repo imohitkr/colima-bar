@@ -5,17 +5,28 @@ import os
 /// Small POSIX helpers shared by the API client and the proxy.
 enum UnixSocket {
     static func connect(_ path: String, timeout: Int = 0) -> Int32? {
+        try? tryConnect(path, timeout: timeout).get()
+    }
+
+    /// Like connect, but a failure carries the errno, so the caller can tell
+    /// "nothing listens there" (ENOENT, ECONNREFUSED) from "out of fds"
+    /// (EMFILE, ENFILE).
+    static func tryConnect(_ path: String, timeout: Int = 0) -> Result<Int32, ProxyError> {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { return nil }
-        guard var addr = address(path) else { close(fd); return nil }
+        guard fd >= 0 else { return .failure(.socket(errno)) }
+        guard var addr = address(path) else { close(fd); return .failure(.socket(ENAMETOOLONG)) }
         let ok = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
             }
         }
-        guard ok else { close(fd); return nil }
+        guard ok else {
+            let err = errno
+            close(fd)
+            return .failure(.socket(err))
+        }
         configure(fd, timeout: timeout)
-        return fd
+        return .success(fd)
     }
 
     static func canConnect(_ path: String) -> Bool {
@@ -59,11 +70,14 @@ enum UnixSocket {
     static func configure(_ fd: Int32, timeout: Int) {
         var one: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
-        if timeout > 0 {
-            var tv = timeval(tv_sec: timeout, tv_usec: 0)
-            setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-            setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
-        }
+        if timeout > 0 { setTimeout(fd, timeout) }
+    }
+
+    /// Sets the read and write timeout in seconds. 0 removes it.
+    static func setTimeout(_ fd: Int32, _ seconds: Int) {
+        var tv = timeval(tv_sec: seconds, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
     }
 
     static func writeAll(_ fd: Int32, _ data: Data) -> Bool {
@@ -93,6 +107,40 @@ enum UnixSocket {
 
 enum ProxyError: Error { case socket(Int32) }
 
+/// The per-process limit on open files (RLIMIT_NOFILE).
+enum FileLimit {
+    /// The proxy uses 2 fds per spliced connection, and each stats stream
+    /// and log window uses 1 more. launchd starts apps with a soft limit of
+    /// 256, which a busy dashboard and a few IDE clients can reach.
+    static let wanted: rlim_t = 8192
+
+    /// Raises the soft limit to `target`, capped by the hard limit and
+    /// OPEN_MAX. It never lowers the limit. Returns the soft limit after
+    /// the call.
+    @discardableResult
+    static func raise(to target: rlim_t = wanted) -> rlim_t {
+        var lim = rlimit()
+        guard getrlimit(RLIMIT_NOFILE, &lim) == 0 else { return 0 }
+        // macOS refuses RLIM_INFINITY and values above OPEN_MAX here.
+        var want = min(target, lim.rlim_max, rlim_t(OPEN_MAX))
+        guard want > lim.rlim_cur else { return lim.rlim_cur }
+        var next = lim
+        next.rlim_cur = want
+        if setrlimit(RLIMIT_NOFILE, &next) != 0 {
+            // kern.maxfilesperproc can be lower than OPEN_MAX: try that.
+            var perProc: Int32 = 0
+            var size = MemoryLayout<Int32>.size
+            if sysctlbyname("kern.maxfilesperproc", &perProc, &size, nil, 0) == 0, perProc > 0 {
+                want = min(want, rlim_t(perProc))
+                next.rlim_cur = want
+                if want > lim.rlim_cur { setrlimit(RLIMIT_NOFILE, &next) }
+            }
+        }
+        guard getrlimit(RLIMIT_NOFILE, &lim) == 0 else { return 0 }
+        return lim.rlim_cur
+    }
+}
+
 /// The auto-start proxy behind ColimaBar's stable socket (Paths.proxySocket).
 ///
 /// Every docker client (shell DOCKER_HOST, launchd env for IDEs, the docker
@@ -121,6 +169,15 @@ final class SocketProxy: @unchecked Sendable {
 
     /// Starts Colima and returns once Docker is ready (or false on failure).
     var wake: @Sendable () async -> Bool = { false }
+
+    /// Opens a connection to Colima's socket (injectable for tests).
+    var connectUpstream: @Sendable (String) -> Result<Int32, ProxyError> = { UnixSocket.tryConnect($0) }
+
+    /// While the VM is down, a client that sends nothing for this many
+    /// seconds is closed. Otherwise each idle keep-alive client holds a
+    /// thread and an fd forever. Spliced connections have no timeout:
+    /// attach, logs and events streams can be silent for a long time.
+    var idleTimeout = 5 * 60
 
     /// How long a request waits for a wake. wake() must finish well inside it.
     /// wake() worst case: 300 s waiting for another start + 600 s for
@@ -212,12 +269,35 @@ final class SocketProxy: @unchecked Sendable {
         }
     }
 
+    /// The result of trying Colima's socket.
+    private enum Upstream {
+        case up(Int32)
+        /// Nothing listens there, or a wake runs: wait for the wake.
+        case down
+        /// Connecting failed for another reason, such as no free fds.
+        case failed(Int32)
+    }
+
+    /// Only ENOENT (no socket file) and ECONNREFUSED (stale socket file)
+    /// mean that the VM is down. Other errors, such as EMFILE when this
+    /// process runs out of fds, must not start Colima.
+    static func meansVMDown(_ err: Int32) -> Bool { err == ENOENT || err == ECONNREFUSED }
+
+    /// Not while a wake runs: Lima's ssh tunnel accepts connections seconds
+    /// before dockerd and containerd are stable, so requests must wait for
+    /// the readiness check in wake() like the one that triggered it.
+    private func connectIfAwake() -> Upstream {
+        if lock.withLock({ waking }) { return .down }
+        switch connectUpstream(upstream) {
+        case .success(let fd): return .up(fd)
+        case .failure(.socket(let err)): return Self.meansVMDown(err) ? .down : .failed(err)
+        }
+    }
+
     private func serve(_ client: Int32) {
         // Fast path: VM up, splice straight through without parsing anything.
-        // Not while a wake runs: Lima's ssh tunnel accepts connections seconds
-        // before dockerd and containerd are stable, so requests must wait for
-        // the readiness check in wake() like the one that triggered it.
-        if !lock.withLock({ waking }), let up = UnixSocket.connect(upstream) {
+        switch connectIfAwake() {
+        case .up(let up):
             // Read the start of the first request to classify the connection
             // (auto-stop activity); the bytes are forwarded as they are.
             var buf = [UInt8](repeating: 0, count: 8192)
@@ -227,13 +307,22 @@ final class SocketProxy: @unchecked Sendable {
             let line = String(decoding: first.prefix { $0 != 0x0D && $0 != 0x0A }, as: UTF8.self)
             splice(client, up, initial: first, work: Self.isWork(line))
             return
+        case .failed(let err):
+            refuse(client, err)
+            return
+        case .down:
+            break
         }
+        // An idle client closes after idleTimeout. splice() removes the
+        // timeout again before it streams.
+        UnixSocket.setTimeout(client, idleTimeout)
         var pending = Data()
         var buf = [UInt8](repeating: 0, count: 65536)
         while true {
             // Need one complete request head to decide what to do.
             while pending.range(of: Data("\r\n\r\n".utf8)) == nil {
                 let n = read(client, &buf, buf.count)
+                if n < 0, errno == EINTR { continue }
                 if n <= 0 { close(client); return }
                 pending.append(buf, count: n)
             }
@@ -242,7 +331,7 @@ final class SocketProxy: @unchecked Sendable {
                 .components(separatedBy: "\r\n").first ?? ""
             if let reply = pingReply(requestLine) {
                 // VM may have come up meanwhile; prefer the real daemon.
-                if !lock.withLock({ waking }), let up = UnixSocket.connect(upstream) {
+                if case .up(let up) = connectIfAwake() {
                     splice(client, up, initial: pending, work: Self.isWork(requestLine))
                     return
                 }
@@ -250,17 +339,48 @@ final class SocketProxy: @unchecked Sendable {
                 pending.removeSubrange(..<head.upperBound)
                 continue
             }
-            log.notice("waking Colima for: \(requestLine, privacy: .public)")
-            if waitForWake(), let up = UnixSocket.connect(upstream) {
+            // The VM may have come up while this client was idle.
+            switch connectIfAwake() {
+            case .up(let up):
                 splice(client, up, initial: pending, work: Self.isWork(requestLine))
-            } else {
-                let body = #"{"message":"ColimaBar could not start Colima. Check the Colima log or start it from the menu bar."}"#
-                let resp = "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: \(body.utf8.count)\r\nConnection: close\r\n\r\n\(body)"
-                _ = UnixSocket.writeAll(client, Data(resp.utf8))
-                close(client)
+                return
+            case .failed(let err):
+                refuse(client, err)
+                return
+            case .down:
+                break
+            }
+            log.notice("waking Colima for: \(requestLine, privacy: .public)")
+            guard waitForWake() else {
+                reply503(client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
+                return
+            }
+            switch connectUpstream(upstream) {
+            case .success(let up):
+                splice(client, up, initial: pending, work: Self.isWork(requestLine))
+            case .failure(.socket(let err)) where !Self.meansVMDown(err):
+                refuse(client, err)
+            case .failure:
+                reply503(client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
             }
             return
         }
+    }
+
+    /// Answers 503 when connecting to Colima's socket failed for a reason
+    /// other than "VM down", for example EMFILE. Colima is not started.
+    private func refuse(_ client: Int32, _ err: Int32) {
+        let reason = String(cString: strerror(err))
+        log.error("couldn't connect to Colima's socket: errno \(err) (\(reason, privacy: .public)); answering 503")
+        reply503(client, "ColimaBar could not connect to the Colima socket: \(reason) (errno \(err)). Try again in a moment.")
+    }
+
+    private func reply503(_ client: Int32, _ message: String) {
+        let body = (try? JSONSerialization.data(withJSONObject: ["message": message], options: [.withoutEscapingSlashes]))
+            ?? Data(#"{"message":"ColimaBar error"}"#.utf8)
+        let head = "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+        _ = UnixSocket.writeAll(client, Data(head.utf8) + body)
+        close(client)
     }
 
     /// Open connections doing real work: a build, pull, push, load, save,
@@ -345,6 +465,9 @@ final class SocketProxy: @unchecked Sendable {
     /// Copies bytes both ways until each side closes, half-closing as it goes
     /// so request/response streams (and hijacked attach/exec) end cleanly.
     private func splice(_ client: Int32, _ upstream: Int32, initial: Data, work: Bool = false) {
+        // Streams can be silent for a long time: remove the idle timeout of
+        // the VM-down path.
+        UnixSocket.setTimeout(client, 0)
         if !initial.isEmpty, !UnixSocket.writeAll(upstream, initial) {
             close(client); close(upstream); return
         }

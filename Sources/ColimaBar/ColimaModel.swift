@@ -12,15 +12,20 @@ enum VMState: Equatable { case unknown, running, stopped, notInstalled }
 /// Container data comes straight from the Docker Engine API on the selected
 /// profile's socket (no process per refresh, streaming stats). Colima itself
 /// has no API, so VM facts come from `colima list -j`, run only when the VM
-/// goes up/down or once a minute.
+/// goes up/down, when a watched Colima directory changes, or when the last
+/// list is old (1 minute while running, 5 minutes while stopped).
 @MainActor @Observable
 final class ColimaModel {
-    var state: VMState = .unknown
+    var state: VMState = .unknown {
+        didSet { if state != oldValue { wakeHeartbeat() } }
+    }
     var busy: String?
     var vm = VMInfo()
     var rosetta = false
     var k8s = false
-    var containers: [Container] = []
+    var containers: [Container] = [] {
+        didSet { updateDerivedLists() }
+    }
     var stats: [String: Stat] = [:]     // by container id
     var cpuHistory: [Double] = []       // % of VM CPU used by containers
     var memHistory: [Double] = []       // % of VM memory used by containers
@@ -109,28 +114,35 @@ final class ColimaModel {
             guard (oldValue > 0) != (visibleCount > 0) else { return }
             if visibleCount == 0 { revealIcon = false }
             visibleCount > 0 ? becameVisible() : syncStatStreams()
+            wakeHeartbeat()
         }
     }
 
-    var running: [Container] { containers.filter(\.isRunning) }
-    var stopped: [Container] { containers.filter { !$0.isRunning } }
-    var unhealthyCount: Int { containers.filter { $0.health == "unhealthy" }.count }
+    // Views and the menu bar icon read these many times per render. They are
+    // stored, and recomputed only when `containers` changes.
+    private(set) var running: [Container] = []
+    private(set) var stopped: [Container] = []
+    private(set) var unhealthyCount = 0
     var kubeContext: String { Paths.kubeContext(profile) }
 
     private(set) var api: DockerAPI
     let proxy: SocketProxy
     private let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "model")
-    private var events: StreamHandle?
-    private var statStreams: [String: StreamHandle] = [:]
-    private var latest: [String: Stat] = [:]   // written by stat streams, published once a second
-    private var tickTask: Task<Void, Never>?
-    private var containerRefresh: Task<Void, Never>?
-    private var lastDF = Date.distantPast
-    private var lastColima = Date.distantPast
-    private var isDebug = false
-    private var generation = 0                 // bumps on profile switch; stale callbacks are ignored
-    private var stopping = false               // an auto-stop check is confirming
-    private var localBusy: String?             // VM action launched here, marker not written yet
+    // Internal bookkeeping that no view reads: writes skip observation.
+    @ObservationIgnored private var events: StreamHandle?
+    @ObservationIgnored private var statStreams: [String: StreamHandle] = [:]
+    @ObservationIgnored private var latest: [String: Stat] = [:]   // written by stat streams, published once a second
+    @ObservationIgnored private var tickTask: Task<Void, Never>?
+    @ObservationIgnored private var tickSleep: Task<Void, Never>?  // the heartbeat's current sleep
+    @ObservationIgnored private var containerRefresh: Task<Void, Never>?
+    @ObservationIgnored private var lastDF = Date.distantPast
+    @ObservationIgnored private var lastColima = Date.distantPast
+    @ObservationIgnored private var lastPing = Date()
+    @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
+    @ObservationIgnored private var isDebug = false
+    @ObservationIgnored private var generation = 0     // bumps on profile switch; stale callbacks are ignored
+    @ObservationIgnored private var stopping = false   // an auto-stop check is confirming
+    @ObservationIgnored private var localBusy: String? // VM action launched here, marker not written yet
     private let historyLen = 60
 
     init() {
@@ -149,16 +161,58 @@ final class ColimaModel {
                 await Routing.apply()
                 routing = await Routing.status()
             }
-        }
-        Task { await refreshAll() }
-        tickTask = Task {
-            var n = 0
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
-                n += 1
-                await tick(n)
+            // Any profile starting, stopping, appearing or going away changes
+            // these directories, so no frequent `colima list` is needed.
+            dirWatcher = ColimaDirWatcher { [weak self] in
+                Task { await self?.refreshStatus() }
             }
         }
+        Task { await refreshAll() }
+        lastPing = Date()
+        tickTask = Task {
+            while !Task.isCancelled {
+                let interval = Self.tickInterval(state: state, busy: busy != nil, dashboardOpen: visibleCount > 0)
+                // A separate task, so wakeHeartbeat() can end the sleep early.
+                let sleep = Task { _ = try? await Task.sleep(for: interval, tolerance: interval / 2) }
+                tickSleep = sleep
+                await sleep.value
+                await tick()
+            }
+        }
+    }
+
+    /// The heartbeat runs once a second. While the VM is stopped, nothing is
+    /// in progress and no dashboard is open, it runs every 5 seconds instead.
+    nonisolated static func tickInterval(state: VMState, busy: Bool, dashboardOpen: Bool) -> Duration {
+        state == .stopped && !busy && !dashboardOpen ? .seconds(5) : .seconds(1)
+    }
+
+    /// How old the last `colima list` can be before the heartbeat runs it
+    /// again. The directory watcher catches most changes, so a stopped VM
+    /// needs only a rare check.
+    nonisolated static func staleAfter(state: VMState) -> TimeInterval {
+        state == .stopped ? 5 * 60 : 60
+    }
+
+    /// Ends the heartbeat's current sleep, so a tick runs now and the next
+    /// sleep uses the interval for the new state.
+    private func wakeHeartbeat() {
+        tickSleep?.cancel()
+    }
+
+    /// Writes only the lists that changed, so views that read the others
+    /// don't redraw.
+    private func updateDerivedLists() {
+        let d = Self.derivedLists(containers)
+        if d.running != running { running = d.running }
+        if d.stopped != stopped { stopped = d.stopped }
+        if d.unhealthy != unhealthyCount { unhealthyCount = d.unhealthy }
+    }
+
+    nonisolated static func derivedLists(_ containers: [Container])
+        -> (running: [Container], stopped: [Container], unhealthy: Int) {
+        (containers.filter(\.isRunning), containers.filter { !$0.isRunning },
+         containers.reduce(0) { $0 + ($1.health == "unhealthy" ? 1 : 0) })
     }
 
     /// Called on quit: the stable socket becomes a symlink to Colima's, so
@@ -167,9 +221,10 @@ final class ColimaModel {
         proxy.stop()
     }
 
-    /// 1s heartbeat. Cheap work only: a stat() of the busy marker, publishing
-    /// the stat streams' latest numbers, and a socket /_ping every few seconds.
-    private func tick(_ n: Int) async {
+    /// Heartbeat (see tickInterval). Cheap work only: a stat() of the busy
+    /// marker, publishing the stat streams' latest numbers, and a socket
+    /// /_ping every 3 s (dashboard open) or 10 s (closed).
+    private func tick() async {
         let b = readBusy()
         if b != busy {
             let finished = busy != nil && b == nil
@@ -178,18 +233,21 @@ final class ColimaModel {
         }
         if visibleCount > 0 { publishStats() }
 
+        let staleAfter = Self.staleAfter(state: state)
         // A containerd profile has no docker socket, so a ping says nothing
-        // about it. Refresh its state only when it is 60 s old.
+        // about it. Refresh its state only when it is stale.
         if !hasDockerSocket {
-            if Date().timeIntervalSince(lastColima) > 60 { await refreshStatus() }
-        } else if n % (visibleCount > 0 ? 3 : 10) == 0 {
+            if Date().timeIntervalSince(lastColima) > staleAfter { await refreshStatus() }
+        } else if Date().timeIntervalSince(lastPing) >= (visibleCount > 0 ? 3 : 10) - 0.5 {
+            // The 0.5 s margin absorbs the sleep's tolerance.
+            lastPing = Date()
             let ping = await api.get("/_ping", timeout: 2)
             let up = ping?.ok ?? false
             if let v = ping?.headers["api-version"], v != proxy.apiVersion {
                 proxy.apiVersion = v
                 Defaults.set(v, "apiVersion")
             }
-            let stale = Date().timeIntervalSince(lastColima) > 60
+            let stale = Date().timeIntervalSince(lastColima) > staleAfter
             if up != (state == .running) || stale {
                 await refreshStatus()
             } else if up, events == nil {
@@ -240,6 +298,8 @@ final class ColimaModel {
 
     func refreshStatus() async {
         lastColima = Date()
+        // Profiles and Lima instances come and go: watch the current set.
+        dirWatcher?.rearm()
         guard Shell.which("colima") != nil else {
             set(\.state, .notInstalled)
             return
@@ -321,8 +381,8 @@ final class ColimaModel {
         set(\.images, [])
         set(\.volumes, [])
         set(\.df, [])
-        cpuHistory = []
-        memHistory = []
+        set(\.cpuHistory, [])
+        set(\.memHistory, [])
     }
 
     private func switchProfile() {
@@ -786,6 +846,106 @@ final class ColimaModel {
     private func push(_ arr: inout [Double], _ v: Double) {
         arr.append(v)
         if arr.count > historyLen { arr.removeFirst(arr.count - historyLen) }
+    }
+}
+
+/// Watches the directories that change when any Colima profile starts,
+/// stops, appears or goes away: ~/.config/colima, each profile directory,
+/// Lima's `_lima` directory and each Lima instance directory. Lima creates
+/// and removes ha.sock and ha.pid in the instance directory. Changes that
+/// come close together call `onChange` once. It is called at most once per
+/// `minGap`, and a change is never dropped, only delayed.
+@MainActor
+final class ColimaDirWatcher {
+    private let root: String
+    private let debounce: Duration
+    private let minGap: Duration
+    private let onChange: @MainActor () -> Void
+    private var sources: [String: DispatchSourceFileSystemObject] = [:]
+    private var pending: Task<Void, Never>?
+    private var lastFire: ContinuousClock.Instant?
+
+    /// XDG_CONFIG_HOME is pinned to ~/.config (see Shell), so Colima uses this root.
+    init(root: String = "\(Paths.home)/.config/colima", debounce: Duration = .seconds(2),
+         minGap: Duration = .seconds(10), onChange: @escaping @MainActor () -> Void) {
+        self.root = root
+        self.debounce = debounce
+        self.minGap = minGap
+        self.onChange = onChange
+        rearm()
+    }
+
+    deinit {
+        for s in sources.values { s.cancel() }
+    }
+
+    var watched: Set<String> { Set(sources.keys) }
+
+    /// The directories to watch that exist now. Names that start with "_"
+    /// or "." are Colima's and Lima's own stores, not profiles or instances.
+    nonisolated static func watchPaths(root: String) -> Set<String> {
+        let fm = FileManager.default
+        func isDir(_ p: String) -> Bool {
+            var d: ObjCBool = false
+            return fm.fileExists(atPath: p, isDirectory: &d) && d.boolValue
+        }
+        func children(_ dir: String) -> [String] {
+            ((try? fm.contentsOfDirectory(atPath: dir)) ?? [])
+                .filter { !$0.hasPrefix("_") && !$0.hasPrefix(".") }
+                .map { "\(dir)/\($0)" }
+                .filter(isDir)
+        }
+        guard isDir(root) else { return [] }
+        var out: Set<String> = [root]
+        out.formUnion(children(root))
+        let lima = "\(root)/_lima"
+        if isDir(lima) {
+            out.insert(lima)
+            out.formUnion(children(lima))
+        }
+        return out
+    }
+
+    /// Starts watching new directories and stops watching removed ones.
+    func rearm() {
+        let want = Self.watchPaths(root: root)
+        for (path, s) in sources where !want.contains(path) {
+            s.cancel()
+            sources[path] = nil
+        }
+        for path in want where sources[path] == nil {
+            let fd = open(path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let s = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .delete, .rename],
+                                                              queue: .main)
+            s.setEventHandler { [weak self, weak s] in
+                guard let s else { return }
+                let gone = !s.data.isDisjoint(with: [.delete, .rename])
+                MainActor.assumeIsolated { self?.changed(path, gone: gone) }
+            }
+            s.setCancelHandler { close(fd) }
+            s.resume()
+            sources[path] = s
+        }
+    }
+
+    private func changed(_ path: String, gone: Bool) {
+        // The descriptor now points at a removed or moved directory. Drop it,
+        // so the next rearm() opens the path again if it exists.
+        if gone, let s = sources.removeValue(forKey: path) { s.cancel() }
+        // A callback is already scheduled: it also covers this change.
+        guard pending == nil else { return }
+        let now = ContinuousClock.now
+        var at = now + debounce
+        if let lastFire, lastFire + minGap > at { at = lastFire + minGap }
+        pending = Task { [weak self] in
+            try? await Task.sleep(until: at, clock: .continuous)
+            guard let self else { return }
+            self.pending = nil
+            self.lastFire = .now
+            self.rearm()
+            self.onChange()
+        }
     }
 }
 
