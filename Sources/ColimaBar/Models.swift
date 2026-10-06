@@ -14,10 +14,10 @@ struct Container: Identifiable, Equatable {
     let id: String
     let name: String
     let image: String
-    let state: String       // running, exited, created, paused, restarting
-    let status: String      // "Up 3 hours (healthy)"
+    let state: String  // running, exited, created, paused, restarting
+    let status: String  // "Up 3 hours (healthy)"
     let ports: [Int]
-    let project: String?    // docker compose project label
+    let project: String?  // docker compose project label
     /// "healthy", "unhealthy", "health: starting" or nil. Parsed once here,
     /// not on every read: rows read it several times per render.
     let health: String?
@@ -58,7 +58,7 @@ struct ProfileRow: Identifiable, Equatable {
 }
 
 struct Stat: Equatable {
-    let cpu: Double     // percent of one core, as docker reports it
+    let cpu: Double  // percent of one core, as docker reports it
     let memBytes: Double
 }
 
@@ -82,6 +82,8 @@ struct ColimaListJSON: Decodable {
     let runtime: String?
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
+// Property names match the JSON keys of the wire format.
 struct ColimaStatusJSON: Decodable {
     let driver: String?
     let mount_type: String?
@@ -89,8 +91,13 @@ struct ColimaStatusJSON: Decodable {
 
 // Docker Engine API payloads (only the fields we use).
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
+// Property names match the JSON keys of the wire format.
 struct APIContainer: Decodable {
-    struct Port: Decodable { let IP: String?; let PublicPort: Int? }
+    struct Port: Decodable {
+        let IP: String?
+        let PublicPort: Int?
+    }
     let Id: String
     let Names: [String]
     let Image: String
@@ -100,6 +107,8 @@ struct APIContainer: Decodable {
     let Labels: [String: String]?
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
+// Property names match the JSON keys of the wire format.
 struct APIStats: Decodable {
     struct CPU: Decodable {
         struct Usage: Decodable { let total_usage: UInt64 }
@@ -133,6 +142,8 @@ struct APIStats: Decodable {
     }
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
+// Property names match the JSON keys of the wire format.
 struct APIDF: Decodable {
     struct Image: Decodable {
         let Id: String
@@ -142,14 +153,24 @@ struct APIDF: Decodable {
         let Created: Int64
         let Containers: Int
     }
-    struct Ctr: Decodable { let SizeRw: Int64?; let State: String }
+    struct Ctr: Decodable {
+        let SizeRw: Int64?
+        let State: String
+    }
     struct Volume: Decodable {
-        struct Usage: Decodable { let Size: Int64; let RefCount: Int }
+        struct Usage: Decodable {
+            let Size: Int64
+            let RefCount: Int
+        }
         let Name: String
         let Labels: [String: String]?
         let UsageData: Usage?
     }
-    struct Cache: Decodable { let Size: Int64; let InUse: Bool; let Shared: Bool }
+    struct Cache: Decodable {
+        let Size: Int64
+        let InUse: Bool
+        let Shared: Bool
+    }
     let Images: [Image]?
     let Containers: [Ctr]?
     let Volumes: [Volume]?
@@ -164,7 +185,9 @@ struct ImageRow: Identifiable, Equatable {
     let created: Date
     let containers: Int
     var dangling: Bool { repo == "<none>" }
-    var ref: String { dangling ? String(id.replacingOccurrences(of: "sha256:", with: "").prefix(12)) : "\(repo):\(tag)" }
+    var ref: String {
+        dangling ? String(id.replacingOccurrences(of: "sha256:", with: "").prefix(12)) : "\(repo):\(tag)"
+    }
 }
 
 struct VolumeRow: Identifiable, Equatable {
@@ -176,6 +199,8 @@ struct VolumeRow: Identifiable, Equatable {
     let anonymous: Bool
 }
 
+// swift-format-ignore: AlwaysUseLowerCamelCase
+// Property names match the JSON keys of the wire format.
 struct DockerEvent: Decodable {
     struct Actor: Decodable {
         let ID: String?
@@ -195,7 +220,10 @@ enum Parse {
         for raw in text.split(separator: "\n", omittingEmptySubsequences: false) {
             let line = String(raw)
             if let section {
-                if line.hasPrefix("\(section):") { inSection = true; continue }
+                if line.hasPrefix("\(section):") {
+                    inSection = true
+                    continue
+                }
                 if inSection, let c = line.first, c.isLetter { inSection = false }
                 if inSection, line.hasPrefix("  \(key):") {
                     return line.dropFirst(key.count + 3).trimmingCharacters(in: .whitespaces)
@@ -213,7 +241,10 @@ enum Fmt {
         if b <= 0 { return "0 B" }
         let units = ["B", "KB", "MB", "GB", "TB"]
         var v = b, i = 0
-        while v >= 1024 && i < units.count - 1 { v /= 1024; i += 1 }
+        while v >= 1024 && i < units.count - 1 {
+            v /= 1024
+            i += 1
+        }
         return i == 0 ? "\(Int(v)) B" : String(format: v < 10 ? "%.1f %@" : "%.0f %@", v, units[i])
     }
 }

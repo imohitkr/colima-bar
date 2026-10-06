@@ -1,6 +1,6 @@
 import AppKit
-import os
 import UserNotifications
+import os
 
 /// Native notifications (ColimaBar's own name and icon). Container alerts get
 /// "View logs" and "Restart" buttons. Permission is requested the first time
@@ -36,16 +36,19 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let logs = UNNotificationAction(identifier: Self.viewLogs, title: "View logs", options: [.foreground])
         let restart = UNNotificationAction(identifier: Self.restart, title: "Restart", options: [])
         center.setNotificationCategories([
-            UNNotificationCategory(identifier: Self.containerCategory, actions: [logs, restart],
-                                   intentIdentifiers: [], options: []),
+            UNNotificationCategory(
+                identifier: Self.containerCategory, actions: [logs, restart],
+                intentIdentifiers: [], options: [])
         ])
     }
 
     /// `record: false` for messages about the app itself (updates, tips),
     /// which don't belong in the dashboard's list of container alerts.
     /// `url` makes a click on the banner open that page.
-    func post(_ body: String, title: String = "Colima", container: (id: String, name: String)? = nil,
-              profile: String? = nil, record: Bool = true, url: URL? = nil) {
+    func post(
+        _ body: String, title: String = "Colima", container: (id: String, name: String)? = nil,
+        profile: String? = nil, record: Bool = true, url: URL? = nil
+    ) {
         if record { onAlert?(title, body, container) }
         // The dashboard list above still gets every alert. Only the banner is skipped.
         if let container, !throttle.allow(AlertThrottle.key(container: container.id, body: body)) { return }
@@ -117,20 +120,26 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     // MARK: - UNUserNotificationCenterDelegate
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
-                                            withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void) {
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+        withCompletionHandler done: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
         done([.banner, .sound, .list])
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
-                                            withCompletionHandler done: @escaping () -> Void) {
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+        withCompletionHandler done: @escaping () -> Void
+    ) {
         let info = response.notification.request.content.userInfo
         let action = response.actionIdentifier
         let id = info["id"] as? String ?? ""
         let name = info["name"] as? String ?? ""
         let profile = (info["profile"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         // Open web pages only, never a file or another app's URL scheme.
-        let link = (info["url"] as? String).flatMap(URL.init(string:)).flatMap { $0.scheme?.lowercased() == "https" ? $0 : nil }
+        let link = (info["url"] as? String).flatMap(URL.init(string:)).flatMap {
+            $0.scheme?.lowercased() == "https" ? $0 : nil
+        }
         Task { @MainActor in
             if let link { NSWorkspace.shared.open(link) }
             if !id.isEmpty {

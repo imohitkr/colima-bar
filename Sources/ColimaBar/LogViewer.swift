@@ -5,7 +5,7 @@ import SwiftUI
 struct LogLine: Identifiable, Equatable {
     /// Set by `LogBuffer` when the line enters the store.
     fileprivate(set) var id: Int
-    let time: String     // HH:mm:ss.SSS, local time
+    let time: String  // HH:mm:ss.SSS, local time
     let text: String
     let stderr: Bool
 
@@ -25,7 +25,9 @@ struct LogLine: Identifiable, Equatable {
             let ts = raw[..<sp]
             if let t = LogTime.parse(ts) {
                 let text = String(raw[raw.utf8.index(after: sp)...])
-                return (LogLine(id: 0, time: LogTime.clock(secs: t.secs, nanos: t.nanos), text: text, stderr: stderr), ts)
+                return (
+                    LogLine(id: 0, time: LogTime.clock(secs: t.secs, nanos: t.nanos), text: text, stderr: stderr), ts
+                )
             }
         }
         return (LogLine(id: 0, time: "", text: raw, stderr: stderr), nil)
@@ -55,17 +57,21 @@ enum LogTime {
             return v
         }
         guard let y = num(0, 4), b[4] == 0x2D, let mo = num(5, 2), b[7] == 0x2D, let d = num(8, 2),
-              b[10] == 0x54 || b[10] == 0x74,     // "T" or "t"
-              let h = num(11, 2), b[13] == 0x3A, let mi = num(14, 2), b[16] == 0x3A, let s = num(17, 2),
-              (1...12).contains(mo), d >= 1, d <= daysIn(month: mo, year: y),
-              h <= 23, mi <= 59, s <= 60 else { return nil }
+            b[10] == 0x54 || b[10] == 0x74,  // "T" or "t"
+            let h = num(11, 2), b[13] == 0x3A, let mi = num(14, 2), b[16] == 0x3A, let s = num(17, 2),
+            (1...12).contains(mo), d >= 1, d <= daysIn(month: mo, year: y),
+            h <= 23, mi <= 59, s <= 60
+        else { return nil }
         var i = 19
         var nanos = 0
-        if b[i] == 0x2E {     // "."
+        if b[i] == 0x2E {  // "."
             i += 1
             var digits = 0
             while i < b.count, b[i] >= 0x30, b[i] <= 0x39 {
-                if digits < 9 { nanos = nanos * 10 + Int(b[i] - 0x30); digits += 1 }
+                if digits < 9 {
+                    nanos = nanos * 10 + Int(b[i] - 0x30)
+                    digits += 1
+                }
                 i += 1
             }
             guard digits > 0 else { return nil }
@@ -73,11 +79,12 @@ enum LogTime {
         }
         guard i < b.count else { return nil }
         var offset = 0
-        if b[i] == 0x5A || b[i] == 0x7A {     // "Z" or "z"
+        if b[i] == 0x5A || b[i] == 0x7A {  // "Z" or "z"
             i += 1
-        } else if b[i] == 0x2B || b[i] == 0x2D {     // "+" or "-"
+        } else if b[i] == 0x2B || b[i] == 0x2D {  // "+" or "-"
             guard i + 6 == b.count, let oh = num(i + 1, 2), b[i + 3] == 0x3A, let om = num(i + 4, 2),
-                  oh <= 23, om <= 59 else { return nil }
+                oh <= 23, om <= 59
+            else { return nil }
             offset = (oh * 3600 + om * 60) * (b[i] == 0x2B ? 1 : -1)
             i += 6
         } else {
@@ -119,9 +126,12 @@ enum LogTime {
                 p[at] = UInt8(48 + v / 10)
                 p[at + 1] = UInt8(48 + v % 10)
             }
-            put2(0, Int(parts.tm_hour)); p[2] = 0x3A
-            put2(3, Int(parts.tm_min)); p[5] = 0x3A
-            put2(6, Int(parts.tm_sec)); p[8] = 0x2E
+            put2(0, Int(parts.tm_hour))
+            p[2] = 0x3A
+            put2(3, Int(parts.tm_min))
+            p[5] = 0x3A
+            put2(6, Int(parts.tm_sec))
+            p[8] = 0x2E
             p[9] = UInt8(48 + ms / 100)
             put2(10, ms % 100)
             return 12
@@ -170,7 +180,7 @@ enum LogFilter {
     /// Holds the query and a scratch buffer for many lines. Not thread-safe.
     struct Matcher {
         let needle: [UInt8]
-        private let needleASCII: Bool   // false if the query has non-ASCII cased letters
+        private let needleASCII: Bool  // false if the query has non-ASCII cased letters
         /// For the slow path: the UTF-8 forms of every letter that lower-cases
         /// to the query's first non-ASCII letter. A line with none of them
         /// can't match, so it is not lower-cased.
@@ -214,9 +224,13 @@ enum LogFilter {
             // but only for lines that have non-ASCII bytes and one of the
             // prefilter letters.
             guard hay.contains(where: { $0 >= 0x80 }) else { return false }
-            if !prefilter.isEmpty, !prefilter.contains(where: { p in
-                p.withUnsafeBufferPointer { memmem(hay.baseAddress, hay.count, $0.baseAddress, $0.count) != nil }
-            }) { return false }
+            if !prefilter.isEmpty,
+                !prefilter.contains(where: { p in
+                    p.withUnsafeBufferPointer { memmem(hay.baseAddress, hay.count, $0.baseAddress, $0.count) != nil }
+                })
+            {
+                return false
+            }
             let lower = Array(String(decoding: hay, as: UTF8.self).lowercased().utf8)
             return lower.withUnsafeBufferPointer { l in
                 needle.withUnsafeBufferPointer { n in
@@ -323,7 +337,8 @@ struct LogDemuxer {
         // the front would move the rest of the buffer every time.
         var b = buffer.startIndex
         while buffer.endIndex - b >= 8 {
-            let size = Int(buffer[b + 4]) << 24 | Int(buffer[b + 5]) << 16 | Int(buffer[b + 6]) << 8 | Int(buffer[b + 7])
+            let size =
+                Int(buffer[b + 4]) << 24 | Int(buffer[b + 5]) << 16 | Int(buffer[b + 6]) << 8 | Int(buffer[b + 7])
             guard buffer.endIndex - b >= 8 + size else { break }
             let payload = buffer[(b + 8)..<(b + 8 + size)]
             let isErr = buffer[b] == 2
@@ -337,12 +352,12 @@ struct LogDemuxer {
     /// Splits on "\n" at the byte level and decodes only whole lines.
     private mutating func split(_ bytes: Data, stderr: Bool, into out: inout [(String, Bool)]) {
         var pending = partial[stderr] ?? Data()
-        partial[stderr] = nil     // so the append below does not copy
+        partial[stderr] = nil  // so the append below does not copy
         pending.append(bytes)
         var start = pending.startIndex
         while let nl = pending[start...].firstIndex(of: 0x0A) {
             var end = nl
-            if end > start, pending[end - 1] == 0x0D { end -= 1 }   // drop "\r"
+            if end > start, pending[end - 1] == 0x0D { end -= 1 }  // drop "\r"
             start = Self.cutLong(pending, from: start, to: end, stderr: stderr, into: &out)
             out.append((String(decoding: pending[start..<end], as: UTF8.self), stderr))
             start = nl + 1
@@ -353,12 +368,14 @@ struct LogDemuxer {
 
     /// Emits full-size pieces while more than `maxLineBytes` remain, and
     /// returns where the rest starts. Never cuts inside a UTF-8 character.
-    private static func cutLong(_ d: Data, from: Int, to end: Int, stderr: Bool,
-                                into out: inout [(String, Bool)]) -> Int {
+    private static func cutLong(
+        _ d: Data, from: Int, to end: Int, stderr: Bool,
+        into out: inout [(String, Bool)]
+    ) -> Int {
         var start = from
         while end - start > maxLineBytes {
             var cut = start + maxLineBytes
-            while cut > start + 1, d[cut] & 0xC0 == 0x80 { cut -= 1 }   // continuation byte
+            while cut > start + 1, d[cut] & 0xC0 == 0x80 { cut -= 1 }  // continuation byte
             out.append((String(decoding: d[start..<cut], as: UTF8.self) + splitMarker, stderr))
             start = cut
         }
@@ -478,8 +495,10 @@ final class LogStore {
     /// How long new lines wait, so that they are published as one batch.
     nonisolated static let flushDelay = Duration.milliseconds(250)
 
-    init(api: DockerAPI, containerID: String, name: String, maxLines: Int = 20_000,
-         maxBytes: Int = LogStore.defaultMaxBytes) {
+    init(
+        api: DockerAPI, containerID: String, name: String, maxLines: Int = 20_000,
+        maxBytes: Int = LogStore.defaultMaxBytes
+    ) {
         self.api = api
         self.containerID = containerID
         self.name = name
@@ -555,7 +574,8 @@ final class LogStore {
             return
         }
         guard r.ok, let j = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
-              let config = j["Config"] as? [String: Any] else {
+            let config = j["Config"] as? [String: Any]
+        else {
             reconnect(tail: tail, status: "Docker could not inspect the container (HTTP \(r.status)). Retrying…")
             return
         }
@@ -569,22 +589,25 @@ final class LogStore {
         status = "Live"
         let box = DemuxBox(LogDemuxer(tty: tty))
         let buffer = self.buffer
-        handle = api.streamRaw("/containers/\(containerID)/logs?\(q)", onData: { [weak self] data in
-            // Parse here, off the main thread. Only the first push after a
-            // flush hops to the main actor.
-            let (lines, ts) = box.feed(data)
-            guard !lines.isEmpty, buffer.push(lines, lastTimestamp: ts) else { return }
-            Task { @MainActor in await self?.flush() }
-        }, onEnd: { [weak self] h in
-            Task { @MainActor in
-                guard let self, self.handle === h else { return }
-                if let s = h.status, !(200..<300).contains(s) {
-                    self.status = "Docker refused the log request (HTTP \(s))."
-                    return
+        handle = api.streamRaw(
+            "/containers/\(containerID)/logs?\(q)",
+            onData: { [weak self] data in
+                // Parse here, off the main thread. Only the first push after a
+                // flush hops to the main actor.
+                let (lines, ts) = box.feed(data)
+                guard !lines.isEmpty, buffer.push(lines, lastTimestamp: ts) else { return }
+                Task { @MainActor in await self?.flush() }
+            },
+            onEnd: { [weak self] h in
+                Task { @MainActor in
+                    guard let self, self.handle === h else { return }
+                    if let s = h.status, !(200..<300).contains(s) {
+                        self.status = "Docker refused the log request (HTTP \(s))."
+                        return
+                    }
+                    self.ended()
                 }
-                self.ended()
-            }
-        })
+            })
     }
 
     /// The query for a log request. After the first line it asks for
@@ -610,7 +633,10 @@ final class LogStore {
         let t = date.timeIntervalSince1970
         var secs = Int64(t.rounded(.down))
         var nanos = Int64(((t - Double(secs)) * 1e9).rounded())
-        if nanos >= 1_000_000_000 { nanos -= 1_000_000_000; secs += 1 }
+        if nanos >= 1_000_000_000 {
+            nanos -= 1_000_000_000
+            secs += 1
+        }
         let n = String(nanos)
         return "\(secs)." + String(repeating: "0", count: 9 - n.count) + n
     }
@@ -631,7 +657,10 @@ final class LogStore {
         guard let t = LogTime.parse(ts[...]) else { return nil }
         var secs = t.secs
         var nanos = t.nanos + 1
-        if nanos >= 1_000_000_000 { nanos -= 1_000_000_000; secs += 1 }
+        if nanos >= 1_000_000_000 {
+            nanos -= 1_000_000_000
+            secs += 1
+        }
         let n = String(nanos)
         return "\(secs)." + String(repeating: "0", count: 9 - n.count) + n
     }
@@ -666,8 +695,10 @@ final class LogStore {
 
     /// Moves the start of the rendered lines when they pass the limit.
     private func updateTail(from start: Int? = nil) {
-        setTailStart(LogTail.start(current: start ?? tailStart, count: visible.count,
-                                   slack: follow ? 0 : LogTail.slack))
+        setTailStart(
+            LogTail.start(
+                current: start ?? tailStart, count: visible.count,
+                slack: follow ? 0 : LogTail.slack))
     }
 
     /// Stream ends when the container stops or restarts: keep the window and
@@ -763,9 +794,11 @@ private struct LogList: View {
                 LazyVStack(alignment: .leading, spacing: 1) {
                     let shown = store.shown
                     if store.tailStart > 0 {
-                        Text("Showing the newest \(shown.count) of \(store.visible.count) lines. Use the filter to find older lines. Copy includes all lines.")
-                            .foregroundStyle(.secondary)
-                            .padding(.bottom, 4)
+                        Text(
+                            "Showing the newest \(shown.count) of \(store.visible.count) lines. Use the filter to find older lines. Copy includes all lines."
+                        )
+                        .foregroundStyle(.secondary)
+                        .padding(.bottom, 4)
                     }
                     ForEach(shown) { line in
                         LogRow(line: line, showTime: showTime, wrap: wrap)
@@ -848,9 +881,10 @@ final class LogWindows: NSObject, NSWindowDelegate {
             return
         }
         let store = LogStore(api: api, containerID: id, name: name)
-        let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 560),
-                         styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                         backing: .buffered, defer: false)
+        let w = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 560),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered, defer: false)
         w.title = "Logs: \(name)"
         w.isReleasedWhenClosed = false
         w.contentViewController = NSHostingController(rootView: LogView(store: store, openInTerminal: openInTerminal))
@@ -870,13 +904,15 @@ final class LogWindows: NSObject, NSWindowDelegate {
 
     private func updateOnScreen(_ n: Notification) {
         guard let w = n.object as? NSWindow,
-              let entry = windows.values.first(where: { $0.0 === w }) else { return }
+            let entry = windows.values.first(where: { $0.0 === w })
+        else { return }
         entry.1.setOnScreen(!w.isMiniaturized && w.occlusionState.contains(.visible))
     }
 
     func windowWillClose(_ n: Notification) {
         guard let w = n.object as? NSWindow,
-              let (id, entry) = windows.first(where: { $0.value.0 === w }) else { return }
+            let (id, entry) = windows.first(where: { $0.value.0 === w })
+        else { return }
         entry.1.stop()
         windows[id] = nil
     }

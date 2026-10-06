@@ -1,19 +1,20 @@
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct ParsingTests {
     @Test func yamlTopLevelAndSection() {
         let yaml = """
-        cpu: 4
-        rosetta: true
-        kubernetes:
-          # Enable kubernetes.
-          enabled: false
-          version: v1.30
-        network:
-          enabled: true
-        """
+            cpu: 4
+            rosetta: true
+            kubernetes:
+              # Enable kubernetes.
+              enabled: false
+              version: v1.30
+            network:
+              enabled: true
+            """
         #expect(Parse.yaml(yaml, key: "cpu") == "4")
         #expect(Parse.yaml(yaml, key: "rosetta") == "true")
         #expect(Parse.yaml(yaml, key: "enabled", section: "kubernetes") == "false")
@@ -23,10 +24,10 @@ import Testing
 
     @Test func statsMatchDockerFormulas() throws {
         let json = """
-        {"cpu_stats":{"cpu_usage":{"total_usage":3000000000},"system_cpu_usage":20000000000,"online_cpus":4},
-         "precpu_stats":{"cpu_usage":{"total_usage":1000000000},"system_cpu_usage":10000000000},
-         "memory_stats":{"usage":104857600,"stats":{"inactive_file":4857600}}}
-        """
+            {"cpu_stats":{"cpu_usage":{"total_usage":3000000000},"system_cpu_usage":20000000000,"online_cpus":4},
+             "precpu_stats":{"cpu_usage":{"total_usage":1000000000},"system_cpu_usage":10000000000},
+             "memory_stats":{"usage":104857600,"stats":{"inactive_file":4857600}}}
+            """
         let s = try JSONDecoder().decode(APIStats.self, from: Data(json.utf8))
         // (2e9 / 1e10) * 4 cores * 100 = 80% of one core
         #expect(abs(s.cpuPercent - 80) < 0.001)
@@ -35,10 +36,10 @@ import Testing
 
     @Test func statsWithNoPreviousSampleIsZero() throws {
         let json = """
-        {"cpu_stats":{"cpu_usage":{"total_usage":5},"system_cpu_usage":10,"online_cpus":2},
-         "precpu_stats":{"cpu_usage":{"total_usage":0}},
-         "memory_stats":{}}
-        """
+            {"cpu_stats":{"cpu_usage":{"total_usage":5},"system_cpu_usage":10,"online_cpus":2},
+             "precpu_stats":{"cpu_usage":{"total_usage":0}},
+             "memory_stats":{}}
+            """
         let s = try JSONDecoder().decode(APIStats.self, from: Data(json.utf8))
         #expect(s.cpuPercent == 0)
         #expect(s.memBytes == 0)
@@ -56,10 +57,10 @@ import Testing
 
     @Test func containerDecodesFromAPI() throws {
         let json = """
-        [{"Id":"abc123","Names":["/web"],"Image":"nginx","State":"running","Status":"Up 1 minute",
-          "Ports":[{"IP":"0.0.0.0","PrivatePort":80,"PublicPort":8080,"Type":"tcp"},{"PrivatePort":443,"Type":"tcp"}],
-          "Labels":{"com.docker.compose.project":"shop"}}]
-        """
+            [{"Id":"abc123","Names":["/web"],"Image":"nginx","State":"running","Status":"Up 1 minute",
+              "Ports":[{"IP":"0.0.0.0","PrivatePort":80,"PublicPort":8080,"Type":"tcp"},{"PrivatePort":443,"Type":"tcp"}],
+              "Labels":{"com.docker.compose.project":"shop"}}]
+            """
         let list = try JSONDecoder().decode([APIContainer].self, from: Data(json.utf8))
         #expect(list.first?.Names == ["/web"])
         #expect(list.first?.Ports?.compactMap { $0.IP != nil ? $0.PublicPort : nil } == [8080])
@@ -90,7 +91,8 @@ import Testing
     private func frame(_ stream: UInt8, _ s: String) -> Data {
         let payload = Data(s.utf8)
         let n = UInt32(payload.count)
-        return Data([stream, 0, 0, 0, UInt8(n >> 24), UInt8(n >> 16 & 0xff), UInt8(n >> 8 & 0xff), UInt8(n & 0xff)]) + payload
+        return Data([stream, 0, 0, 0, UInt8(n >> 24), UInt8(n >> 16 & 0xff), UInt8(n >> 8 & 0xff), UInt8(n & 0xff)])
+            + payload
     }
 
     @Test func demuxesStdoutAndStderrFrames() {
@@ -116,7 +118,7 @@ import Testing
     @Test func ttyKeepsMultibyteCharacterSplitAcrossReads() {
         var d = LogDemuxer(tty: true)
         let bytes = Data("héllo ✓\n".utf8)
-        let cut = bytes.firstIndex(of: 0xC3)! + 1      // inside "é"
+        let cut = bytes.firstIndex(of: 0xC3)! + 1  // inside "é"
         #expect(d.feed(bytes.prefix(cut)).isEmpty)
         #expect(d.feed(bytes.dropFirst(cut)).map(\.0) == ["héllo ✓"])
     }
@@ -125,8 +127,10 @@ import Testing
         var d = LogDemuxer(tty: false)
         let bytes = Data("✓ok\n".utf8)
         var first = frame(1, ""), second = frame(1, "")
-        first.append(bytes.prefix(1)); first[7] = 1      // first byte of "✓"
-        second.append(bytes.dropFirst(1)); second[7] = UInt8(bytes.count - 1)
+        first.append(bytes.prefix(1))
+        first[7] = 1  // first byte of "✓"
+        second.append(bytes.dropFirst(1))
+        second[7] = UInt8(bytes.count - 1)
         #expect(d.feed(first).isEmpty)
         #expect(d.feed(second).map(\.0) == ["✓ok"])
     }
@@ -138,7 +142,7 @@ import Testing
 
     @Test @MainActor func clockTrimsNanoseconds() {
         let t = LogStore.clock("2026-10-02T14:03:11.123456789Z")
-        #expect(t.count == 12)          // HH:mm:ss.SSS in local time
+        #expect(t.count == 12)  // HH:mm:ss.SSS in local time
         #expect(t.hasSuffix("11.123"))
         #expect(LogStore.clock("garbage") == "")
     }

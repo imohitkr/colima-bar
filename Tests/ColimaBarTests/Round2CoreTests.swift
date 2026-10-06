@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 /// Accepts one connection and reads the request head. Then it stays silent
@@ -24,7 +25,7 @@ final class SilentDaemon: @unchecked Sendable {
             let c = accept(lfd, nil, nil)
             guard c >= 0 else { return }
             defer { close(c) }
-            UnixSocket.configure(c, timeout: 0)   // no SIGPIPE if the proxy hung up
+            UnixSocket.configure(c, timeout: 0)  // no SIGPIPE if the proxy hung up
             var buf = [UInt8](repeating: 0, count: 4096)
             var data = Data()
             while data.range(of: Data("\r\n\r\n".utf8)) == nil {
@@ -35,7 +36,8 @@ final class SilentDaemon: @unchecked Sendable {
             UnixSocket.setTimeout(c, silence)
             let n = read(c, &buf, buf.count)
             lock.withLock { eof = n == 0 }
-            _ = UnixSocket.writeAll(c, Data("HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate".utf8))
+            _ = UnixSocket.writeAll(
+                c, Data("HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nlate".utf8))
         }
     }
 
@@ -70,7 +72,12 @@ final class SilentDaemon: @unchecked Sendable {
         let lfd = try busyUpstream()
         let px = SocketProxy(upstream: upstream, path: stable)
         px.start()
-        defer { px.stop(); close(lfd); unlink(upstream); unlink(stable) }
+        defer {
+            px.stop()
+            close(lfd)
+            unlink(upstream)
+            unlink(stable)
+        }
 
         let fd = try #require(UnixSocket.connect(stable, timeout: 5))
         defer { close(fd) }
@@ -91,11 +98,17 @@ final class SilentDaemon: @unchecked Sendable {
         let lfd = try busyUpstream()
         let px = SocketProxy(upstream: upstream, path: stable)
         px.start()
-        defer { px.stop(); close(lfd); unlink(upstream); unlink(stable) }
+        defer {
+            px.stop()
+            close(lfd)
+            unlink(upstream)
+            unlink(stable)
+        }
 
         let fd = try #require(UnixSocket.connect(stable, timeout: 5))
         defer { close(fd) }
-        _ = UnixSocket.writeAll(fd, Data("POST /v1.54/build?t=app HTTP/1.1\r\nHost: d\r\nContent-Type: application/x-tar\r\n\r\n".utf8))
+        _ = UnixSocket.writeAll(
+            fd, Data("POST /v1.54/build?t=app HTTP/1.1\r\nHost: d\r\nContent-Type: application/x-tar\r\n\r\n".utf8))
         Thread.sleep(forTimeInterval: 0.3)
         #expect(px.activeTransfers() == 1)
         _ = UnixSocket.writeAll(fd, Data("Dockerfile\0\0\0\0000000644 GET /x HTTP/1.1".utf8))
@@ -108,13 +121,18 @@ final class SilentDaemon: @unchecked Sendable {
         let px = SocketProxy(upstream: upstream, path: stable)
         px.idleTimeout = 1
         px.start()
-        defer { px.stop(); close(lfd); unlink(upstream); unlink(stable) }
+        defer {
+            px.stop()
+            close(lfd)
+            unlink(upstream)
+            unlink(stable)
+        }
 
         let fd = try #require(UnixSocket.connect(stable, timeout: 10))
         defer { close(fd) }
         let started = Date()
         var buf = [UInt8](repeating: 0, count: 16)
-        #expect(read(fd, &buf, buf.count) == 0)   // send nothing: the proxy must hang up
+        #expect(read(fd, &buf, buf.count) == 0)  // send nothing: the proxy must hang up
         #expect(Date().timeIntervalSince(started) < 5)
     }
 
@@ -125,7 +143,11 @@ final class SilentDaemon: @unchecked Sendable {
         let px = SocketProxy(upstream: upstream, path: stable)
         px.idleTimeout = 1
         px.start()
-        defer { px.stop(); daemon.stop(); unlink(stable) }
+        defer {
+            px.stop()
+            daemon.stop()
+            unlink(stable)
+        }
 
         let reply = roundTrip(stable, "GET /v1.54/containers/x/attach?stream=1 HTTP/1.1\r\nHost: d\r\n\r\n")
         #expect(reply.hasSuffix("late"))
@@ -140,7 +162,11 @@ final class SilentDaemon: @unchecked Sendable {
         px.idleTimeout = 1
         px.wake = { (try? daemon.start(silence: 3)) != nil }
         px.start()
-        defer { px.stop(); daemon.stop(); unlink(stable) }
+        defer {
+            px.stop()
+            daemon.stop()
+            unlink(stable)
+        }
 
         let reply = roundTrip(stable, "GET /v1.54/events HTTP/1.1\r\nHost: d\r\n\r\n")
         #expect(reply.hasSuffix("late"))
@@ -151,9 +177,15 @@ final class SilentDaemon: @unchecked Sendable {
         unlink(upstream)
         let px = SocketProxy(upstream: upstream, path: stable)
         let woke = Counter()
-        px.wake = { woke.add(); return true }
+        px.wake = {
+            woke.add()
+            return true
+        }
         px.start()
-        defer { px.stop(); unlink(stable) }
+        defer {
+            px.stop()
+            unlink(stable)
+        }
 
         let pad = String(repeating: "a", count: SocketProxy.maxHead + 2048)
         let reply = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nX-Pad: \(pad)\r\n")
@@ -167,7 +199,10 @@ final class SilentDaemon: @unchecked Sendable {
         let px = SocketProxy(upstream: upstream, path: stable)
         px.apiVersion = "1.54"
         px.start()
-        defer { px.stop(); unlink(stable) }
+        defer {
+            px.stop()
+            unlink(stable)
+        }
 
         let fd = try #require(UnixSocket.connect(stable, timeout: 5))
         defer { close(fd) }
@@ -186,7 +221,7 @@ final class SilentDaemon: @unchecked Sendable {
         #expect(line("GET /v1.54/containers/json HTTP/1.1\r\n") == "GET /v1.54/containers/json HTTP/1.1")
         #expect(line("OPTIONS /x HTTP/1.1\r\n") == "OPTIONS /x HTTP/1.1")
         #expect(line("Dockerfile\0\0\0") == "")
-        #expect(line("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n") == "")   // BuildKit's HTTP/2 preface
+        #expect(line("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n") == "")  // BuildKit's HTTP/2 preface
         #expect(line("GETX /a HTTP/1.1") == "")
         #expect(line("GET") == "")
     }
@@ -225,13 +260,13 @@ final class SilentDaemon: @unchecked Sendable {
         #expect(AppDelegate.restart(running: "0.3.0", onDisk: nil, isAgent: false) == .none)
         #expect(AppDelegate.restart(running: "0.3.0", onDisk: "0.4.0", isAgent: true) == .agent)
         #expect(AppDelegate.restart(running: "0.3.0", onDisk: "0.4.0", isAgent: false) == .manual)
-        #expect(AppDelegate.restart(running: "0.4.0", onDisk: "0.3.0", isAgent: false) == .manual)   // downgrade
+        #expect(AppDelegate.restart(running: "0.4.0", onDisk: "0.3.0", isAgent: false) == .manual)  // downgrade
     }
 
     @Test func newerInstalledCopyTakesOver() {
         #expect(AppDelegate.takesOver(mine: "0.4.0", other: "0.3.0", installed: true))
-        #expect(!AppDelegate.takesOver(mine: "0.4.0", other: "0.3.0", installed: false))   // DMG, Downloads
-        #expect(!AppDelegate.takesOver(mine: "0.3.0", other: "0.3.0", installed: true))    // same version: reopen
+        #expect(!AppDelegate.takesOver(mine: "0.4.0", other: "0.3.0", installed: false))  // DMG, Downloads
+        #expect(!AppDelegate.takesOver(mine: "0.3.0", other: "0.3.0", installed: true))  // same version: reopen
         #expect(!AppDelegate.takesOver(mine: "0.3.0", other: "0.4.0", installed: true))
         #expect(!AppDelegate.takesOver(mine: "0.4.0", other: nil, installed: true))
         #expect(!AppDelegate.takesOver(mine: "dev", other: "0.3.0", installed: true))
@@ -249,7 +284,7 @@ final class SilentDaemon: @unchecked Sendable {
         #expect(AppDelegate.revealRequestIsFresh(now - 5, now: now))
         #expect(!AppDelegate.revealRequestIsFresh(now - 60, now: now))
         #expect(!AppDelegate.revealRequestIsFresh(now - 3600, now: now))
-        #expect(!AppDelegate.revealRequestIsFresh(now + 30, now: now))    // clock went back
+        #expect(!AppDelegate.revealRequestIsFresh(now + 30, now: now))  // clock went back
         #expect(!AppDelegate.revealRequestIsFresh(nil, now: now))
     }
 }

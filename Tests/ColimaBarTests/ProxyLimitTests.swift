@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite(.serialized) struct ProxyLimitTests {
@@ -11,10 +12,16 @@ import Testing
     @Test func outOfFdsAnswers503WithoutWake() throws {
         let p = SocketProxy(upstream: upstream, path: stable)
         let woke = Counter()
-        p.wake = { woke.add(); return true }
+        p.wake = {
+            woke.add()
+            return true
+        }
         p.connectUpstream = { _ in .failure(.socket(EMFILE)) }
         p.start()
-        defer { p.stop(); unlink(stable) }
+        defer {
+            p.stop()
+            unlink(stable)
+        }
 
         let started = Date()
         let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
@@ -28,9 +35,15 @@ import Testing
         unlink(upstream)
         let p = SocketProxy(upstream: upstream, path: stable)
         let woke = Counter()
-        p.wake = { woke.add(); return false }
+        p.wake = {
+            woke.add()
+            return false
+        }
         p.start()
-        defer { p.stop(); unlink(stable) }
+        defer {
+            p.stop()
+            unlink(stable)
+        }
 
         let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
         #expect(resp.hasPrefix("HTTP/1.1 503"))
@@ -56,13 +69,16 @@ import Testing
         let p = SocketProxy(upstream: upstream, path: stable)
         p.idleTimeout = 1
         p.start()
-        defer { p.stop(); unlink(stable) }
+        defer {
+            p.stop()
+            unlink(stable)
+        }
 
         let fd = try #require(UnixSocket.connect(stable, timeout: 10))
         defer { close(fd) }
         let started = Date()
         var buf = [UInt8](repeating: 0, count: 16)
-        let n = read(fd, &buf, buf.count)   // send nothing: the proxy must hang up
+        let n = read(fd, &buf, buf.count)  // send nothing: the proxy must hang up
         #expect(n == 0)
         #expect(Date().timeIntervalSince(started) < 5)
     }
@@ -87,8 +103,9 @@ import Testing
 
     @Test func plistRoundTripIsNotOutdated() throws {
         let exe = "/Applications/ColimaBar.app/Contents/MacOS/ColimaBar"
-        let data = try PropertyListSerialization.data(fromPropertyList: LoginItem.plistContents(exe: exe),
-                                                      format: .xml, options: 0)
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: LoginItem.plistContents(exe: exe),
+            format: .xml, options: 0)
         let read = try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
         #expect(!LoginItem.plistIsOutdated(read, exe: exe))
         let limits = read["SoftResourceLimits"] as? [String: Any]

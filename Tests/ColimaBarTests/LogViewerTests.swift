@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct LogFilterPrefilterTests {
@@ -14,15 +15,19 @@ import Testing
         }
         let folded = text.utf8.map { $0 >= 0x41 && $0 <= 0x5A ? $0 | 0x20 : $0 }
         if has(folded) { return true }
-        let cased = String(decoding: needle, as: UTF8.self).contains { !$0.isASCII && $0.lowercased() != $0.uppercased() }
+        let cased = String(decoding: needle, as: UTF8.self).contains {
+            !$0.isASCII && $0.lowercased() != $0.uppercased()
+        }
         guard cased, text.utf8.contains(where: { $0 >= 0x80 }) else { return false }
         return has(Array(text.lowercased().utf8))
     }
 
     @Test func randomLinesMatchTheSlowPath() {
-        let alphabet: [String] = ["a", "B", "k", "K", "s", "S", "i", "I", " ", ":", "ä", "Ä", "å", "Å", "\u{212B}",
-                                  "ß", "\u{1E9E}", "σ", "Σ", "ς", "ω", "\u{2126}", "\u{212A}", "İ", "ı", "\u{0307}",
-                                  "é", "É", "e\u{0301}", "ǅ", "ǆ", "Ǆ", "日", "🚀", "ж", "Ж"]
+        let alphabet: [String] = [
+            "a", "B", "k", "K", "s", "S", "i", "I", " ", ":", "ä", "Ä", "å", "Å", "\u{212B}",
+            "ß", "\u{1E9E}", "σ", "Σ", "ς", "ω", "\u{2126}", "\u{212A}", "İ", "ı", "\u{0307}",
+            "é", "É", "e\u{0301}", "ǅ", "ǆ", "Ǆ", "日", "🚀", "ж", "Ж",
+        ]
         var rng = SystemRandomNumberGenerator()
         func random(_ n: Int) -> String { (0..<n).map { _ in alphabet.randomElement(using: &rng)! }.joined() }
         var checked = 0
@@ -42,11 +47,11 @@ import Testing
 
     @Test func specialLowerCaseSources() {
         func has(_ text: String, _ query: String) -> Bool { LogFilter.contains(text, LogFilter.needle(query)) }
-        #expect(has("unit: 5 \u{212B}", "å"))       // Angstrom sign lower-cases to å
-        #expect(has("Gruß \u{1E9E}", "ẞ"))           // capital sharp s
-        #expect(has("R = 4 \u{2126}", "ω"))          // Ohm sign
+        #expect(has("unit: 5 \u{212B}", "å"))  // Angstrom sign lower-cases to å
+        #expect(has("Gruß \u{1E9E}", "ẞ"))  // capital sharp s
+        #expect(has("R = 4 \u{2126}", "ω"))  // Ohm sign
         #expect(!has("plain ascii line", "ä"))
-        #expect(has("İ", "İ"))                       // the lower case is longer than the line
+        #expect(has("İ", "İ"))  // the lower case is longer than the line
     }
 
     @Test func noCasedLettersAbovePlaneOne() {

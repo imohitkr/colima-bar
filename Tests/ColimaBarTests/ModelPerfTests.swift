@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct ContainerHealthTests {
@@ -14,9 +15,11 @@ import Testing
     }
 
     @Test func storedHealthMatchesTheOldParser() {
-        for status in ["Up 2 hours (healthy)", "Up 1 minute (unhealthy)", "Up 5 seconds (health: starting)",
-                       "Up 3 days", "Exited (1) 2 minutes ago", "Created", "", "Up 1 hour (Paused)",
-                       "Up 4 minutes (healthy) (unhealthy)"] {
+        for status in [
+            "Up 2 hours (healthy)", "Up 1 minute (unhealthy)", "Up 5 seconds (health: starting)",
+            "Up 3 days", "Exited (1) 2 minutes ago", "Created", "", "Up 1 hour (Paused)",
+            "Up 4 minutes (healthy) (unhealthy)",
+        ] {
             #expect(ctr(status).health == oldHealth(status), "\(status)")
             #expect(Container.health(status: status) == oldHealth(status), "\(status)")
         }
@@ -30,9 +33,11 @@ import Testing
     }
 
     @Test func derivedListsSplitAndCount() {
-        let list = [ctr("Up 1 minute (unhealthy)"), ctr("Exited (0) 1 hour ago", state: "exited"),
-                    ctr("Up 2 hours (healthy)", state: "paused"), ctr("Restarting", state: "restarting"),
-                    ctr("Created", state: "created")]
+        let list = [
+            ctr("Up 1 minute (unhealthy)"), ctr("Exited (0) 1 hour ago", state: "exited"),
+            ctr("Up 2 hours (healthy)", state: "paused"), ctr("Restarting", state: "restarting"),
+            ctr("Created", state: "created"),
+        ]
         let d = ColimaModel.derivedLists(list)
         #expect(d.running == list.filter(\.isRunning))
         #expect(d.stopped == list.filter { !$0.isRunning })
@@ -77,10 +82,11 @@ import Testing
     @Test func watchesProfilesAndLimaInstancesOnly() throws {
         let root = try tempRoot()
         defer { try? FileManager.default.removeItem(atPath: root) }
-        #expect(ColimaDirWatcher.watchPaths(root: root) == [
-            root, "\(root)/default", "\(root)/work",
-            "\(root)/_lima", "\(root)/_lima/colima", "\(root)/_lima/colima-work",
-        ])
+        #expect(
+            ColimaDirWatcher.watchPaths(root: root) == [
+                root, "\(root)/default", "\(root)/work",
+                "\(root)/_lima", "\(root)/_lima/colima", "\(root)/_lima/colima-work",
+            ])
         #expect(ColimaDirWatcher.watchPaths(root: "\(root)/missing").isEmpty)
     }
 

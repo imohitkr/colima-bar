@@ -9,7 +9,8 @@ import PackageDescription
 // SwiftPM doesn't search; point the compiler at it when it's there. Xcode
 // toolchains (CI) find it on their own.
 let cltTestingPlugins = "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing"
-let testSettings: [SwiftSetting] = FileManager.default.fileExists(atPath: cltTestingPlugins)
+let testSettings: [SwiftSetting] =
+    FileManager.default.fileExists(atPath: cltTestingPlugins)
     ? [.unsafeFlags(["-plugin-path", cltTestingPlugins])]
     : []
 

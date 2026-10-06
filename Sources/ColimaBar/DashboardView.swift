@@ -77,8 +77,12 @@ struct DashboardView: View {
                 TextField("Filter \(ui.tab.rawValue.lowercased())", text: $ui.search)
                     .textFieldStyle(.plain).focused($searchFocused)
                 if !ui.search.isEmpty {
-                    Button { ui.search = "" } label: { Image(systemName: "xmark.circle.fill") }
-                        .buttonStyle(.plain).foregroundStyle(.secondary)
+                    Button {
+                        ui.search = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain).foregroundStyle(.secondary)
                 }
             }
             .padding(.horizontal, 7).padding(.vertical, 4)
@@ -175,14 +179,18 @@ struct FooterView: View {
             IconButton("doc.text", Help.config) { model.ctl("config") }
             IconButton("list.bullet.rectangle", Help.log) { model.ctl("logs") }
             Spacer()
-            Button { Task { await Updater.shared.check(manual: true) } } label: {
+            Button {
+                Task { await Updater.shared.check(manual: true) }
+            } label: {
                 Text("v\(AppDelegate.version)").font(.caption2.monospacedDigit())
                     .lineLimit(1).truncationMode(.middle).frame(maxWidth: 120)
             }
             .buttonStyle(.borderless).foregroundStyle(.secondary)
             .hint(Help.version(AppDelegate.version))
             if let r = Updater.shared.available {
-                Button { Updater.shared.openReleasePage() } label: {
+                Button {
+                    Updater.shared.openReleasePage()
+                } label: {
                     Label("Update \(r.version)", systemImage: "arrow.down.circle.fill")
                         .font(.caption.weight(.medium))
                 }
@@ -217,7 +225,9 @@ struct StoppedView: View {
                     Text("It will start by itself when something uses docker.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                Button { model.ctl("start") } label: {
+                Button {
+                    model.ctl("start")
+                } label: {
                     Label("Start Colima", systemImage: "play.fill").frame(width: 160)
                 }
                 .controlSize(.large).buttonStyle(.borderedProminent)
@@ -277,12 +287,16 @@ struct LiveTiles: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Tile(title: "CPU", value: cpuText, detail: "of \(model.vm.cpus) cores",
-                 history: model.cpuHistory, tint: .blue)
-                .hint(Help.cpuTile)
-            Tile(title: "Memory", value: memText, detail: "of \(model.vm.memGB) GB",
-                 history: model.memHistory, tint: .purple)
-                .hint(Help.memTile)
+            Tile(
+                title: "CPU", value: cpuText, detail: "of \(model.vm.cpus) cores",
+                history: model.cpuHistory, tint: .blue
+            )
+            .hint(Help.cpuTile)
+            Tile(
+                title: "Memory", value: memText, detail: "of \(model.vm.memGB) GB",
+                history: model.memHistory, tint: .purple
+            )
+            .hint(Help.memTile)
             ContainersTile(model: model)
         }
     }
@@ -415,7 +429,9 @@ struct SectionHeader<Trailing: View>: View {
     var body: some View {
         HStack(spacing: 4) {
             if let collapsed {
-                Button { collapsed.wrappedValue.toggle() } label: {
+                Button {
+                    collapsed.wrappedValue.toggle()
+                } label: {
                     Image(systemName: collapsed.wrappedValue ? "chevron.right" : "chevron.down")
                         .font(.caption2.weight(.bold)).frame(width: 12)
                     Text(title).font(.caption.weight(.semibold))

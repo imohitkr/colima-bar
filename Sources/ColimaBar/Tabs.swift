@@ -20,7 +20,9 @@ struct ContainersTab: View {
                 let isCollapsed = Binding(
                     get: { ui.collapsed.contains(g.key) },
                     set: { if $0 { ui.collapsed.insert(g.key) } else { ui.collapsed.remove(g.key) } })
-                SectionHeader(title: g.title, collapsed: isCollapsed, hint: g.project == nil ? Help.standalone : Help.projectGroup) {
+                SectionHeader(
+                    title: g.title, collapsed: isCollapsed, hint: g.project == nil ? Help.standalone : Help.projectGroup
+                ) {
                     if let project = g.project {
                         IconButton("play.fill", "Start all in \(project)") { model.project(project, "start") }
                         IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, "restart") }
@@ -56,9 +58,9 @@ struct ContainersTab: View {
     private var grouped: [Group] {
         let q = ui.search.lowercased()
         let list = model.containers.filter { c in
-            (!ui.runningOnly || c.isRunning) &&
-            (q.isEmpty || c.name.lowercased().contains(q) || c.image.lowercased().contains(q)
-                || (c.project?.lowercased().contains(q) ?? false))
+            (!ui.runningOnly || c.isRunning)
+                && (q.isEmpty || c.name.lowercased().contains(q) || c.image.lowercased().contains(q)
+                    || (c.project?.lowercased().contains(q) ?? false))
         }
         let order: (Container, Container) -> Bool = { a, b in
             a.isRunning != b.isRunning ? a.isRunning : a.name.localizedStandardCompare(b.name) == .orderedAscending
@@ -73,8 +75,10 @@ struct ContainersTab: View {
         let solo = list.filter { $0.project == nil }.sorted(by: order)
         if !solo.isEmpty {
             let up = solo.filter(\.isRunning).count
-            out.append(Group(key: "~standalone", title: "Standalone  ·  \(up)/\(solo.count) running",
-                             project: nil, items: solo))
+            out.append(
+                Group(
+                    key: "~standalone", title: "Standalone  ·  \(up)/\(solo.count) running",
+                    project: nil, items: solo))
         }
         return out
     }
@@ -109,9 +113,11 @@ struct AlertsStrip: View {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption)
                         VStack(alignment: .leading, spacing: 0) {
                             Text("\(a.title): \(a.body)").font(.system(size: 11)).lineLimit(1)
-                            Text(a.date.formatted(date: .omitted, time: .shortened)
-                                 + (a.containerID != nil && ctr == nil ? " · container removed" : ""))
-                                .font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text(
+                                a.date.formatted(date: .omitted, time: .shortened)
+                                    + (a.containerID != nil && ctr == nil ? " · container removed" : "")
+                            )
+                            .font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                         Spacer()
                         if let ctr {
@@ -175,7 +181,9 @@ struct ContainerRow: View {
         HStack(spacing: 0) {
             if c.isRunning {
                 IconButton("text.alignleft", Help.logs) { model.openLogs(id: c.id, name: c.name) }
-                IconButton("chevron.left.forwardslash.chevron.right", Help.shell) { model.terminal("ctr-shell", c.name) }
+                IconButton("chevron.left.forwardslash.chevron.right", Help.shell) {
+                    model.terminal("ctr-shell", c.name)
+                }
                 IconButton("arrow.clockwise", Help.ctrRestart) { model.container(c.id, "restart") }
                 IconButton("stop.fill", Help.ctrStop) { model.container(c.id, "stop") }
             } else {
@@ -247,7 +255,9 @@ struct ImagesTab: View {
 
     var body: some View {
         let q = search.lowercased()
-        let list = model.images.filter { q.isEmpty || $0.repo.lowercased().contains(q) || $0.tag.lowercased().contains(q) }
+        let list = model.images.filter {
+            q.isEmpty || $0.repo.lowercased().contains(q) || $0.tag.lowercased().contains(q)
+        }
         let unused = model.images.filter { $0.containers == 0 }
         // Lazy: a long list builds only the rows on screen.
         LazyVStack(alignment: .leading, spacing: 6) {
@@ -284,8 +294,10 @@ struct ImagesTab: View {
                         if !i.dangling { Button("Pull latest of this tag") { model.ctl("img-pull", i.ref) } }
                         Divider()
                         Button("Remove…") { model.ctl("img-rm", i.ref) }
-                    } label: { Image(systemName: "ellipsis") }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
                 }
                 .padding(.vertical, 4).padding(.horizontal, 6)
                 .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
@@ -302,7 +314,9 @@ struct VolumesTab: View {
 
     var body: some View {
         let q = search.lowercased()
-        let list = model.volumes.filter { q.isEmpty || $0.name.lowercased().contains(q) || ($0.project?.lowercased().contains(q) ?? false) }
+        let list = model.volumes.filter {
+            q.isEmpty || $0.name.lowercased().contains(q) || ($0.project?.lowercased().contains(q) ?? false)
+        }
         let unused = model.volumes.filter { $0.links == 0 }
         // Lazy: a long list builds only the rows on screen.
         LazyVStack(alignment: .leading, spacing: 6) {
@@ -317,11 +331,18 @@ struct VolumesTab: View {
                     VStack(alignment: .leading, spacing: 1) {
                         Text(v.anonymous ? String(v.name.prefix(12)) + "…" : v.name)
                             .font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
-                        Text([v.project.map { "compose: \($0)" }, v.anonymous ? "anonymous" : nil,
-                              v.links > 0 ? "used by \(v.links)" : "unused"].compactMap { $0 }.joined(separator: " · "))
-                            .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
+                        Text(
+                            [
+                                v.project.map { "compose: \($0)" }, v.anonymous ? "anonymous" : nil,
+                                v.links > 0 ? "used by \(v.links)" : "unused",
+                            ].compactMap { $0 }.joined(separator: " · ")
+                        )
+                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .hint(v.anonymous ? Help.anonymous : v.links == 0 ? Help.unusedVolume : "Volume \(v.name), used by \(v.links) container(s).")
+                    .hint(
+                        v.anonymous
+                            ? Help.anonymous
+                            : v.links == 0 ? Help.unusedVolume : "Volume \(v.name), used by \(v.links) container(s).")
                     Spacer(minLength: 4)
                     Text(Fmt.bytes(v.size)).font(.system(size: 11).monospacedDigit())
                         .frame(width: 60, alignment: .trailing)
@@ -329,8 +350,10 @@ struct VolumesTab: View {
                         Button("Copy name") { copy(v.name) }
                         Divider()
                         Button("Remove…") { model.ctl("vol-rm", v.name) }.disabled(v.links > 0)
-                    } label: { Image(systemName: "ellipsis") }
-                        .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
+                    } label: {
+                        Image(systemName: "ellipsis")
+                    }
+                    .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
                 }
                 .padding(.vertical, 4).padding(.horizontal, 6)
                 .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
@@ -349,9 +372,9 @@ final class SystemForm {
     var cpu = 0
     var mem = 0
     var loginEnabled = LoginItem.isEnabled
-    var loginNeedsApproval = false   // filled in off the main thread (runs launchctl)
+    var loginNeedsApproval = false  // filled in off the main thread (runs launchctl)
     var linking = false
-    var customIdle = false        // "Custom" picked in the auto-stop picker
+    var customIdle = false  // "Custom" picked in the auto-stop picker
     var customMinutes = ""
 }
 
@@ -401,14 +424,18 @@ struct SystemTab: View {
             HStack(spacing: 6) {
                 ForEach(presets, id: \.0) { p in
                     let active = p.1 == model.vm.cpus && p.2 == model.vm.memGB
-                    Button { model.ctl("resources", "\(p.1)", "\(p.2)") } label: {
+                    Button {
+                        model.ctl("resources", "\(p.1)", "\(p.2)")
+                    } label: {
                         VStack(spacing: 1) {
                             Text(p.0).font(.system(size: 11, weight: .semibold))
                             Text("\(p.1) CPU · \(p.2) GB").font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
-                        .background(active ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08),
-                                    in: RoundedRectangle(cornerRadius: 6))
+                        .background(
+                            active ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08),
+                            in: RoundedRectangle(cornerRadius: 6)
+                        )
                         .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? Color.accentColor : .clear))
                     }
                     .buttonStyle(.plain).disabled(active)
@@ -418,15 +445,21 @@ struct SystemTab: View {
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 GridRow {
                     Text("CPU").font(.caption).foregroundStyle(.secondary)
-                    Picker("", selection: $form.cpu) { ForEach(Self.options(cpuOpts, model.vm.cpus, form.cpu), id: \.self) { Text("\($0)").tag($0) } }
-                        .pickerStyle(.segmented).labelsHidden()
-                        .hint(Help.cpu)
+                    Picker("", selection: $form.cpu) {
+                        ForEach(Self.options(cpuOpts, model.vm.cpus, form.cpu), id: \.self) { Text("\($0)").tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    .hint(Help.cpu)
                 }
                 GridRow {
                     Text("Memory").font(.caption).foregroundStyle(.secondary)
-                    Picker("", selection: $form.mem) { ForEach(Self.options(memOpts, model.vm.memGB, form.mem), id: \.self) { Text("\($0) GB").tag($0) } }
-                        .pickerStyle(.segmented).labelsHidden()
-                        .hint(Help.memory)
+                    Picker("", selection: $form.mem) {
+                        ForEach(Self.options(memOpts, model.vm.memGB, form.mem), id: \.self) {
+                            Text("\($0) GB").tag($0)
+                        }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    .hint(Help.memory)
                 }
             }
             HStack {
@@ -462,7 +495,10 @@ struct SystemTab: View {
             SectionHeader(title: "Disk usage")
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
                 GridRow {
-                    Text("Type"); Text("Count"); Text("Size"); Text("Reclaimable").hint(Help.dfReclaimable)
+                    Text("Type")
+                    Text("Count")
+                    Text("Size")
+                    Text("Reclaimable").hint(Help.dfReclaimable)
                 }
                 .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
                 ForEach(model.df) { r in
@@ -492,9 +528,14 @@ struct SystemTab: View {
             }
             .hint(Help.autoStart)
             VStack(alignment: .leading, spacing: 3) {
-                RouteRow(ok: model.routing.context, text: "docker context: \(Routing.contextName)", help: Help.routeContext)
-                RouteRow(ok: model.routing.launchd, text: "Apps & IDE test runners (launchd DOCKER_HOST)", help: Help.routeLaunchd)
-                RouteRow(ok: model.routing.testcontainers, text: "testcontainers (~/.testcontainers.properties)", help: Help.routeTestcontainers)
+                RouteRow(
+                    ok: model.routing.context, text: "docker context: \(Routing.contextName)", help: Help.routeContext)
+                RouteRow(
+                    ok: model.routing.launchd, text: "Apps & IDE test runners (launchd DOCKER_HOST)",
+                    help: Help.routeLaunchd)
+                RouteRow(
+                    ok: model.routing.testcontainers, text: "testcontainers (~/.testcontainers.properties)",
+                    help: Help.routeTestcontainers)
                 HStack {
                     RouteRow(ok: model.routing.varRun, text: "/var/run/docker.sock", help: Help.routeVarRun)
                     if !model.routing.varRun {
@@ -551,8 +592,10 @@ struct SystemTab: View {
             .disabled(!model.autoStop)
             .padding(.leading, 22)
             if model.autoStop, let since = model.idleSince {
-                Text("Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(since.addingTimeInterval(Double(model.autoStopMinutes * 60)).formatted(date: .omitted, time: .shortened)).")
-                    .font(.caption2).foregroundStyle(.secondary)
+                Text(
+                    "Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(since.addingTimeInterval(Double(model.autoStopMinutes * 60)).formatted(date: .omitted, time: .shortened))."
+                )
+                .font(.caption2).foregroundStyle(.secondary)
             }
             Toggle(isOn: $model.hideIconWhenStopped) {
                 Label("Hide menu bar icon while Colima is stopped", systemImage: "eye.slash")
@@ -561,38 +604,46 @@ struct SystemTab: View {
             .hint(Help.hideIcon)
 
             if model.profiles.count > 1 {
-            Divider()
-            SectionHeader(title: "Profiles", hint: Help.profiles) { EmptyView() }
-            ForEach(model.profiles) { p in
-                HStack(spacing: 8) {
-                    Circle().fill(p.running ? Color.green : .secondary.opacity(0.5)).frame(width: 7, height: 7)
-                    Text(p.name).font(.system(size: 12, weight: p.name == model.profile ? .semibold : .regular))
-                    Text("\(p.cpus) CPU · \(p.memGB) GB").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    if p.name != model.profile {
-                        Button("Show") { model.profile = p.name }.controlSize(.mini)
-                            .hint("Switch the dashboard to the \(p.name) profile.")
+                Divider()
+                SectionHeader(title: "Profiles", hint: Help.profiles) { EmptyView() }
+                ForEach(model.profiles) { p in
+                    HStack(spacing: 8) {
+                        Circle().fill(p.running ? Color.green : .secondary.opacity(0.5)).frame(width: 7, height: 7)
+                        Text(p.name).font(.system(size: 12, weight: p.name == model.profile ? .semibold : .regular))
+                        Text("\(p.cpus) CPU · \(p.memGB) GB").font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        if p.name != model.profile {
+                            Button("Show") { model.profile = p.name }.controlSize(.mini)
+                                .hint("Switch the dashboard to the \(p.name) profile.")
+                        }
                     }
                 }
-            }
             }
 
             Divider()
             SectionHeader(title: "App")
-            Toggle("Check for new versions daily", isOn: Binding(
-                get: { Updater.shared.enabled }, set: { Updater.shared.enabled = $0 }))
-                .hint(Help.checkUpdates)
+            Toggle(
+                "Check for new versions daily",
+                isOn: Binding(
+                    get: { Updater.shared.enabled }, set: { Updater.shared.enabled = $0 })
+            )
+            .hint(Help.checkUpdates)
             Toggle("Notify when a container crashes, OOMs or turns unhealthy", isOn: $model.notifyOnCrash)
                 .hint(Help.notify)
-            Toggle("Launch ColimaBar at login", isOn: Binding(get: { form.loginEnabled || form.loginNeedsApproval }, set: { on in
-                do {
-                    try LoginItem.set(on)
-                } catch {
-                    model.notify("Login item change failed: \(error.localizedDescription)")
-                }
-                form.loginEnabled = LoginItem.isEnabled
-                form.loginNeedsApproval = false
-            }))
+            Toggle(
+                "Launch ColimaBar at login",
+                isOn: Binding(
+                    get: { form.loginEnabled || form.loginNeedsApproval },
+                    set: { on in
+                        do {
+                            try LoginItem.set(on)
+                        } catch {
+                            model.notify("Login item change failed: \(error.localizedDescription)")
+                        }
+                        form.loginEnabled = LoginItem.isEnabled
+                        form.loginNeedsApproval = false
+                    })
+            )
             .hint(Help.login)
             if form.loginNeedsApproval {
                 HStack(spacing: 6) {
@@ -641,8 +692,10 @@ struct SystemTab: View {
     /// A preset's minutes, or IdleMinutes.custom while the custom field shows.
     private var idleSelection: Binding<Int> {
         Binding(
-            get: { form.customIdle || !IdleMinutes.presets.contains(model.autoStopMinutes)
-                ? IdleMinutes.custom : model.autoStopMinutes },
+            get: {
+                form.customIdle || !IdleMinutes.presets.contains(model.autoStopMinutes)
+                    ? IdleMinutes.custom : model.autoStopMinutes
+            },
             set: { v in
                 if v == IdleMinutes.custom {
                     form.customIdle = true
@@ -657,7 +710,9 @@ struct SystemTab: View {
     /// Applies the custom field. A preset picked after "Custom" wins: the
     /// field's focus loss and disappearance must not undo it.
     private func applyCustomIdle() {
-        guard form.customIdle, let n = IdleMinutes.commit(form.customMinutes, current: model.autoStopMinutes) else { return }
+        guard form.customIdle, let n = IdleMinutes.commit(form.customMinutes, current: model.autoStopMinutes) else {
+            return
+        }
         model.autoStopMinutes = n
     }
 }

@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct PipelinedRequestTests {
@@ -80,11 +81,16 @@ import Testing
         let lfd = try busyUpstream()
         let px = SocketProxy(upstream: upstream, path: stable)
         px.start()
-        defer { px.stop(); close(lfd); unlink(upstream); unlink(stable) }
+        defer {
+            px.stop()
+            close(lfd)
+            unlink(upstream)
+            unlink(stable)
+        }
         let fd = try #require(UnixSocket.connect(stable, timeout: 5))
         defer { close(fd) }
         for c in chunks {
-            _ = UnixSocket.writeAll(fd, Data(c.utf8))   // one write: one read on the proxy side
+            _ = UnixSocket.writeAll(fd, Data(c.utf8))  // one write: one read on the proxy side
             Thread.sleep(forTimeInterval: 0.3)
         }
         return px.activeTransfers()

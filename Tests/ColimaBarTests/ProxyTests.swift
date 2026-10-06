@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 /// A one-request-per-connection HTTP server on a unix socket, standing in for
@@ -29,14 +30,18 @@ final class FakeDaemon: @unchecked Sendable {
                 }
                 let line = String(decoding: data, as: UTF8.self).components(separatedBy: "\r\n").first ?? ""
                 lock.withLock { requests.append(line) }
-                _ = UnixSocket.writeAll(c, Data("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello".utf8))
+                _ = UnixSocket.writeAll(
+                    c, Data("HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello".utf8))
                 close(c)
             }
         }
     }
 
     func stop() {
-        if fd >= 0 { close(fd); fd = -1 }
+        if fd >= 0 {
+            close(fd)
+            fd = -1
+        }
         unlink(path)
     }
 
@@ -67,7 +72,7 @@ func roundTrip(_ path: String, _ request: String, until: String? = nil) -> Strin
 
     @Test func pingReplyOnlyForPings() {
         let p = SocketProxy(upstream: upstream, path: stable)
-        #expect(p.pingReply("HEAD /_ping HTTP/1.1") == nil)   // API version unknown yet
+        #expect(p.pingReply("HEAD /_ping HTTP/1.1") == nil)  // API version unknown yet
         p.apiVersion = "1.54"
         let head = String(decoding: p.pingReply("HEAD /_ping HTTP/1.1")!, as: UTF8.self)
         #expect(head.contains("Api-Version: 1.54"))
@@ -84,7 +89,10 @@ func roundTrip(_ path: String, _ request: String, until: String? = nil) -> Strin
         defer { daemon.stop() }
         let p = SocketProxy(upstream: upstream, path: stable)
         p.start()
-        defer { p.stop(); unlink(stable) }
+        defer {
+            p.stop()
+            unlink(stable)
+        }
 
         let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
         #expect(resp.hasSuffix("hello"))
@@ -99,11 +107,15 @@ func roundTrip(_ path: String, _ request: String, until: String? = nil) -> Strin
         let woke = Counter()
         p.wake = {
             woke.add()
-            try? daemon.start()          // "Colima" comes up
+            try? daemon.start()  // "Colima" comes up
             return true
         }
         p.start()
-        defer { p.stop(); daemon.stop(); unlink(stable) }
+        defer {
+            p.stop()
+            daemon.stop()
+            unlink(stable)
+        }
 
         // docker's preflight ping must not boot the VM...
         let ping = roundTrip(stable, "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n", until: "\r\n\r\n")
@@ -111,8 +123,10 @@ func roundTrip(_ path: String, _ request: String, until: String? = nil) -> Strin
         #expect(woke.value == 0)
 
         // ...but a real request on the same connection does, and goes through.
-        let resp = roundTrip(stable, "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n"
-                             + "POST /v1.54/containers/create HTTP/1.1\r\nHost: docker\r\nContent-Length: 0\r\n\r\n")
+        let resp = roundTrip(
+            stable,
+            "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n"
+                + "POST /v1.54/containers/create HTTP/1.1\r\nHost: docker\r\nContent-Length: 0\r\n\r\n")
         #expect(resp.hasSuffix("hello"))
         #expect(woke.value == 1)
         #expect(daemon.seen == ["POST /v1.54/containers/create HTTP/1.1"])
@@ -123,7 +137,10 @@ func roundTrip(_ path: String, _ request: String, until: String? = nil) -> Strin
         let p = SocketProxy(upstream: upstream, path: stable)
         p.wake = { false }
         p.start()
-        defer { p.stop(); unlink(stable) }
+        defer {
+            p.stop()
+            unlink(stable)
+        }
         let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
         #expect(resp.hasPrefix("HTTP/1.1 503"))
         #expect(resp.contains("could not start Colima"))

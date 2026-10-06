@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct CustomIdleCommitTests {
@@ -33,7 +34,7 @@ import Testing
 
     @Test func listedOrUnknownValuesAddNothing() {
         #expect(SystemTab.options(cpu, 4, 8) == cpu)
-        #expect(SystemTab.options(cpu, 0, 0) == cpu)     // VM facts not loaded yet
+        #expect(SystemTab.options(cpu, 0, 0) == cpu)  // VM facts not loaded yet
         #expect(SystemTab.options(mem) == mem)
     }
 }
@@ -49,7 +50,7 @@ import Testing
         var g = DFGate()
         var steps = [ask(&g, at: 0), ask(&g, at: 0)]  // the second is already scheduled
         g.begin()
-        steps += [ask(&g, at: 0), ask(&g, at: 0)]     // in flight: remembered
+        steps += [ask(&g, at: 0), ask(&g, at: 0)]  // in flight: remembered
         // Requests during the run join into one more run after the gap.
         steps += [done(&g, at: 5), ask(&g, at: 6)]
         #expect(steps == [.run(after: 0), .none, .none, .none, .run(after: 30), .none])
@@ -80,7 +81,7 @@ import Testing
     @Test func skipAllowsALaterRequest() {
         var g = DFGate()
         _ = ask(&g, at: 0)
-        g.skip()                                      // the tab closed during the wait
+        g.skip()  // the tab closed during the wait
         let step = ask(&g, at: 0)
         #expect(step == .run(after: 0))
     }
@@ -104,8 +105,10 @@ import Testing
         #expect(Set(f.keys) == ["type", "event"])
         #expect(Set(f["type"] ?? []) == ["builder", "container", "image", "volume"])
         let actions = Set(f["event"] ?? [])
-        for a in ["create", "start", "restart", "die", "stop", "kill", "oom", "pause", "unpause", "rename",
-                  "destroy", "health_status", "pull", "tag", "untag", "delete", "import", "load", "prune", "commit"] {
+        for a in [
+            "create", "start", "restart", "die", "stop", "kill", "oom", "pause", "unpause", "rename",
+            "destroy", "health_status", "pull", "tag", "untag", "delete", "import", "load", "prune", "commit",
+        ] {
             #expect(actions.contains(a), "\(a)")
         }
     }
@@ -117,9 +120,11 @@ import Testing
         for a in ["health_status: unhealthy", "health_status: healthy", "die", "oom", "destroy"] {
             #expect(passes(a), "\(a)")
         }
-        for a in ["exec_create: sh -c true", "exec_start: sh -c true", "exec_die", "exec_detach", "top",
-                  "attach", "detach", "copy", "export", "resize", "update", "mount", "unmount",
-                  "archive-path", "extract-to-dir", "push", "save"] {
+        for a in [
+            "exec_create: sh -c true", "exec_start: sh -c true", "exec_die", "exec_detach", "top",
+            "attach", "detach", "copy", "export", "resize", "update", "mount", "unmount",
+            "archive-path", "extract-to-dir", "push", "save",
+        ] {
             #expect(!passes(a), "\(a)")
         }
     }
@@ -152,7 +157,10 @@ import Testing
 private actor Gauge {
     var now = 0
     var peak = 0
-    func enter() { now += 1; peak = max(peak, now) }
+    func enter() {
+        now += 1
+        peak = max(peak, now)
+    }
     func leave() { now -= 1 }
 }
 
@@ -175,7 +183,11 @@ private actor Gauge {
 
 @Suite struct LogByteBudgetTests {
     private func lines(_ n: Int, size: Int) -> [LogLine] {
-        (0..<n).map { i in LogLine(id: 0, time: "", text: String(format: "%05d", i) + String(repeating: "x", count: size - 5), stderr: false) }
+        (0..<n).map { i in
+            LogLine(
+                id: 0, time: "", text: String(format: "%05d", i) + String(repeating: "x", count: size - 5),
+                stderr: false)
+        }
     }
 
     @Test func dropCountHonoursBothLimits() {
@@ -189,7 +201,7 @@ private actor Gauge {
 
     @Test func bufferKeepsNewestLinesWithinTheByteBudget() {
         let b = LogBuffer(cap: 10_000, byteCap: 10_000)
-        for _ in 0..<50 { _ = b.push(lines(100, size: 100), lastTimestamp: nil) }   // 500 kB pushed
+        for _ in 0..<50 { _ = b.push(lines(100, size: 100), lastTimestamp: nil) }  // 500 kB pushed
         let out = b.drain()
         #expect(out.count == 100)
         #expect(out.reduce(0) { $0 + $1.text.utf8.count } <= 10_000)
@@ -199,19 +211,21 @@ private actor Gauge {
 
     @Test func bufferCountsMultibyteText() {
         let b = LogBuffer(cap: 10_000, byteCap: 1000)
-        let wide = (0..<20).map { _ in LogLine(id: 0, time: "", text: String(repeating: "é", count: 50), stderr: false) }
-        _ = b.push(wide, lastTimestamp: nil)                                        // 100 bytes each
+        let wide = (0..<20).map { _ in LogLine(id: 0, time: "", text: String(repeating: "é", count: 50), stderr: false)
+        }
+        _ = b.push(wide, lastTimestamp: nil)  // 100 bytes each
         #expect(b.drain().count == 10)
     }
 
     @Test @MainActor func storeTrimsToTheByteBudget() {
-        let store = LogStore(api: DockerAPI(socketPath: "/nonexistent"), containerID: "c", name: "n",
-                             maxLines: 100_000, maxBytes: 16_000)
+        let store = LogStore(
+            api: DockerAPI(socketPath: "/nonexistent"), containerID: "c", name: "n",
+            maxLines: 100_000, maxBytes: 16_000)
         let b = LogBuffer(cap: 100_000, byteCap: 1 << 30)
         _ = b.push(lines(160, size: 100), lastTimestamp: nil)
         store.ingest(b.drain())
-        #expect(store.lines.count == 160)                       // at the budget: no trim
-        _ = b.push(lines(10, size: 100), lastTimestamp: nil)     // within the slack (1/16)
+        #expect(store.lines.count == 160)  // at the budget: no trim
+        _ = b.push(lines(10, size: 100), lastTimestamp: nil)  // within the slack (1/16)
         store.ingest(b.drain())
         #expect(store.lines.count == 170)
         store.search = "x"
@@ -239,15 +253,16 @@ private actor Gauge {
     /// What the filter did before: lower-case both sides, then compare bytes.
     private func old(_ text: String, _ query: String) -> Bool {
         let n = Array(query.lowercased().utf8)
-        return n.isEmpty || Array(text.lowercased().utf8).withUnsafeBufferPointer { h in
-            n.withUnsafeBufferPointer { memmem(h.baseAddress, h.count, $0.baseAddress, $0.count) != nil }
-        }
+        return n.isEmpty
+            || Array(text.lowercased().utf8).withUnsafeBufferPointer { h in
+                n.withUnsafeBufferPointer { memmem(h.baseAddress, h.count, $0.baseAddress, $0.count) != nil }
+            }
     }
 
     @Test func foldsASCIIOnTheRawText() {
         #expect(has("Connection REFUSED by Upstream", "refused"))
         #expect(has("Connection REFUSED by Upstream", "UPSTREAM"))
-        #expect(has("[@`{] brackets", "[@`{]"))           // bytes next to A-Z and a-z do not fold
+        #expect(has("[@`{] brackets", "[@`{]"))  // bytes next to A-Z and a-z do not fold
         #expect(!has("[@`{]", "{`@["))
         #expect(!has("abc", "abd"))
     }
@@ -258,7 +273,7 @@ private actor Gauge {
         #expect(has("Grüße aus KÖLN", "köln"))
         #expect(has("Fehler: Datei FEHLT – Größe 0", "größe 0"))
         #expect(has("日本語のログ 🚀 DONE", "🚀 done"))
-        #expect(!has("Grüße", "GRÜSSE"))                   // no full case folding, as before
+        #expect(!has("Grüße", "GRÜSSE"))  // no full case folding, as before
         #expect(!has("Köln", "koln"))
         #expect(!has("ÁRBOL", "árboles"))
     }
@@ -275,15 +290,19 @@ private actor Gauge {
         func word(_ n: Int) -> String { String((0..<n).map { _ in alphabet.randomElement(using: &rng)! }) }
         for _ in 0..<3000 {
             let text = word(Int.random(in: 0...40, using: &rng))
-            let query = Bool.random(using: &rng) && text.count > 2
-                ? String(text.dropFirst(Int.random(in: 0...2, using: &rng)).prefix(Int.random(in: 1...6, using: &rng))).uppercased()
+            let query =
+                Bool.random(using: &rng) && text.count > 2
+                ? String(text.dropFirst(Int.random(in: 0...2, using: &rng)).prefix(Int.random(in: 1...6, using: &rng)))
+                    .uppercased()
                 : word(Int.random(in: 1...3, using: &rng))
             #expect(has(text, query) == old(text, query), "\(text) / \(query)")
         }
     }
 
     @Test func filtersTwentyThousandLinesQuickly() {
-        let lines = (0..<20_000).map { "2026-10-06 INFO worker-\($0 % 64) handled GET /api/v1/items/\($0) in \($0 % 900) ms" }
+        let lines = (0..<20_000).map {
+            "2026-10-06 INFO worker-\($0 % 64) handled GET /api/v1/items/\($0) in \($0 % 900) ms"
+        }
         var m = LogFilter.Matcher(query: "ERROR timeout")
         // The best of 5 runs, so other suites running in parallel do not count.
         var best = Duration.seconds(60)
@@ -306,7 +325,8 @@ private actor Gauge {
     private let base = "follow=1&stdout=1&stderr=1&timestamps=1"
 
     @Test func usesTheLastLineFirst() {
-        let q = LogStore.logQuery(lastTimestamp: "1970-01-01T00:00:10.5Z", lastStart: Date(timeIntervalSince1970: 99), tail: 0)
+        let q = LogStore.logQuery(
+            lastTimestamp: "1970-01-01T00:00:10.5Z", lastStart: Date(timeIntervalSince1970: 99), tail: 0)
         #expect(q == base + "&tail=all&since=10.500000001")
     }
 

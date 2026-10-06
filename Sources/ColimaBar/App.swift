@@ -23,7 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     static let bundleID = "com.imohitkr.ColimaBar"
     /// Snapshot/debug runs sit beside the real instance and must not touch
     /// the proxy socket, docker routing or login items.
-    static let isDebugRun = CommandLine.arguments.contains { ["--snapshot", "--popover", "--notify-test"].contains($0) }
+    static let isDebugRun = CommandLine.arguments.contains {
+        ["--snapshot", "--popover", "--notify-test"].contains($0)
+    }
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
@@ -33,8 +35,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var item: NSStatusItem!
     private let popover = NSPopover()
     private var window: NSWindow?
-    private var windowCounted = false          // dashboard window counted in model.visibleCount
-    private var appliedHidden: Bool?           // last icon visibility we set
+    private var windowCounted = false  // dashboard window counted in model.visibleCount
+    private var appliedHidden: Bool?  // last icon visibility we set
     private var sigterm: DispatchSourceSignal?
     private let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "app")
 
@@ -99,8 +101,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // Fixed size, and the hosting controller must not drive it: if it
         // reports its SwiftUI size after the popover is on screen, the popover
         // grows upward from its anchor and ends up off the top of the screen.
-        let host = NSHostingController(rootView:
-            DashboardView(model: model, ui: ui, openWindow: { [weak self] in self?.showWindow() }))
+        let host = NSHostingController(
+            rootView:
+                DashboardView(model: model, ui: ui, openWindow: { [weak self] in self?.showWindow() }))
         host.sizingOptions = []
         host.view.frame = NSRect(origin: .zero, size: Self.popoverSize)
         popover.contentViewController = host
@@ -187,11 +190,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // A normal quit exits 0, so launchd does not restart an old agent
         // (KeepAlive restarts only on a failed exit). Below, refreshIfNeeded()
         // points the login item at this copy, and kickstart() starts it.
-        let takeOver = !Self.isLaunchAgent && !Self.isReplacement && others.first.map {
-            Self.takesOver(mine: Self.version, other: $0.bundleURL.flatMap(Self.onDiskVersion(of:)),
-                           installed: LoginItem.isInstalled(Bundle.main.bundlePath))
-        } == true
-        if takeOver { log.notice("a newer copy takes over from \(others.first?.bundleURL?.path ?? "?", privacy: .public)") }
+        let takeOver =
+            !Self.isLaunchAgent && !Self.isReplacement
+            && others.first.map {
+                Self.takesOver(
+                    mine: Self.version, other: $0.bundleURL.flatMap(Self.onDiskVersion(of:)),
+                    installed: LoginItem.isInstalled(Bundle.main.bundlePath))
+            } == true
+        if takeOver {
+            log.notice("a newer copy takes over from \(others.first?.bundleURL?.path ?? "?", privacy: .public)")
+        }
         if Self.isLaunchAgent || Self.isReplacement || takeOver {
             // Quitting runs the other copy's shutdown, which frees the proxy
             // socket before this copy starts listening on it.
@@ -239,26 +247,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let main = NSMenu()
         func submenu(_ title: String, _ items: [NSMenuItem]) {
             let m = NSMenu(title: title)
-            items.forEach { m.addItem($0) }
+            for item in items { m.addItem(item) }
             let holder = NSMenuItem()
             holder.submenu = m
             main.addItem(holder)
         }
         // No ⌘Q: quitting stops the auto-start proxy until the next login, so
         // it is only in the right-click menu and the footer, never a reflex.
-        submenu("ColimaBar", [NSMenuItem(title: "Quit ColimaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")])
+        submenu(
+            "ColimaBar",
+            [NSMenuItem(title: "Quit ColimaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")])
         let redo = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
         redo.keyEquivalentModifierMask = [.command, .shift]
-        submenu("Edit", [
-            NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"), redo, .separator(),
-            NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"),
-            NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"),
-            NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"),
-            NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"),
-        ])
-        submenu("Window", [
-            NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"),
-        ])
+        submenu(
+            "Edit",
+            [
+                NSMenuItem(title: "Undo", action: Selector(("undo:")), keyEquivalent: "z"), redo, .separator(),
+                NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"),
+                NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"),
+                NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"),
+                NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"),
+            ])
+        submenu(
+            "Window",
+            [
+                NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+            ])
         NSApp.mainMenu = main
     }
 
@@ -276,9 +290,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         guard let layer = view.layer else { return }
         let scale = view.window?.backingScaleFactor ?? 2
         let w = Int(view.bounds.width * scale), h = Int(view.bounds.height * scale)
-        guard let ctx = CGContext(data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        guard
+            let ctx = CGContext(
+                data: nil, width: w, height: h, bitsPerComponent: 8, bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+        else { return }
         view.effectiveAppearance.performAsCurrentDrawingAppearance {
             ctx.setFillColor(NSColor.windowBackgroundColor.cgColor)
         }
@@ -313,8 +330,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             img?.isTemplate = true
             item.button?.image = img
             item.button?.title = title
-            item.button?.setAccessibilityValue(model.busy ?? (model.state == .running
-                ? "\(model.running.count) containers running" : "stopped"))
+            item.button?.setAccessibilityValue(
+                model.busy
+                    ?? (model.state == .running
+                        ? "\(model.running.count) containers running" : "stopped"))
             item.button?.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
             // Write isVisible only when our decision changes, so the system
             // (or the user) hiding the item isn't undone on every refresh.
@@ -369,11 +388,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         login.target = self
         login.state = LoginItem.isEnabled ? .on : .off
         menu.addItem(login)
-        let auto = NSMenuItem(title: "Auto-start Colima on Demand", action: #selector(toggleAutoStart), keyEquivalent: "")
+        let auto = NSMenuItem(
+            title: "Auto-start Colima on Demand", action: #selector(toggleAutoStart), keyEquivalent: "")
         auto.target = self
         auto.state = model.autoStart ? .on : .off
         menu.addItem(auto)
-        let hide = NSMenuItem(title: "Hide Icon While Colima Is Stopped", action: #selector(toggleHideIcon), keyEquivalent: "")
+        let hide = NSMenuItem(
+            title: "Hide Icon While Colima Is Stopped", action: #selector(toggleHideIcon), keyEquivalent: "")
         hide.target = self
         hide.state = model.hideIconWhenStopped ? .on : .off
         menu.addItem(hide)
@@ -389,7 +410,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         add("Quit ColimaBar", #selector(quit), key: "q")
         item.menu = menu
         item.button?.performClick(nil)
-        item.menu = nil   // so the next left click opens the popover again
+        item.menu = nil  // so the next left click opens the popover again
     }
 
     /// Turns launch-at-login on the first time the app runs; after that the
@@ -397,7 +418,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func registerLoginItemOnce() {
         let key = "didOfferLoginItem"
         guard !UserDefaults.standard.bool(forKey: key),
-              Bundle.main.bundlePath.contains("/Applications/") else { return }
+            Bundle.main.bundlePath.contains("/Applications/")
+        else { return }
         UserDefaults.standard.set(true, forKey: key)
         try? LoginItem.set(true)
     }
@@ -496,7 +518,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let restart = Self.restart(running: Self.version, onDisk: onDisk, isAgent: Self.isLaunchAgent)
         guard restart != .none else { return false }
         relaunching = true
-        log.notice("bundle on disk is \(onDisk ?? "?", privacy: .public), running \(Self.version, privacy: .public); restarting")
+        log.notice(
+            "bundle on disk is \(onDisk ?? "?", privacy: .public), running \(Self.version, privacy: .public); restarting"
+        )
         // Also for a copy started by hand: if the agent takes over from the
         // new instance, the agent reads it.
         UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.revealKey)
@@ -546,7 +570,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, !self.popover.isShown else { return }
             if let w = self.item.button?.window, w.screen != nil, w.isVisible,
-               w.occlusionState.contains(.visible) {
+                w.occlusionState.contains(.visible)
+            {
                 self.togglePopover()
             } else {
                 self.showWindow()
@@ -567,13 +592,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private func showWindow() {
         popover.performClose(nil)
         if window == nil {
-            let w = (Self.isDebugRun ? SnapshotWindow.self : NSWindow.self).init(contentRect: NSRect(x: 0, y: 0, width: 720, height: 760),
-                             styleMask: [.titled, .closable, .miniaturizable, .resizable],
-                             backing: .buffered, defer: false)
+            let w = (Self.isDebugRun ? SnapshotWindow.self : NSWindow.self).init(
+                contentRect: NSRect(x: 0, y: 0, width: 720, height: 760),
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
+                backing: .buffered, defer: false)
             w.title = "Colima"
             w.isReleasedWhenClosed = false
-            w.contentViewController = NSHostingController(rootView:
-                DashboardView(model: model, ui: ui, inWindow: true))
+            w.contentViewController = NSHostingController(
+                rootView:
+                    DashboardView(model: model, ui: ui, inWindow: true))
             // The closed window may not be freed yet and still hold the name.
             if !w.setFrameAutosaveName(Self.windowFrameName) { w.setFrameUsingName(Self.windowFrameName) }
             w.delegate = self
@@ -613,8 +640,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// screen, stops counting, so stat streams and the fast heartbeat stop.
     func windowDidChangeOcclusionState(_ n: Notification) {
         guard let w = n.object as? NSWindow, w === window else { return }
-        setWindowCounted(Self.windowCounts(visible: w.occlusionState.contains(.visible),
-                                           miniaturized: w.isMiniaturized, debug: Self.isDebugRun))
+        setWindowCounted(
+            Self.windowCounts(
+                visible: w.occlusionState.contains(.visible),
+                miniaturized: w.isMiniaturized, debug: Self.isDebugRun))
     }
 
     /// Whether the dashboard window counts in visibleCount. A debug snapshot

@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct LogTimeTests {
@@ -20,8 +21,10 @@ import Testing
 
     @Test func matchesFoundationOverManyDates() {
         // Covers leap years, month ends and both sides of 1970.
-        for s in ["1970-01-01T00:00:00Z", "1969-12-31T23:59:59Z", "2000-02-29T12:00:00Z",
-                  "2024-12-31T23:59:59Z", "2100-03-01T00:00:00Z", "2038-01-19T03:14:08Z"] {
+        for s in [
+            "1970-01-01T00:00:00Z", "1969-12-31T23:59:59Z", "2000-02-29T12:00:00Z",
+            "2024-12-31T23:59:59Z", "2100-03-01T00:00:00Z", "2038-01-19T03:14:08Z",
+        ] {
             #expect(LogTime.parse(Substring(s))?.secs == epoch(s), "\(s)")
         }
     }
@@ -38,9 +41,11 @@ import Testing
     }
 
     @Test func rejectsInvalidTimestamps() {
-        for s in ["", "nope", "2026-10-02T14:03:11", "2026-10-02T14:03:11.Z", "2026-02-30T00:00:00Z",
-                  "2026-13-01T00:00:00Z", "2026-10-02T24:00:00Z", "2026-10-02 14:03:11Z",
-                  "2026-10-02T14:03:11Zjunk", "2026-10-02T14:03:11+0200", "404 not found"] {
+        for s in [
+            "", "nope", "2026-10-02T14:03:11", "2026-10-02T14:03:11.Z", "2026-02-30T00:00:00Z",
+            "2026-13-01T00:00:00Z", "2026-10-02T24:00:00Z", "2026-10-02 14:03:11Z",
+            "2026-10-02T14:03:11Zjunk", "2026-10-02T14:03:11+0200", "404 not found",
+        ] {
             #expect(LogTime.parse(Substring(s)) == nil, "\(s)")
         }
     }
@@ -56,8 +61,10 @@ import Testing
         f.dateFormat = "HH:mm:ss"
         // Half a year apart, so one of them is in daylight saving time
         // where the local zone has it.
-        let cases = [("2026-01-15T08:09:10.987654321Z", ".987"), ("2026-07-15T23:59:59.001Z", ".001"),
-                     ("2026-03-29T01:30:00Z", ".000")]
+        let cases = [
+            ("2026-01-15T08:09:10.987654321Z", ".987"), ("2026-07-15T23:59:59.001Z", ".001"),
+            ("2026-03-29T01:30:00Z", ".000"),
+        ]
         for (s, ms) in cases {
             let t = LogTime.parse(Substring(s))!
             let date = Date(timeIntervalSince1970: TimeInterval(t.secs))
@@ -106,7 +113,7 @@ import Testing
     }
 
     @Test func nonASCIIText() {
-        #expect(has("Grüße aus Köln ✓", "GRÜSSE") == false)   // no full case folding
+        #expect(has("Grüße aus Köln ✓", "GRÜSSE") == false)  // no full case folding
         #expect(has("Grüße aus Köln ✓", "KÖLN"))
         #expect(has("ÄPFEL und Birnen", "äpfel"))
         #expect(has("日本語のログ 🚀 done", "🚀 DONE"))
@@ -124,9 +131,12 @@ import Testing
     @Test @MainActor func storeFiltersBySearchAndStderr() {
         let store = LogStore(api: DockerAPI(socketPath: "/nonexistent"), containerID: "c", name: "n")
         let b = LogBuffer(cap: 100)
-        _ = b.push([LogLine(id: 0, time: "", text: "Error: disk full", stderr: true),
-                    LogLine(id: 0, time: "", text: "all good", stderr: false),
-                    LogLine(id: 0, time: "", text: "another ERROR", stderr: false)], lastTimestamp: nil)
+        _ = b.push(
+            [
+                LogLine(id: 0, time: "", text: "Error: disk full", stderr: true),
+                LogLine(id: 0, time: "", text: "all good", stderr: false),
+                LogLine(id: 0, time: "", text: "another ERROR", stderr: false),
+            ], lastTimestamp: nil)
         store.ingest(b.drain())
         store.search = "error"
         #expect(store.visible.map(\.text) == ["Error: disk full", "another ERROR"])
@@ -168,7 +178,7 @@ import Testing
         let b = LogBuffer(cap: 10_000)
         _ = b.push(lines(100 + LogStore.trimSlack), lastTimestamp: nil)
         store.ingest(b.drain())
-        #expect(store.lines.count == 100 + LogStore.trimSlack)     // within the slack: no trim yet
+        #expect(store.lines.count == 100 + LogStore.trimSlack)  // within the slack: no trim yet
         store.search = "line 2"
         _ = b.push(lines(1), lastTimestamp: nil)
         store.ingest(b.drain())
@@ -203,11 +213,13 @@ import Testing
 
     @Test func doesNotCutMultibyteCharacters() {
         var d = LogDemuxer(tty: false)
-        let text = String(repeating: "é", count: max) + "\n"     // 2 bytes each
+        let text = String(repeating: "é", count: max) + "\n"  // 2 bytes each
         var frame = Data([1, 0, 0, 0, 0, 0, 0, 0])
         let payload = Data(text.utf8)
-        frame[4] = UInt8(payload.count >> 24); frame[5] = UInt8(payload.count >> 16 & 0xff)
-        frame[6] = UInt8(payload.count >> 8 & 0xff); frame[7] = UInt8(payload.count & 0xff)
+        frame[4] = UInt8(payload.count >> 24)
+        frame[5] = UInt8(payload.count >> 16 & 0xff)
+        frame[6] = UInt8(payload.count >> 8 & 0xff)
+        frame[7] = UInt8(payload.count & 0xff)
         let out = d.feed(frame + payload)
         #expect(out.count == 2)
         #expect(out.allSatisfy { !$0.0.contains("\u{FFFD}") })

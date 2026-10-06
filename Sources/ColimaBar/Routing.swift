@@ -1,6 +1,6 @@
 import Foundation
-import os
 import ServiceManagement
+import os
 
 /// Points every way a docker client finds its daemon at ColimaBar's stable
 /// socket (Paths.proxySocket), so `docker run` from a terminal, an IDE test
@@ -15,10 +15,10 @@ enum Routing {
     static var stableHost: String { "unix://\(Paths.proxySocket)" }
 
     struct Status: Equatable {
-        var context = false          // docker context "colimabar" is current
-        var launchd = false          // GUI apps get DOCKER_HOST
-        var testcontainers = false   // ~/.testcontainers.properties docker.host
-        var varRun = false           // /var/run/docker.sock -> stable socket
+        var context = false  // docker context "colimabar" is current
+        var launchd = false  // GUI apps get DOCKER_HOST
+        var testcontainers = false  // ~/.testcontainers.properties docker.host
+        var varRun = false  // /var/run/docker.sock -> stable socket
     }
 
     /// Applies the routes that need no admin rights. Leaves things alone if the
@@ -59,7 +59,8 @@ enum Routing {
         let env = await Shell.run(["launchctl", "getenv", "DOCKER_HOST"], timeout: 5)
         s.launchd = env.out.trimmingCharacters(in: .whitespacesAndNewlines) == stableHost
         s.testcontainers = testcontainersHost() == stableHost
-        s.varRun = (try? FileManager.default.destinationOfSymbolicLink(atPath: "/var/run/docker.sock")) == Paths.proxySocket
+        s.varRun =
+            (try? FileManager.default.destinationOfSymbolicLink(atPath: "/var/run/docker.sock")) == Paths.proxySocket
         return s
     }
 
@@ -70,9 +71,12 @@ enum Routing {
         let ls = await Shell.run(["docker", "context", "ls", "--format", "{{.Name}}"], timeout: 10)
         let names = Set(ls.out.split(separator: "\n").map(String.init))
         if !names.contains(contextName) {
-            _ = await Shell.run(["docker", "context", "create", contextName,
-                                 "--description", "ColimaBar (auto-starts Colima)",
-                                 "--docker", "host=\(stableHost)"], timeout: 10)
+            _ = await Shell.run(
+                [
+                    "docker", "context", "create", contextName,
+                    "--description", "ColimaBar (auto-starts Colima)",
+                    "--docker", "host=\(stableHost)",
+                ], timeout: 10)
             log.info("created docker context \(contextName, privacy: .public)")
         }
         let cur = await Shell.run(["docker", "context", "show"], timeout: 5).out
@@ -122,9 +126,14 @@ enum Routing {
         // Write through a symlink (dotfile managers) and keep the file's mode;
         // an atomic write would replace the link with a plain file.
         let fm = FileManager.default
-        let target = (try? fm.destinationOfSymbolicLink(atPath: Paths.testcontainersProps))
-            .map { $0.hasPrefix("/") ? $0 : ((Paths.testcontainersProps as NSString).deletingLastPathComponent as NSString)
-                .appendingPathComponent($0) } ?? Paths.testcontainersProps
+        let target =
+            (try? fm.destinationOfSymbolicLink(atPath: Paths.testcontainersProps))
+            .map {
+                $0.hasPrefix("/")
+                    ? $0
+                    : ((Paths.testcontainersProps as NSString).deletingLastPathComponent as NSString)
+                        .appendingPathComponent($0)
+            } ?? Paths.testcontainersProps
         let mode = (try? fm.attributesOfItem(atPath: target))?[.posixPermissions]
         do {
             try (lines.joined(separator: "\n") + "\n").write(toFile: target, atomically: true, encoding: .utf8)
@@ -143,7 +152,8 @@ enum Routing {
     static func linkVarRun() async -> Bool {
         let varRun = "/var/run/docker.sock"
         if let type = (try? FileManager.default.attributesOfItem(atPath: varRun))?[.type] as? FileAttributeType,
-           type != .typeSymbolicLink {
+            type != .typeSymbolicLink
+        {
             log.error("\(varRun, privacy: .public) is a real file or socket; not replacing it")
             return false
         }
@@ -151,7 +161,8 @@ enum Routing {
         // character in it can change the root shell command.
         let asPath = Paths.proxySocket.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "do shell script \"/bin/ln -sfn \" & quoted form of \"\(asPath)\" & \" \(varRun)\" with administrator privileges"
+        let script =
+            "do shell script \"/bin/ln -sfn \" & quoted form of \"\(asPath)\" & \" \(varRun)\" with administrator privileges"
         return await Shell.run(["osascript", "-e", script], timeout: 120).ok
     }
 }
@@ -235,8 +246,8 @@ enum LoginItem {
     /// kill it.
     static func refreshIfNeeded() {
         guard isEnabled, let exe = Bundle.main.executablePath,
-              let data = FileManager.default.contents(atPath: plistPath),
-              let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+            let data = FileManager.default.contents(atPath: plistPath),
+            let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
         else { return }
         let current = plist["Program"] as? String ?? ""
         guard current != exe else {
@@ -293,7 +304,8 @@ enum LoginItem {
         guard !UserDefaults.standard.bool(forKey: "didMigrateLoginItem") else { return }
         UserDefaults.standard.set(true, forKey: "didMigrateLoginItem")
         let old = SMAppService.agent(plistName: "\(legacyLabel).plist")
-        let hadOld = old.status == .enabled || old.status == .requiresApproval
+        let hadOld =
+            old.status == .enabled || old.status == .requiresApproval
             || SMAppService.mainApp.status == .enabled
         guard hadOld else { return }
         try? old.unregister()
@@ -324,9 +336,11 @@ enum LoginItem {
 
     private static func writePlist() throws {
         guard let exe = Bundle.main.executablePath else { throw CocoaError(.fileNoSuchFile) }
-        let data = try PropertyListSerialization.data(fromPropertyList: plistContents(exe: exe), format: .xml, options: 0)
-        try FileManager.default.createDirectory(atPath: (plistPath as NSString).deletingLastPathComponent,
-                                                withIntermediateDirectories: true)
+        let data = try PropertyListSerialization.data(
+            fromPropertyList: plistContents(exe: exe), format: .xml, options: 0)
+        try FileManager.default.createDirectory(
+            atPath: (plistPath as NSString).deletingLastPathComponent,
+            withIntermediateDirectories: true)
         try data.write(to: URL(fileURLWithPath: plistPath), options: .atomic)
     }
 

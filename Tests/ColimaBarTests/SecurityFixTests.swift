@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct ReleaseLinkTests {
@@ -33,7 +34,9 @@ import Testing
     @Test func pageFallsBackToLatest() {
         let good = URL(string: "https://github.com/imohitkr/colima-bar/releases/tag/v0.4.0")!
         #expect(ReleaseLink.page(good) == good)
-        #expect(ReleaseLink.page(URL(string: "http://github.com/imohitkr/colima-bar/releases/tag/v0.4.0")!) == ReleaseLink.latest)
+        #expect(
+            ReleaseLink.page(URL(string: "http://github.com/imohitkr/colima-bar/releases/tag/v0.4.0")!)
+                == ReleaseLink.latest)
         #expect(ReleaseLink.page(nil) == ReleaseLink.latest)
         #expect(ReleaseLink.latest.absoluteString == "https://github.com/imohitkr/colima-bar/releases/latest")
     }
@@ -59,9 +62,9 @@ import Testing
         #expect(t.allow(key))
         clock.now += 60
         #expect(!t.allow(key))
-        clock.now += 539   // 599 s after the first banner
+        clock.now += 539  // 599 s after the first banner
         #expect(!t.allow(key))
-        clock.now += 1     // 600 s: the window is over
+        clock.now += 1  // 600 s: the window is over
         #expect(t.allow(key))
         clock.now += 1
         #expect(!t.allow(key))

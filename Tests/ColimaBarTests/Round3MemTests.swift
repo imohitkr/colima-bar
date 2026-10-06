@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct LogTailTests {
@@ -100,7 +101,7 @@ import Testing
         s.follow = false
         ingest(s, b, lines(3000 + LogStore.trimSlack))
         #expect(s.tailStart == s.visible.count - LogTail.limit)
-        ingest(s, b, lines(1))     // past the slack: the store drops old lines
+        ingest(s, b, lines(1))  // past the slack: the store drops old lines
         #expect(s.lines.count == 3000)
         #expect(s.shown.count <= LogTail.limit + LogTail.slack)
         #expect(s.shown.last?.id == s.lines.last?.id)

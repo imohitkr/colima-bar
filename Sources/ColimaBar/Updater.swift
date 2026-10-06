@@ -12,7 +12,7 @@ final class Updater {
     static let releasesAPI = URL(string: "https://api.github.com/repos/imohitkr/colima-bar/releases/latest")!
 
     struct Release: Equatable {
-        let version: String   // without the leading "v"
+        let version: String  // without the leading "v"
         let url: URL
     }
 
@@ -31,7 +31,7 @@ final class Updater {
     func start() {
         loop?.cancel()
         loop = Task {
-            try? await Task.sleep(for: .seconds(30))   // don't compete with launch work
+            try? await Task.sleep(for: .seconds(30))  // don't compete with launch work
             while !Task.isCancelled {
                 if enabled { await check(manual: false) }
                 try? await Task.sleep(for: .seconds(24 * 60 * 60))
@@ -50,7 +50,12 @@ final class Updater {
             return
         }
         guard Version.parts(current) != nil else {
-            if manual { Self.alert("Development build", "This build (\(current)) can't be compared with releases. The latest release is \(release.version).") }
+            if manual {
+                Self.alert(
+                    "Development build",
+                    "This build (\(current)) can't be compared with releases. The latest release is \(release.version)."
+                )
+            }
             return
         }
         guard Version.isNewer(release.version, than: current) else {
@@ -60,8 +65,11 @@ final class Updater {
         }
         available = release
         if manual {
-            if Self.alert("ColimaBar \(release.version) is available", "You have \(current). Open the release page to download it?",
-                          buttons: ["Open Release Page", "Later"]) {
+            if Self.alert(
+                "ColimaBar \(release.version) is available",
+                "You have \(current). Open the release page to download it?",
+                buttons: ["Open Release Page", "Later"])
+            {
                 openReleasePage()
             }
             Defaults.set(release.version, "notifiedVersion")
@@ -70,8 +78,9 @@ final class Updater {
         // Announce each version once; the footer button stays until updated.
         if Defaults.string("notifiedVersion") != release.version {
             Defaults.set(release.version, "notifiedVersion")
-            Notifier.shared.post("ColimaBar \(release.version) is available (you have \(current)). Click to open the release page.",
-                                 title: "Update available", record: false, url: release.url)
+            Notifier.shared.post(
+                "ColimaBar \(release.version) is available (you have \(current)). Click to open the release page.",
+                title: "Update available", record: false, url: release.url)
         }
     }
 
@@ -83,7 +92,7 @@ final class Updater {
         let a = NSAlert()
         a.messageText = title
         a.informativeText = text
-        buttons.forEach { a.addButton(withTitle: $0) }
+        for button in buttons { a.addButton(withTitle: button) }
         return a.runModal() == .alertFirstButtonReturn
     }
 
@@ -98,8 +107,9 @@ final class Updater {
         do {
             let (data, resp) = try await URLSession.shared.data(for: req)
             guard (resp as? HTTPURLResponse)?.statusCode == 200,
-                  let j = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let tag = j["tag_name"] as? String else { return nil }
+                let j = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let tag = j["tag_name"] as? String
+            else { return nil }
             // html_url is not used: the page URL is built from the checked tag.
             return Release(version: Version.strip(tag), url: ReleaseLink.page(tag: tag))
         } catch {
@@ -119,7 +129,8 @@ enum ReleaseLink {
     /// vX.Y.Z (or X.Y.Z) gives the latest release page.
     static func page(tag: String) -> URL {
         guard isReleaseTag(tag),
-              let u = URL(string: "https://github.com/imohitkr/colima-bar/releases/tag/\(tag)") else { return latest }
+            let u = URL(string: "https://github.com/imohitkr/colima-bar/releases/tag/\(tag)")
+        else { return latest }
         return u
     }
 
@@ -127,9 +138,10 @@ enum ReleaseLink {
     static func isReleaseTag(_ tag: String) -> Bool {
         let core = tag.hasPrefix("v") ? tag.dropFirst() : Substring(tag)
         let parts = core.split(separator: ".", omittingEmptySubsequences: false)
-        return parts.count == 3 && parts.allSatisfy { p in
-            !p.isEmpty && p.count <= 9 && p.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 }
-        }
+        return parts.count == 3
+            && parts.allSatisfy { p in
+                !p.isEmpty && p.count <= 9 && p.utf8.allSatisfy { $0 >= 0x30 && $0 <= 0x39 }
+            }
     }
 
     static func isTrusted(_ url: URL) -> Bool {

@@ -14,7 +14,10 @@ enum UnixSocket {
     static func tryConnect(_ path: String, timeout: Int = 0) -> Result<Int32, ProxyError> {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .failure(.socket(errno)) }
-        guard var addr = address(path) else { close(fd); return .failure(.socket(ENAMETOOLONG)) }
+        guard var addr = address(path) else {
+            close(fd)
+            return .failure(.socket(ENAMETOOLONG))
+        }
         let ok = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 Darwin.connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
@@ -42,7 +45,10 @@ enum UnixSocket {
         unlink(tmp)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw ProxyError.socket(errno) }
-        guard var addr = address(tmp) else { close(fd); throw ProxyError.socket(ENAMETOOLONG) }
+        guard var addr = address(tmp) else {
+            close(fd)
+            throw ProxyError.socket(ENAMETOOLONG)
+        }
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
@@ -62,8 +68,9 @@ enum UnixSocket {
     /// left as it is.
     static func makePrivateDir(_ dir: String) {
         let own = (dir as NSString).standardizingPath == (Paths.cacheDir as NSString).standardizingPath
-        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true,
-                                                 attributes: own ? [.posixPermissions: 0o700] : nil)
+        try? FileManager.default.createDirectory(
+            atPath: dir, withIntermediateDirectories: true,
+            attributes: own ? [.posixPermissions: 0o700] : nil)
         if own { chmod(dir, 0o700) }
     }
 
@@ -321,7 +328,11 @@ final class SocketProxy: @unchecked Sendable {
                 let chunk = UnsafeRawBufferPointer(rebasing: buf[0..<n])
                 return (Data(chunk), Self.isWork(Self.lastRequestLine(chunk)))
             }
-            guard let first else { close(client); close(up); return }
+            guard let first else {
+                close(client)
+                close(up)
+                return
+            }
             splice(client, up, initial: first.0, work: first.1)
             return
         case .failed(let err):
@@ -342,19 +353,27 @@ final class SocketProxy: @unchecked Sendable {
             var found = pending.range(of: marker)
             while found == nil {
                 if pending.count >= Self.maxHead {
-                    reply(client, status: "431 Request Header Fields Too Large",
-                          "ColimaBar refused a request head larger than \(Self.maxHead / 1024) KB.")
+                    reply(
+                        client, status: "431 Request Header Fields Too Large",
+                        "ColimaBar refused a request head larger than \(Self.maxHead / 1024) KB.")
                     return
                 }
                 let n = read(client, &buf, buf.count)
                 if n < 0, errno == EINTR { continue }
-                if n <= 0 { close(client); return }
+                if n <= 0 {
+                    close(client)
+                    return
+                }
                 let from = pending.startIndex + max(0, pending.count - (marker.count - 1))
                 pending.append(buf, count: n)
                 found = pending.range(of: marker, in: from..<pending.endIndex)
             }
-            guard let head = found else { close(client); return }
-            let requestLine = String(decoding: pending[..<head.lowerBound], as: UTF8.self)
+            guard let head = found else {
+                close(client)
+                return
+            }
+            let requestLine =
+                String(decoding: pending[..<head.lowerBound], as: UTF8.self)
                 .components(separatedBy: "\r\n").first ?? ""
             if let reply = pingReply(requestLine) {
                 // VM may have come up meanwhile; prefer the real daemon.
@@ -362,7 +381,10 @@ final class SocketProxy: @unchecked Sendable {
                     splice(client, up, initial: pending, work: Self.isWork(requestLine))
                     return
                 }
-                guard UnixSocket.writeAll(client, reply) else { close(client); return }
+                guard UnixSocket.writeAll(client, reply) else {
+                    close(client)
+                    return
+                }
                 pending.removeSubrange(..<head.upperBound)
                 continue
             }
@@ -379,7 +401,8 @@ final class SocketProxy: @unchecked Sendable {
             }
             log.notice("waking Colima for: \(Self.logTarget(requestLine), privacy: .public)")
             guard waitForWake() else {
-                reply503(client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
+                reply503(
+                    client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
                 return
             }
             switch connectUpstream(upstream) {
@@ -388,7 +411,8 @@ final class SocketProxy: @unchecked Sendable {
             case .failure(.socket(let err)) where !Self.meansVMDown(err):
                 refuse(client, err)
             case .failure:
-                reply503(client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
+                reply503(
+                    client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
             }
             return
         }
@@ -399,7 +423,9 @@ final class SocketProxy: @unchecked Sendable {
     private func refuse(_ client: Int32, _ err: Int32) {
         let reason = String(cString: strerror(err))
         log.error("couldn't connect to Colima's socket: errno \(err) (\(reason, privacy: .public)); answering 503")
-        reply503(client, "ColimaBar could not connect to the Colima socket: \(reason) (errno \(err)). Try again in a moment.")
+        reply503(
+            client, "ColimaBar could not connect to the Colima socket: \(reason) (errno \(err)). Try again in a moment."
+        )
     }
 
     private func reply503(_ client: Int32, _ message: String) {
@@ -408,9 +434,11 @@ final class SocketProxy: @unchecked Sendable {
 
     /// Sends a JSON error like the daemon's, then closes the connection.
     private func reply(_ client: Int32, status: String, _ message: String) {
-        let body = (try? JSONSerialization.data(withJSONObject: ["message": message], options: [.withoutEscapingSlashes]))
+        let body =
+            (try? JSONSerialization.data(withJSONObject: ["message": message], options: [.withoutEscapingSlashes]))
             ?? Data(#"{"message":"ColimaBar error"}"#.utf8)
-        let head = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+        let head =
+            "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
         _ = UnixSocket.writeAll(client, Data(head.utf8) + body)
         close(client)
     }
@@ -448,7 +476,8 @@ final class SocketProxy: @unchecked Sendable {
     static func requestLine(_ chunk: UnsafeRawBufferPointer) -> String {
         let head = UnsafeRawBufferPointer(rebasing: chunk.prefix(512))
         guard let space = head.prefix(8).firstIndex(of: 0x20), space + 1 < head.count, head[space + 1] == 0x2F,
-              methods.contains(String(decoding: head[..<space], as: UTF8.self)) else { return "" }
+            methods.contains(String(decoding: head[..<space], as: UTF8.self))
+        else { return "" }
         return String(decoding: head.prefix { $0 != 0x0D && $0 != 0x0A }, as: UTF8.self)
     }
 
@@ -467,7 +496,8 @@ final class SocketProxy: @unchecked Sendable {
             guard let found = memmem(base + start, chunk.count - start, "\r\n\r\n", 4) else { break }
             let headEnd = base.distance(to: UnsafeRawPointer(found)) + 4
             guard let body = bodyLength(UnsafeRawBufferPointer(rebasing: chunk[start..<headEnd])),
-                  body < chunk.count - headEnd else { break }
+                body < chunk.count - headEnd
+            else { break }
             let next = requestLine(UnsafeRawBufferPointer(rebasing: chunk[(headEnd + body)...]))
             guard !next.isEmpty else { break }
             line = next
@@ -482,7 +512,7 @@ final class SocketProxy: @unchecked Sendable {
         func hasName(_ line: Slice<UnsafeRawBufferPointer>, _ name: StaticString) -> Bool {
             let n = UnsafeRawBufferPointer(start: name.utf8Start, count: name.utf8CodeUnitCount)
             guard line.count > n.count, line[line.startIndex + n.count] == 0x3A else { return false }
-            return zip(line, n).allSatisfy { $0 | 0x20 == $1 }   // the names are lower case
+            return zip(line, n).allSatisfy { $0 | 0x20 == $1 }  // the names are lower case
         }
         var length = 0
         var i = 0
@@ -516,9 +546,10 @@ final class SocketProxy: @unchecked Sendable {
         var path = String(parts[1].split(separator: "?").first ?? "")
         // Drop the API version prefix: /v1.54/build -> /build
         if path.hasPrefix("/v"), let slash = path.dropFirst().firstIndex(of: "/") { path = String(path[slash...]) }
-        if path == "/session" || path.hasPrefix("/grpc") { return true }   // BuildKit
+        if path == "/session" || path.hasPrefix("/grpc") { return true }  // BuildKit
         guard method == "POST" || method == "GET" else { return false }
-        if method == "GET" { return path == "/images/get" || (path.hasPrefix("/images/") && path.hasSuffix("/get")) }   // save
+        // docker save
+        if method == "GET" { return path == "/images/get" || (path.hasPrefix("/images/") && path.hasSuffix("/get")) }
         return path == "/build" || path == "/images/create" || path == "/images/load" || path == "/commit"
             || (path.hasPrefix("/images/") && path.hasSuffix("/push"))
     }
@@ -533,9 +564,13 @@ final class SocketProxy: @unchecked Sendable {
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2, parts[0] == "GET" || parts[0] == "HEAD", let version = apiVersion else { return nil }
         let path = parts[1].split(separator: "?").first.map(String.init) ?? ""
-        guard path == "/_ping" || (path.hasPrefix("/v") && path.hasSuffix("/_ping")
-                                   && path.dropFirst(2).dropLast(6).allSatisfy { $0.isNumber || $0 == "." }) else { return nil }
-        let head = "HTTP/1.1 200 OK\r\nApi-Version: \(version)\r\nDocker-Experimental: false\r\nOstype: linux\r\n"
+        guard
+            path == "/_ping"
+                || (path.hasPrefix("/v") && path.hasSuffix("/_ping")
+                    && path.dropFirst(2).dropLast(6).allSatisfy { $0.isNumber || $0 == "." })
+        else { return nil }
+        let head =
+            "HTTP/1.1 200 OK\r\nApi-Version: \(version)\r\nDocker-Experimental: false\r\nOstype: linux\r\n"
             + "Cache-Control: no-cache, no-store, must-revalidate\r\nPragma: no-cache\r\n"
             + "Content-Type: text/plain; charset=utf-8\r\nContent-Length: 2\r\n\r\n"
         return Data((parts[0] == "HEAD" ? head : head + "OK").utf8)
@@ -560,7 +595,7 @@ final class SocketProxy: @unchecked Sendable {
                     self.wakeOK = ok
                     return ws
                 }
-                ws.forEach { $0.signal() }
+                for w in ws { w.signal() }
             }
         }
         // Longer than wake()'s own budget (start + readiness), so a slow start
@@ -576,7 +611,9 @@ final class SocketProxy: @unchecked Sendable {
         // the VM-down path.
         UnixSocket.setTimeout(client, 0)
         if !initial.isEmpty, !UnixSocket.writeAll(upstream, initial) {
-            close(client); close(upstream); return
+            close(client)
+            close(upstream)
+            return
         }
         let id = lock.withLock { () -> Int in
             nextConn += 1
@@ -626,11 +663,18 @@ final class SocketProxy: @unchecked Sendable {
                     }
                 }
                 let now = Date()
-                if now.timeIntervalSince(lastTouch) >= 1 { touch(conn); lastTouch = now }
+                if now.timeIntervalSince(lastTouch) >= 1 {
+                    touch(conn)
+                    lastTouch = now
+                }
                 var off = 0
                 while off < n {
                     let w = write(dst, base + off, n - off)
-                    if w <= 0 { shutdown(src, SHUT_RD); shutdown(dst, SHUT_WR); return }
+                    if w <= 0 {
+                        shutdown(src, SHUT_RD)
+                        shutdown(dst, SHUT_WR)
+                        return
+                    }
                     off += w
                 }
             }

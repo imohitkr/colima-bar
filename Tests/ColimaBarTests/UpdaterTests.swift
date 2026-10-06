@@ -1,16 +1,23 @@
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct ReleasePageTests {
     @Test func buildsThePageFromAValidTag() {
-        #expect(ReleaseLink.page(tag: "v0.5.0").absoluteString == "https://github.com/imohitkr/colima-bar/releases/tag/v0.5.0")
-        #expect(ReleaseLink.page(tag: "1.2.3").absoluteString == "https://github.com/imohitkr/colima-bar/releases/tag/1.2.3")
+        #expect(
+            ReleaseLink.page(tag: "v0.5.0").absoluteString
+                == "https://github.com/imohitkr/colima-bar/releases/tag/v0.5.0")
+        #expect(
+            ReleaseLink.page(tag: "1.2.3").absoluteString == "https://github.com/imohitkr/colima-bar/releases/tag/1.2.3"
+        )
     }
 
     @Test func otherTagsGiveTheLatestPage() {
-        for t in ["v0.5.0/../../x/y", "v1.2", "v1.2.3.4", "v1.2.3-rc1", "", "v", "v1..3", "%2e%2e", "v1.2.3%2f",
-                  "v1.2.3?x=1", "v1.2.3#x", "v١.٢.٣", "v1.2.3 ", "V1.2.3"] {
+        for t in [
+            "v0.5.0/../../x/y", "v1.2", "v1.2.3.4", "v1.2.3-rc1", "", "v", "v1..3", "%2e%2e", "v1.2.3%2f",
+            "v1.2.3?x=1", "v1.2.3#x", "v١.٢.٣", "v1.2.3 ", "V1.2.3",
+        ] {
             #expect(ReleaseLink.page(tag: t) == ReleaseLink.latest, "\(t)")
         }
     }

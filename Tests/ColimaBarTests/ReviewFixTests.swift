@@ -1,6 +1,7 @@
 import Darwin
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct IdleMinutesTests {
@@ -26,14 +27,17 @@ import Testing
 
 @Suite struct IconOtherProfileTests {
     @Test func staysVisibleWhileAnotherProfileRuns() {
-        #expect(!ColimaModel.hidesIcon(enabled: true, revealed: false, state: .stopped, busy: false,
-                                       dashboardOpen: false, otherProfileRunning: true))
+        #expect(
+            !ColimaModel.hidesIcon(
+                enabled: true, revealed: false, state: .stopped, busy: false,
+                dashboardOpen: false, otherProfileRunning: true))
     }
 }
 
 @Suite struct HTTPHeadTests {
     @Test func parsesStatusAndLowercasedHeaders() {
-        let (status, headers) = DockerAPI.parseHead(Data("HTTP/1.1 404 Not Found\r\nApi-Version: 1.54\r\nContent-Type: application/json".utf8))
+        let (status, headers) = DockerAPI.parseHead(
+            Data("HTTP/1.1 404 Not Found\r\nApi-Version: 1.54\r\nContent-Type: application/json".utf8))
         #expect(status == 404)
         #expect(headers["api-version"] == "1.54")
         #expect(headers["content-type"] == "application/json")
@@ -48,7 +52,10 @@ import Testing
         // A leftover file at the path (crash) must not block listening.
         FileManager.default.createFile(atPath: stable, contents: Data("stale".utf8))
         let fd = try UnixSocket.listen(stable)
-        defer { close(fd); unlink(stable) }
+        defer {
+            close(fd)
+            unlink(stable)
+        }
         var st = stat()
         #expect(lstat(stable, &st) == 0)
         #expect((st.st_mode & S_IFMT) == S_IFSOCK)
@@ -75,21 +82,28 @@ import Testing
         px.apiVersion = "1.54"
         let release = DispatchSemaphore(value: 0)
         px.wake = {
-            try? daemon.start()               // socket accepts from here on
+            try? daemon.start()  // socket accepts from here on
             await withCheckedContinuation { c in
-                DispatchQueue.global().async { release.wait(); c.resume() }
+                DispatchQueue.global().async {
+                    release.wait()
+                    c.resume()
+                }
             }
             return true
         }
         px.start()
-        defer { px.stop(); daemon.stop(); unlink(stable) }
+        defer {
+            px.stop()
+            daemon.stop()
+            unlink(stable)
+        }
 
         let first = DispatchSemaphore(value: 0)
         DispatchQueue.global().async {
             _ = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: d\r\n\r\n")
             first.signal()
         }
-        Thread.sleep(forTimeInterval: 0.5)      // wake is now in progress
+        Thread.sleep(forTimeInterval: 0.5)  // wake is now in progress
         let second = DispatchSemaphore(value: 0)
         var secondReply = ""
         DispatchQueue.global().async {
@@ -108,9 +122,9 @@ import Testing
         let px = SocketProxy(upstream: upstream, path: stable)
         #expect(px.activeTransfers() == 0)
         let now = Date()
-        px.addConnection(work: true, lastIO: now.addingTimeInterval(-10 * 60))    // silent build step
-        px.addConnection(work: true, lastIO: now.addingTimeInterval(-40 * 60))    // stalled
-        px.addConnection(work: false, lastIO: now)                                // poller
+        px.addConnection(work: true, lastIO: now.addingTimeInterval(-10 * 60))  // silent build step
+        px.addConnection(work: true, lastIO: now.addingTimeInterval(-40 * 60))  // stalled
+        px.addConnection(work: false, lastIO: now)  // poller
         #expect(px.activeTransfers(now: now, stall: 30 * 60) == 1)
         #expect(px.activeTransfers(now: now, stall: 60 * 60) == 2)
         #expect(px.activeTransfers(now: now, stall: 60) == 0)
@@ -124,12 +138,17 @@ import Testing
             let c = accept(lfd, nil, nil)
             guard c >= 0 else { return }
             var buf = [UInt8](repeating: 0, count: 4096)
-            while read(c, &buf, buf.count) > 0 {}   // a daemon that is still working
+            while read(c, &buf, buf.count) > 0 {}  // a daemon that is still working
             close(c)
         }
         let px = SocketProxy(upstream: upstream, path: stable)
         px.start()
-        defer { px.stop(); close(lfd); unlink(upstream); unlink(stable) }
+        defer {
+            px.stop()
+            close(lfd)
+            unlink(upstream)
+            unlink(stable)
+        }
 
         let fd = try #require(UnixSocket.connect(stable, timeout: 5))
         defer { close(fd) }
@@ -143,7 +162,7 @@ import Testing
 
     @Test func requestLineIgnoresBodyBytes() {
         #expect(SocketProxy.requestLine(Array("POST /build HTTP/1.1\r\n".utf8), 22) == "POST /build HTTP/1.1")
-        #expect(SocketProxy.requestLine([0x1f, 0x8b, 0x08], 3) == "")    // gzip body
+        #expect(SocketProxy.requestLine([0x1f, 0x8b, 0x08], 3) == "")  // gzip body
         #expect(SocketProxy.requestLine(Array("{\"a\":1}".utf8), 7) == "")
     }
 }

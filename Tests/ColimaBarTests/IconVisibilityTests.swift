@@ -1,11 +1,15 @@
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct IconVisibilityTests {
-    private func hides(enabled: Bool = true, revealed: Bool = false, state: VMState = .stopped,
-                       busy: Bool = false, dashboardOpen: Bool = false) -> Bool {
-        ColimaModel.hidesIcon(enabled: enabled, revealed: revealed, state: state,
-                              busy: busy, dashboardOpen: dashboardOpen)
+    private func hides(
+        enabled: Bool = true, revealed: Bool = false, state: VMState = .stopped,
+        busy: Bool = false, dashboardOpen: Bool = false
+    ) -> Bool {
+        ColimaModel.hidesIcon(
+            enabled: enabled, revealed: revealed, state: state,
+            busy: busy, dashboardOpen: dashboardOpen)
     }
 
     @Test func hidesWhenEnabledAndStopped() {

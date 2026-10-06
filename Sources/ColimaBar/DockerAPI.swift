@@ -18,7 +18,7 @@ final class DockerAPI: @unchecked Sendable {
 
     struct Response {
         let status: Int
-        let headers: [String: String]   // lower-cased names
+        let headers: [String: String]  // lower-cased names
         let body: Data
         var ok: Bool { (200..<300).contains(status) }
     }
@@ -50,7 +50,7 @@ final class DockerAPI: @unchecked Sendable {
             if n == 0 { break }
             if n < 0 {
                 if errno == EINTR { continue }
-                return nil   // read timeout (SO_RCVTIMEO) or error: not a complete reply
+                return nil  // read timeout (SO_RCVTIMEO) or error: not a complete reply
             }
             data.append(buf, count: n)
         }
@@ -67,15 +67,18 @@ final class DockerAPI: @unchecked Sendable {
         var headers: [String: String] = [:]
         for line in lines.dropFirst() {
             guard let colon = line.firstIndex(of: ":") else { continue }
-            headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            headers[line[..<colon].lowercased()] = line[line.index(after: colon)...].trimmingCharacters(
+                in: .whitespaces)
         }
         return (status, headers)
     }
 
     /// Like `stream`, but hands over raw body bytes as they arrive (for log
     /// streams, whose frames are binary rather than newline-delimited).
-    func streamRaw(_ path: String, onData: @escaping @Sendable (Data) -> Void,
-                   onEnd: @escaping @Sendable (StreamHandle) -> Void) -> StreamHandle {
+    func streamRaw(
+        _ path: String, onData: @escaping @Sendable (Data) -> Void,
+        onEnd: @escaping @Sendable (StreamHandle) -> Void
+    ) -> StreamHandle {
         openStream(path, onBody: onData, onEnd: onEnd)
     }
 
@@ -84,21 +87,34 @@ final class DockerAPI: @unchecked Sendable {
     /// it (VM stopped, container gone, or a non-2xx reply, see
     /// `StreamHandle.status`) but never after `cancel()`. It receives the
     /// handle, so owners can check it is still the one they track.
-    func stream(_ path: String, onLine: @escaping @Sendable (Data) -> Void,
-                onEnd: @escaping @Sendable (StreamHandle) -> Void) -> StreamHandle {
+    func stream(
+        _ path: String, onLine: @escaping @Sendable (Data) -> Void,
+        onEnd: @escaping @Sendable (StreamHandle) -> Void
+    ) -> StreamHandle {
         let splitter = LineSplitter(onLine: onLine)
         return openStream(path, onBody: { splitter.feed($0) }, onEnd: onEnd)
     }
 
-    private func openStream(_ path: String, onBody: @escaping @Sendable (Data) -> Void,
-                            onEnd: @escaping @Sendable (StreamHandle) -> Void) -> StreamHandle {
+    private func openStream(
+        _ path: String, onBody: @escaping @Sendable (Data) -> Void,
+        onEnd: @escaping @Sendable (StreamHandle) -> Void
+    ) -> StreamHandle {
         let handle = StreamHandle()
         Thread.detachNewThread { [self] in
             let end = { if !handle.cancelled { onEnd(handle) } }
-            guard let fd = connect(timeout: 0) else { end(); return }
-            guard handle.attach(fd) else { close(fd); return }
+            guard let fd = connect(timeout: 0) else {
+                end()
+                return
+            }
+            guard handle.attach(fd) else {
+                close(fd)
+                return
+            }
             defer { handle.finish() }
-            guard send(fd, method: "GET", path: path) else { end(); return }
+            guard send(fd, method: "GET", path: path) else {
+                end()
+                return
+            }
             var pending = Data()
             var headerDone = false
             var buf = [UInt8](repeating: 0, count: Self.bufferSize)
@@ -106,7 +122,10 @@ final class DockerAPI: @unchecked Sendable {
                 let n = read(fd, &buf, buf.count)
                 if n < 0, errno == EINTR { continue }
                 if n <= 0 { break }
-                if headerDone { onBody(Data(buf[0..<n])); continue }
+                if headerDone {
+                    onBody(Data(buf[0..<n]))
+                    continue
+                }
                 pending.append(buf, count: n)
                 guard let split = pending.range(of: Data("\r\n\r\n".utf8)) else { continue }
                 headerDone = true
@@ -131,7 +150,8 @@ final class DockerAPI: @unchecked Sendable {
     }
 
     private func send(_ fd: Int32, method: String, path: String) -> Bool {
-        let req = "\(method) \(path) HTTP/1.0\r\nHost: docker\r\nUser-Agent: ColimaBar\r\n"
+        let req =
+            "\(method) \(path) HTTP/1.0\r\nHost: docker\r\nUser-Agent: ColimaBar\r\n"
             + (method == "GET" ? "" : "Content-Length: 0\r\n") + "\r\n"
         let bytes = Array(req.utf8)
         return bytes.withUnsafeBytes { write(fd, $0.baseAddress, bytes.count) } == bytes.count
@@ -171,19 +191,25 @@ final class StreamHandle: @unchecked Sendable {
     fileprivate func setStatus(_ s: Int) { lock.withLock { _status = s } }
 
     fileprivate func attach(_ fd: Int32) -> Bool {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        defer { lock.unlock() }
         if _cancelled { return false }
         self.fd = fd
         return true
     }
 
     fileprivate func finish() {
-        lock.lock(); defer { lock.unlock() }
-        if fd >= 0 { close(fd); fd = -1 }
+        lock.lock()
+        defer { lock.unlock() }
+        if fd >= 0 {
+            close(fd)
+            fd = -1
+        }
     }
 
     func cancel() {
-        lock.lock(); defer { lock.unlock() }
+        lock.lock()
+        defer { lock.unlock() }
         _cancelled = true
         if fd >= 0 { shutdown(fd, SHUT_RDWR) }
     }

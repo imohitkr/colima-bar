@@ -7,7 +7,8 @@ enum Paths {
     /// The action backend ships inside the app bundle, so a downloaded copy
     /// works without a separate install step. Unbundled runs use the copy
     /// that older versions installed.
-    static let ctl = Bundle.main.path(forResource: "colima-ctl", ofType: "sh")
+    static let ctl =
+        Bundle.main.path(forResource: "colima-ctl", ofType: "sh")
         ?? "\(home)/.local/bin/colima-ctl.sh"
     static let cacheDir = "\(home)/.cache/colima-bar"
     /// Busy marker colima-ctl.sh writes while a VM action runs, per profile.
@@ -122,8 +123,9 @@ enum Shell {
             try? fm.removeItem(atPath: Paths.ctlLog)
         }
         if !fm.fileExists(atPath: Paths.ctlLog) {
-            try? fm.createDirectory(atPath: Paths.cacheDir, withIntermediateDirectories: true,
-                                    attributes: [.posixPermissions: 0o700])
+            try? fm.createDirectory(
+                atPath: Paths.cacheDir, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
             fm.createFile(atPath: Paths.ctlLog, contents: nil, attributes: [.posixPermissions: 0o600])
         }
         guard let h = FileHandle(forWritingAtPath: Paths.ctlLog) else { return FileHandle.nullDevice }
@@ -137,18 +139,21 @@ enum Shell {
         let escaped = command.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         let iTerm = FileManager.default.fileExists(atPath: "/Applications/iTerm.app")
-        let script = iTerm ? """
-        tell application "iTerm"
-            activate
-            set w to (create window with default profile)
-            tell current session of w to write text "\(escaped)"
-        end tell
-        """ : """
-        tell application "Terminal"
-            activate
-            do script "\(escaped)"
-        end tell
-        """
+        let script =
+            iTerm
+            ? """
+            tell application "iTerm"
+                activate
+                set w to (create window with default profile)
+                tell current session of w to write text "\(escaped)"
+            end tell
+            """
+            : """
+            tell application "Terminal"
+                activate
+                do script "\(escaped)"
+            end tell
+            """
         Task { _ = await run(["osascript", "-e", script]) }
     }
 }

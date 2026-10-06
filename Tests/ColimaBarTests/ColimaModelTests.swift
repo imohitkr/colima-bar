@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+
 @testable import ColimaBar
 
 @Suite struct DFGateUrgentTests {
@@ -41,8 +42,8 @@ import Testing
         g.begin()
         let during = ask(&g, at: 1, urgent: true)
         let after = done(&g, at: 5)
-        #expect(during == .none)             // only one df in flight
-        #expect(after == .run(after: 0))     // no 30 s gap
+        #expect(during == .none)  // only one df in flight
+        #expect(after == .run(after: 0))  // no 30 s gap
     }
 
     @Test func normalRequestDuringARunStillWaitsForTheGap() {
@@ -64,7 +65,9 @@ import Testing
     }
 
     @Test func diskActionsAreUrgent() {
-        for a in ["img-rm", "vol-rm", "prune", "img-pull", "ctr-rm", "stop-all"] { #expect(ColimaModel.changesDisk(a), "\(a)") }
+        for a in ["img-rm", "vol-rm", "prune", "img-pull", "ctr-rm", "stop-all"] {
+            #expect(ColimaModel.changesDisk(a), "\(a)")
+        }
         for a in ["config", "logs", "copy-env", "start", "ssh"] { #expect(!ColimaModel.changesDisk(a), "\(a)") }
     }
 }
@@ -73,10 +76,12 @@ import Testing
     /// Real dockerd events by type. The filter must pass exactly the ones
     /// that `handle` reacts to.
     private let dockerEvents: [String: [String]] = [
-        "container": ["attach", "commit", "copy", "create", "destroy", "detach", "die", "exec_create: sh",
-                      "exec_detach", "exec_die", "exec_start: sh -c true", "export", "health_status: healthy",
-                      "health_status: unhealthy", "kill", "oom", "pause", "rename", "resize", "restart",
-                      "start", "stop", "top", "unpause", "update", "prune"],
+        "container": [
+            "attach", "commit", "copy", "create", "destroy", "detach", "die", "exec_create: sh",
+            "exec_detach", "exec_die", "exec_start: sh -c true", "export", "health_status: healthy",
+            "health_status: unhealthy", "kill", "oom", "pause", "rename", "resize", "restart",
+            "start", "stop", "top", "unpause", "update", "prune",
+        ],
         "image": ["delete", "import", "load", "pull", "push", "save", "tag", "untag", "prune"],
         "volume": ["create", "mount", "unmount", "destroy", "prune"],
         "builder": ["prune"],
@@ -127,8 +132,8 @@ import Testing
         var o = LatestOnly()
         let a = o.begin()
         let b = o.begin()
-        let newer = o.apply(b)       // newer "Stopped" applies first
-        let older = o.apply(a)       // older "Running" ends later: dropped
+        let newer = o.apply(b)  // newer "Stopped" applies first
+        let older = o.apply(a)  // older "Running" ends later: dropped
         #expect(newer && !older)
         #expect(o.isLatestApplied(b))
         #expect(!o.isLatestApplied(a))
@@ -137,7 +142,7 @@ import Testing
     @Test func olderResultAppliesWhenTheNewerOneGaveNothing() {
         var o = LatestOnly()
         let a = o.begin()
-        _ = o.begin()                // fails, never applies
+        _ = o.begin()  // fails, never applies
         let applied = o.apply(a)
         #expect(applied)
     }
@@ -145,7 +150,7 @@ import Testing
     @Test func laterStepOfAnOlderCallIsDropped() {
         var o = LatestOnly()
         let a = o.begin()
-        let first = o.apply(a)       // `colima list` applied, `colima status` runs
+        let first = o.apply(a)  // `colima list` applied, `colima status` runs
         let b = o.begin()
         let second = o.apply(b)
         #expect(first && second)
