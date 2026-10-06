@@ -42,22 +42,49 @@ final class Updater {
     /// `manual`: from "Check for Updates…", which always reports a result.
     func check(manual: Bool) async {
         let current = AppDelegate.version
-        guard let release = await fetchLatest() else {
-            if manual { Notifier.shared.post("Couldn't check for updates. Try again later.") }
+        let release = await fetchLatest()
+        // The user may have turned checks off while this one ran.
+        guard manual || enabled else { return }
+        guard let release else {
+            if manual { Self.alert("Couldn't check for updates", "GitHub didn't answer. Try again later.") }
+            return
+        }
+        guard Version.parts(current) != nil else {
+            if manual { Self.alert("Development build", "This build (\(current)) can't be compared with releases. The latest release is \(release.version).") }
             return
         }
         guard Version.isNewer(release.version, than: current) else {
             available = nil
-            if manual { Notifier.shared.post("ColimaBar \(current) is the latest version.") }
+            if manual { Self.alert("You're up to date", "ColimaBar \(current) is the latest version.") }
             return
         }
         available = release
-        // Announce each version once; the footer badge stays until updated.
-        if manual || Defaults.string("notifiedVersion") != release.version {
+        if manual {
+            if Self.alert("ColimaBar \(release.version) is available", "You have \(current). Open the release page to download it?",
+                          buttons: ["Open Release Page", "Later"]) {
+                openReleasePage()
+            }
             Defaults.set(release.version, "notifiedVersion")
-            Notifier.shared.post("ColimaBar \(release.version) is available (you have \(current)). Open the dashboard to download it.",
-                                 title: "Update available")
+            return
         }
+        // Announce each version once; the footer button stays until updated.
+        if Defaults.string("notifiedVersion") != release.version {
+            Defaults.set(release.version, "notifiedVersion")
+            Notifier.shared.post("ColimaBar \(release.version) is available (you have \(current)). Click to open the release page.",
+                                 title: "Update available", record: false, url: release.url)
+        }
+    }
+
+    /// A modal answer for "Check for Updates…", which must always show a
+    /// result even when notifications are off. True if the first button won.
+    @discardableResult
+    private static func alert(_ title: String, _ text: String, buttons: [String] = ["OK"]) -> Bool {
+        NSApp.activate()
+        let a = NSAlert()
+        a.messageText = title
+        a.informativeText = text
+        buttons.forEach { a.addButton(withTitle: $0) }
+        return a.runModal() == .alertFirstButtonReturn
     }
 
     func openReleasePage() {

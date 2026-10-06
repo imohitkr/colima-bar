@@ -206,7 +206,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             holder.submenu = m
             main.addItem(holder)
         }
-        submenu("ColimaBar", [NSMenuItem(title: "Quit ColimaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")])
+        // No ⌘Q: quitting stops the auto-start proxy until the next login, so
+        // it is only in the right-click menu and the footer, never a reflex.
+        submenu("ColimaBar", [NSMenuItem(title: "Quit ColimaBar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")])
         let redo = NSMenuItem(title: "Redo", action: Selector(("redo:")), keyEquivalent: "z")
         redo.keyEquivalentModifierMask = [.command, .shift]
         submenu("Edit", [
@@ -218,28 +220,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         ])
         submenu("Window", [
             NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"),
-            NSMenuItem(title: "Minimize", action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m"),
         ])
         NSApp.mainMenu = main
     }
 
-    /// launchd stops the agent with SIGTERM (e.g. when launch at login is
-    /// turned off). Quit normally so the proxy socket is handed back.
+    /// launchd stops the agent with SIGTERM (logout, `launchctl bootout`,
+    /// an update). Quit normally so the proxy socket is handed back.
     private func handleSIGTERM() {
         signal(SIGTERM, SIG_IGN)
         let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-        src.setEventHandler {
-            if LoginItem.relaunchAfterExit {
-                // Turned off launch at login from inside the agent: carry on
-                // as a normal app instead of disappearing.
-                let bundle = Bundle.main.bundlePath
-                let p = Process()
-                p.executableURL = URL(fileURLWithPath: "/bin/sh")
-                p.arguments = ["-c", "sleep 1; /usr/bin/open \"$0\"", bundle]
-                try? p.run()
-            }
-            NSApp.terminate(nil)
-        }
+        src.setEventHandler { NSApp.terminate(nil) }
         src.resume()
         sigterm = src
     }
@@ -398,14 +388,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// Opening the app again (Spotlight, Finder, `open -a ColimaBar`) brings a
     /// hidden icon back and opens the dashboard so Colima can be started.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        model.revealIcon = true
+        guard item != nil else { return false }
+        // Only override the option while the icon is actually hidden;
+        // otherwise the next stop would leave it visible.
+        if model.iconHidden { model.revealIcon = true }
         appliedHidden = false
         item.isVisible = true
         // macOS places a just-shown status item asynchronously; anchor the
         // popover once it is on screen, or fall back to the window.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self, !self.popover.isShown else { return }
-            if let w = self.item.button?.window, w.screen != nil, w.frame.maxY > 0 {
+            if let w = self.item.button?.window, w.screen != nil, w.isVisible,
+               w.occlusionState.contains(.visible) {
                 self.togglePopover()
             } else {
                 self.showWindow()

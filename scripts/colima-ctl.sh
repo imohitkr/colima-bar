@@ -51,28 +51,43 @@ confirm() {
 # lock_vm -> takes this profile's lock for a VM action (confirm dialog
 # included), so two starts/restarts can't run at once. A lock older than 30
 # minutes is left over from a killed script and is taken over.
+# lock_vm [quiet] -> "quiet" skips the notice (timer-driven auto-stop).
 HOLD_LOCK=""
 lock_vm() {
   mkdir -p "$STATE_DIR"
   if ! mkdir "$LOCK" 2>/dev/null; then
-    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
-      rm -rf "$LOCK" && mkdir "$LOCK" 2>/dev/null || exit 2
+    # Take over a stale lock atomically: only one script wins the mv.
+    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +30 2>/dev/null)" ] \
+      && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null; then
+      rm -rf "$LOCK.stale.$$"
+      mkdir "$LOCK" 2>/dev/null || exit 2
     else
-      notify "Another Colima action is still running for $PROFILE."
+      [ "${1:-}" = quiet ] || notify "Another Colima action is still running for $PROFILE."
       exit 2
     fi
   fi
   HOLD_LOCK=1
 }
 
-# Clean up on any exit, and stop our children when ColimaBar times us out.
+# Clean up on any exit, and stop the running action when ColimaBar times
+# us out. Bash runs a trap only after a foreground child exits, so long
+# actions run in the background and we `wait` for them (wait is interruptible).
 WROTE_BUSY=""
+CHILD=""
 cleanup() {
   [ -n "$WROTE_BUSY" ] && rm -f "$BUSY"
   [ -n "$HOLD_LOCK" ] && rmdir "$LOCK" 2>/dev/null
+  return 0
+}
+on_term() {
+  if [ -n "$CHILD" ]; then
+    pkill -TERM -P "$CHILD" 2>/dev/null
+    kill -TERM "$CHILD" 2>/dev/null
+  fi
+  exit 143
 }
 trap cleanup EXIT
-trap 'pkill -TERM -P $$ 2>/dev/null; exit 143' TERM INT
+trap on_term TERM INT
 
 # with_busy "label" cmd... -> writes the busy marker ColimaBar watches.
 with_busy() {
@@ -80,8 +95,11 @@ with_busy() {
   mkdir -p "$STATE_DIR"
   echo "$label" > "$BUSY"
   WROTE_BUSY=1
-  "$@"
+  "$@" &
+  CHILD=$!
+  wait "$CHILD"
   local rc=$?
+  CHILD=""
   rm -f "$BUSY"
   WROTE_BUSY=""
   return $rc
@@ -151,7 +169,9 @@ case "$1" in
     sed -n '/^kubernetes:/,/^[a-z]/p' "$CONFIG" | grep -qE "^  enabled: $val\$" \
       || { notify "Couldn't set kubernetes.enabled in colima.yaml."; exit 1; }
     with_busy "Kubernetes $2" restart_vm || { notify "Kubernetes change failed - $SEE_LOG"; exit 1; }
-    [ "$2" = on ] && kubectl config use-context "$KCTX" >/dev/null 2>&1
+    if [ "$2" = on ]; then
+      kubectl config use-context "$KCTX" >/dev/null 2>&1 || true
+    fi
     ;;
 
   # disk SIZE_GB (grow only)
@@ -177,7 +197,7 @@ case "$1" in
   ctr-shell)   exec docker exec -it "$2" sh -c 'command -v bash >/dev/null && exec bash || exec sh' ;;
   # Idle auto-stop from ColimaBar: no confirmation, just a notification.
   auto-stop)
-    lock_vm
+    lock_vm quiet
     with_busy "Auto-stopping $PROFILE" colima stop || { notify "Auto-stop of $PROFILE failed - $SEE_LOG"; exit 1; } ;;
 
   # Images and volumes: img-rm REF | img-pull REF | vol-rm NAME

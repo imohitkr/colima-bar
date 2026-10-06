@@ -151,3 +151,25 @@ import Testing
         #expect(!ColimaModel.isStartInProgress(command: "vim colima start notes", profile: "default"))
     }
 }
+
+@Suite struct WorkClassificationTests {
+    @Test func buildsPullsPushesCount() {
+        #expect(SocketProxy.isWork("POST /v1.54/build?t=app HTTP/1.1"))
+        #expect(SocketProxy.isWork("POST /v1.54/images/create?fromImage=alpine HTTP/1.1"))
+        #expect(SocketProxy.isWork("POST /v1.54/images/registry.io/app:1/push HTTP/1.1"))
+        #expect(SocketProxy.isWork("POST /v1.54/images/load HTTP/1.1"))
+        #expect(SocketProxy.isWork("GET /v1.54/images/get?names=a HTTP/1.1"))
+        #expect(SocketProxy.isWork("POST /session HTTP/1.1"))
+        #expect(SocketProxy.isWork("POST /v1.54/grpc HTTP/1.1"))
+        #expect(SocketProxy.isWork("POST /commit?container=x HTTP/1.1"))
+    }
+
+    @Test func pollingAndStreamsDoNot() {
+        #expect(!SocketProxy.isWork("GET /v1.54/containers/json HTTP/1.1"))
+        #expect(!SocketProxy.isWork("GET /v1.54/events HTTP/1.1"))
+        #expect(!SocketProxy.isWork("HEAD /_ping HTTP/1.1"))
+        #expect(!SocketProxy.isWork("GET /v1.54/containers/x/logs?follow=1 HTTP/1.1"))
+        #expect(!SocketProxy.isWork("POST /v1.54/containers/create HTTP/1.1"))
+        #expect(!SocketProxy.isWork("garbage"))
+    }
+}

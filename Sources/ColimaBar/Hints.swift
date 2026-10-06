@@ -120,13 +120,13 @@ enum Help {
     static let profiles = "All Colima profiles (create one with `colima start --profile NAME`). The dashboard and every action apply to the selected one."
 
     // Auto-start / auto-stop
-    static let autoStart = "Every docker client (terminal, IDE test runs, testcontainers) is pointed at ColimaBar's socket. While the VM is stopped, the first real docker request starts it and then goes through. Turn off to connect straight to Colima (no auto-start)."
+    static let autoStart = "Docker clients (terminal, IDE test runs, testcontainers) use ColimaBar's socket. While Colima is stopped, the first real docker request starts it. Turn off to connect straight to Colima."
     static let routeContext = "The current docker context points at ColimaBar's socket. Used by the docker CLI when DOCKER_HOST isn't set, and by most GUIs."
     static let routeLaunchd = "DOCKER_HOST is set for apps launched from the Dock or Finder, so IDE test runners (GoLand, PyCharm, VS Code) use ColimaBar's socket. Restart an IDE that was already open for it to pick this up."
     static let routeTestcontainers = "testcontainers (Java, Go, …) reads docker.host from ~/.testcontainers.properties."
     static let routeVarRun = "Some tools only look at /var/run/docker.sock (e.g. the Python docker SDK without DOCKER_HOST). Linking it needs your admin password once."
     static let linkVarRun = "Create /var/run/docker.sock as a symlink to ColimaBar's socket. Asks for your admin password."
-    static let autoStop = "Stop the VM after it has been idle for the chosen time, to free its memory and CPU. Running containers and docker builds, pulls or pushes keep it awake. With auto-start on, the next docker command starts it again."
+    static let autoStop = "Stop the VM after it has been idle for the chosen time. Running containers and docker builds, pulls or pushes keep it awake. With auto-start on, the next docker command starts it again."
     static let autoStopMinutes = "How long the VM must have no running containers and no docker builds, pulls or pushes before it stops."
     static let autoStopCustom = "Type a number of minutes from 1 to 1440 (24 hours), then press Return or click Set."
     static let hideIcon = "Hide the icon while Colima is stopped. ColimaBar keeps running, so docker still starts Colima. To show the icon, open ColimaBar from Spotlight."
@@ -136,7 +136,7 @@ enum Help {
     // App
     static let checkUpdates = "Once a day, ask GitHub whether a newer ColimaBar release exists. A new version is announced once, then shown as a button at the bottom of the dashboard."
     static func update(_ v: String) -> String { "ColimaBar \(v) is available. Click to open the release page and download it." }
-    static let notify = "Alert when a container exits with an error, is killed for running out of memory, or its healthcheck starts failing (testcontainers' throwaway containers are skipped). Failed actions always alert. Alerts are also listed on the Containers tab."
+    static let notify = "Alert when a container exits with an error, runs out of memory or fails its healthcheck. testcontainers' containers are skipped. Failed actions always alert."
     static let login = "Start ColimaBar when you log in, and relaunch it right away if it ever crashes, so the docker socket keeps working."
 
     // Footer

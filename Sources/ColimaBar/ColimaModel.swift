@@ -97,7 +97,8 @@ final class ColimaModel {
         Defaults.set(true, "toldIconHidden")
         guard fd >= 0 else { return }   // someone else claimed it first
         close(fd)
-        Notifier.shared.post("The icon is hidden while Colima is stopped. It comes back when Colima starts. To show it now, open ColimaBar from Spotlight.")
+        Notifier.shared.post("The icon is hidden while Colima is stopped. It comes back when Colima starts. To show it now, open ColimaBar from Spotlight.",
+                             record: false)
     }
 
     /// Number of dashboard surfaces (popover, window) currently on screen.
@@ -311,6 +312,7 @@ final class ColimaModel {
 
     private func switchProfile() {
         generation += 1
+        localBusy = nil
         clearVMData()
         for h in statStreams.values { h.cancel() }
         statStreams = [:]
@@ -323,10 +325,12 @@ final class ColimaModel {
         Task { await refreshAll() }
     }
 
-    func refreshContainers() async {
+    /// True if the list was refreshed from the daemon.
+    @discardableResult
+    func refreshContainers() async -> Bool {
         let gen = generation
         guard let r = await api.get("/containers/json?all=1"), r.ok, gen == generation, state == .running,
-              let list = try? JSONDecoder().decode([APIContainer].self, from: r.body) else { return }
+              let list = try? JSONDecoder().decode([APIContainer].self, from: r.body) else { return false }
         let mapped = list.map { c in
             Container(id: c.Id, name: c.Names.first.map { String($0.drop { $0 == "/" }) } ?? String(c.Id.prefix(12)),
                       image: c.Image, state: c.State, status: c.Status,
@@ -336,6 +340,7 @@ final class ColimaModel {
         // Stable order by name: rows never reorder because a number changed.
         set(\.containers, mapped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
         syncStatStreams()
+        return true
     }
 
     func refreshDF() async {
@@ -404,8 +409,14 @@ final class ColimaModel {
         func ready() async -> Bool { await probe.get(probePath, timeout: 3)?.ok ?? false }
 
         if readBusy() == nil, await ready() { return true }
-        if profile != "default", !profiles.isEmpty, !profiles.contains(where: { $0.name == p }) {
+        // A deleted profile: `colima start` would provision a new VM.
+        if p != "default", !FileManager.default.fileExists(atPath: Paths.config(p)) {
             Notifier.shared.post("Profile \(p) doesn't exist, so it wasn't started.")
+            return false
+        }
+        // Only the docker runtime has a docker socket to wait for.
+        if !vm.runtime.isEmpty, vm.runtime != "docker" {
+            log.notice("profile \(p, privacy: .public) uses the \(self.vm.runtime, privacy: .public) runtime; not auto-starting")
             return false
         }
         func startInFlight() async -> Bool {
@@ -414,7 +425,7 @@ final class ColimaModel {
         }
         // A start/stop is already running (menu, auto-stop, a terminal): let it
         // finish instead of racing it.
-        for _ in 0..<600 {
+        for _ in 0..<300 {
             guard await startInFlight() else { break }
             try? await Task.sleep(for: .seconds(1))
         }
@@ -427,7 +438,8 @@ final class ColimaModel {
             if !r.ok { log.error("auto-start: colima-ctl.sh start exited \(r.status)") }
         }
         var streak = 0
-        for _ in 0..<120 {
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline {
             streak = await ready() ? streak + 1 : 0
             if streak >= 3 {
                 // Refresh the cached API version from the real daemon (a Colima
@@ -513,8 +525,9 @@ final class ColimaModel {
         let gen = generation
         Task {
             defer { stopping = false }
-            await refreshContainers()
-            guard gen == generation, autoStop, state == .running, busy == nil,
+            // No fresh list (timeout, error): don't stop on stale data.
+            let fresh = await refreshContainers()
+            guard fresh, gen == generation, autoStop, state == .running, busy == nil,
                   running.isEmpty, proxy.activeTransfers() == 0 else {
                 idleSince = nil
                 return
@@ -636,7 +649,8 @@ final class ColimaModel {
     /// dialogs, config edits, the busy marker and notifications), then refreshes.
     func ctl(_ args: String...) {
         let p = profile
-        if Self.vmActions.contains(args.first ?? "") { setBusyNow(Self.busyLabel(args.first!)) }
+        let label: String? = Self.vmActions.contains(args.first ?? "") ? Self.busyLabel(args.first!) : nil
+        if let label { setBusyNow(label) }
         Task {
             let r = await Shell.run([Paths.ctl] + args, timeout: 900,
                                     extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
@@ -651,6 +665,9 @@ final class ColimaModel {
             if !r.ok, !notified, r.status != 2 {
                 Notifier.shared.post("\(args.first ?? "Action") failed (exit \(r.status)). See \(Paths.ctlLog).")
             }
+            // The action is over (done, failed or cancelled): drop the
+            // placeholder, but only if a newer action hasn't replaced it.
+            if p == profile, localBusy == label { localBusy = nil }
             busy = readBusy()
             await refreshAll()
         }

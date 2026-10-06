@@ -164,41 +164,53 @@ enum LoginItem {
 
     /// True when the agent exists but was turned off in System Settings >
     /// General > Login Items, so launchd won't run it.
-    static var needsApproval: Bool {
-        guard isEnabled else { return false }
-        let out = launchctl(["print-disabled", domain]).out
+    static var needsApproval: Bool { isEnabled && disabledInSettings() }
+
+    /// Runs launchctl: call it off the main thread from UI code.
+    nonisolated static func disabledInSettings() -> Bool {
+        let out = launchctl(["print-disabled", "gui/\(getuid())"]).out
         return out.contains("\"\(label)\" => disabled") || out.contains("\"\(label)\" => true")
     }
 
-    /// Set when this agent instance turns itself off: launchd then sends
-    /// SIGTERM, and the app relaunches as a normal (unsupervised) instance.
-    static var relaunchAfterExit = false
+    /// The job is loaded in launchd (running or not).
+    static var isLoaded: Bool { launchctl(["print", "\(domain)/\(label)"]).ok }
 
+    /// On: writes the plist and, if the job isn't loaded, bootstraps it, which
+    /// starts the agent (RunAtLoad) and the agent takes over from this copy.
+    /// Off: removes the plist, so it won't start at the next login. When this
+    /// copy *is* the agent, the job stays loaded until logout: unloading it
+    /// would kill this process (and the proxy) on the spot.
     static func set(_ on: Bool) throws {
         if on {
             try writePlist()
-            // bootstrap loads the job and starts it (RunAtLoad); the agent
-            // instance then takes over from this one.
-            _ = launchctl(["bootout", "\(domain)/\(label)"])
+            guard !isLoaded else { return }
             let r = launchctl(["bootstrap", domain, plistPath])
             if !r.ok { log.error("launchctl bootstrap failed: \(r.out, privacy: .public)") }
         } else {
-            if AppDelegate.isLaunchAgent { relaunchAfterExit = true }
             try? FileManager.default.removeItem(atPath: plistPath)
-            _ = launchctl(["bootout", "\(domain)/\(label)"])
+            if !AppDelegate.isLaunchAgent { launchctl(["bootout", "\(domain)/\(label)"]) }
         }
     }
 
     /// Rewrites the plist if the app moved or the plist is outdated, so it
     /// always starts the installed binary.
+    /// Only an installed copy (in /Applications or ~/Applications) takes the
+    /// plist over, or any copy when the plist's binary is gone. A copy run
+    /// from Downloads or a build folder must not repoint it.
     static func refreshIfNeeded() {
-        guard isEnabled, let data = FileManager.default.contents(atPath: plistPath),
+        guard isEnabled, let exe = Bundle.main.executablePath,
+              let data = FileManager.default.contents(atPath: plistPath),
               let plist = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
         else { return }
-        if (plist["Program"] as? String) != Bundle.main.executablePath {
-            log.notice("login agent points at another binary; updating it")
-            try? set(true)
-        }
+        let current = plist["Program"] as? String ?? ""
+        guard current != exe else { return }
+        let installed = (exe.hasPrefix("/Applications/") || exe.hasPrefix("\(Paths.home)/Applications/"))
+            && !exe.contains("/AppTranslocation/")
+        guard installed || !FileManager.default.isExecutableFile(atPath: current) else { return }
+        log.notice("login agent points at another binary; updating it")
+        try? writePlist()
+        launchctl(["bootout", "\(domain)/\(label)"])
+        launchctl(["bootstrap", domain, plistPath])
     }
 
     /// Asks launchd to start the agent now, loading it first if needed.
@@ -212,7 +224,11 @@ enum LoginItem {
     /// plist agent.
     /// The bundle still ships the old agent plist only so SMAppService can
     /// find, and unregister, that registration.
+    /// Runs once: if unregistering fails, it must not re-enable launch at
+    /// login on every start after the user turned it off.
     static func migrate() {
+        guard !UserDefaults.standard.bool(forKey: "didMigrateLoginItem") else { return }
+        UserDefaults.standard.set(true, forKey: "didMigrateLoginItem")
         let old = SMAppService.agent(plistName: "\(legacyLabel).plist")
         let hadOld = old.status == .enabled || old.status == .requiresApproval
             || SMAppService.mainApp.status == .enabled
@@ -240,7 +256,7 @@ enum LoginItem {
     }
 
     @discardableResult
-    private static func launchctl(_ args: [String]) -> Shell.Result {
+    nonisolated private static func launchctl(_ args: [String]) -> Shell.Result {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
         p.arguments = args

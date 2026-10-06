@@ -92,12 +92,17 @@ enum Shell {
                         exited.wait()
                     }
                 }
-                // Let the last buffered output arrive, then stop reading.
-                usleep(50_000)
+                // Let the last buffered output arrive, then stop reading. No
+                // blocking read: an orphaned grandchild may keep the pipe open.
+                usleep(100_000)
                 pipe.fileHandleForReading.readabilityHandler = nil
-                if let rest = try? pipe.fileHandleForReading.readToEnd(), p.terminationReason == .exit,
-                   !rest.isEmpty, rest.count < 1 << 20 {
-                    out.append(rest)
+                let fd = pipe.fileHandleForReading.fileDescriptor
+                _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+                var buf = [UInt8](repeating: 0, count: 65536)
+                while true {
+                    let n = read(fd, &buf, buf.count)
+                    if n <= 0 { break }
+                    out.append(Data(buf[0..<n]))
                 }
                 cont.resume(returning: Result(status: p.terminationStatus, out: out.string))
             }
