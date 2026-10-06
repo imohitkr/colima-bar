@@ -348,6 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         } else {
             add("Check for Updates…", #selector(checkUpdates))
         }
+        add("Uninstall ColimaBar…", #selector(uninstall))
         add("Quit ColimaBar", #selector(quit), key: "q")
         item.menu = menu
         item.button?.performClick(nil)
@@ -373,6 +374,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     @objc private func toggleHideIcon() { model.hideIconWhenStopped.toggle() }
     @objc private func checkUpdates() { Task { await Updater.shared.check(manual: true) } }
     @objc private func openUpdate() { Updater.shared.openReleasePage() }
+
+    /// Runs the bundled uninstall.sh in Terminal after a confirmation. It runs
+    /// outside this process: removing the login item stops this process, and
+    /// removing the /var/run link can ask for a password.
+    @objc private func uninstall() {
+        guard let script = Bundle.main.path(forResource: "uninstall", ofType: "sh") else {
+            model.notify("The uninstall script is missing from the app bundle.")
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Uninstall ColimaBar?"
+        alert.informativeText = Help.uninstallConfirm
+        alert.addButton(withTitle: "Uninstall").hasDestructiveAction = true
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        Shell.inTerminal(Shell.quote(script))
+    }
     @objc private func toggleLogin() {
         do { try LoginItem.set(!LoginItem.isEnabled) } catch {
             model.notify("Login item change failed: \(error.localizedDescription)")

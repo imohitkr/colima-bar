@@ -4,6 +4,13 @@ import Testing
 @testable import ColimaBar
 
 @Suite struct ShellTests {
+    @Test func quoteKeepsEveryWordLiteral() {
+        #expect(Shell.quote("plain") == "'plain'")
+        #expect(Shell.quote("/Users/a b/ColimaBar.app") == "'/Users/a b/ColimaBar.app'")
+        #expect(Shell.quote("it's") == "'it'\\''s'")
+        #expect(Shell.quote("$(rm -rf ~)") == "'$(rm -rf ~)'")
+    }
+
     @Test func returnsAllOutput() async {
         let r = await Shell.run(["sh", "-c", "i=0; while [ $i -lt 2000 ]; do echo line$i; i=$((i+1)); done"])
         #expect(r.ok)

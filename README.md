@@ -150,6 +150,7 @@ Right-click the menu bar icon for these menu items:
 - **Auto-start Colima on Demand**
 - **Hide Icon While Colima Is Stopped**
 - **Check for Updates…** (or **Download ColimaBar *version*…** when an update is available)
+- **Uninstall ColimaBar…**
 - **Quit ColimaBar**
 
 The dashboard footer shows the ColimaBar version. Click it to check for a new version.
@@ -253,7 +254,9 @@ To show the icon while Colima is stopped, open ColimaBar from Spotlight. The ico
 
 ## Uninstall
 
-Run the uninstall script that is in the app:
+Right-click the menu bar icon and choose **Uninstall ColimaBar…**. After you confirm, ColimaBar opens Terminal and runs its uninstall script. If the script asks for your password, it is to remove the `/var/run/docker.sock` link.
+
+You can also run the uninstall script that is in the app:
 
 ```sh
 /Applications/ColimaBar.app/Contents/Resources/uninstall.sh

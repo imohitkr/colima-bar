@@ -126,6 +126,9 @@ enum Shell {
 
     /// Runs `command` in a new iTerm window, falling back to Terminal.app
     /// when iTerm isn't installed.
+    /// Single-quotes a word for the shell.
+    static func quote(_ s: String) -> String { "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'" }
+
     static func inTerminal(_ command: String) {
         let escaped = command.replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")

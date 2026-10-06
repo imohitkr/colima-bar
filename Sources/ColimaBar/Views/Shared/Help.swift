@@ -126,6 +126,8 @@ enum Help {
     // App
     static let checkUpdates =
         "Ask GitHub one time each day if a newer ColimaBar release exists. ColimaBar sends one notification for a new version. Then it shows a button at the bottom of the dashboard."
+    static let uninstallConfirm =
+        "ColimaBar opens Terminal and runs its uninstall script. The script removes the app, the login item and ColimaBar's docker routes. Docker clients then connect to Colima directly. Colima, your containers and your images stay."
     static func version(_ v: String) -> String { "ColimaBar \(v). Click to check for a new version." }
     static func update(_ v: String) -> String {
         "ColimaBar \(v) is available. Click to open the release page and download it."
