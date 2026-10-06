@@ -43,9 +43,38 @@ jobs:
       - name: Build app
         run: ./build.sh
 
+  # The same check as `make lint`. The rules are in .swift-format.
+  lint:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: swift-format
+        run: swift format lint --strict --recursive Sources Tests Package.swift
+
+  # Ubuntu runners have shellcheck preinstalled and cost less than macOS.
+  shellcheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: shellcheck
+        run: |
+          shellcheck --version
+          shellcheck scripts/*.sh build.sh
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, lint, shellcheck]
     runs-on: macos-15
     timeout-minutes: 20
     permissions:

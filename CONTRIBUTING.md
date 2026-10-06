@@ -15,12 +15,20 @@ All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md). To repor
 
 | Command | What it does |
 |---|---|
-| `./build.sh` | Builds `build/ColimaBar.app` with SwiftPM and signs it ad-hoc. |
-| `./build.sh test` | Runs the test suite (`swift test`). |
-| `./build.sh install` | Builds the app, installs it in `~/Applications` and opens it. |
-| `./build.sh dmg` | Builds the app and the disk image `build/ColimaBar-<version>.dmg`. |
+| `make build` | Builds `build/ColimaBar.app` with SwiftPM and signs it ad-hoc (`./build.sh`). |
+| `make test` | Runs the test suite (`swift test`). |
+| `make lint` | Checks the Swift format with `swift format lint --strict`. If `shellcheck` is installed, it also checks the shell scripts. |
+| `make fmt` | Formats the Swift code in place with `swift format`. |
+| `make check` | Runs `make lint`, then `make test`. |
+| `make install` | Builds the app, installs it in `~/Applications` and opens it (`./build.sh install`). |
+| `make dmg` | Builds the app and the disk image `build/ColimaBar-<version>.dmg` (`./build.sh dmg`). |
+| `make clean` | Removes `.build` and `build`. |
 
-`./build.sh install` quits the running ColimaBar and replaces it. Use it when you want to test the full app with the login item and auto-start.
+Run `make` with no target to list all targets. The Make targets call `./build.sh` and `swift`, so you can also run those commands directly.
+
+`.swift-format` holds the format rules. `swift format` comes with the Swift toolchain in the Command Line Tools. Run `make fmt` before you commit. CI fails if `make lint` reports a finding. To check the shell scripts locally, install ShellCheck with `brew install shellcheck`.
+
+`make install` quits the running ColimaBar and replaces it. Use it when you want to test the full app with the login item and auto-start.
 
 The version comes from `git describe --tags`. Without a tag, the version is the commit hash.
 
@@ -73,6 +81,8 @@ build/ColimaBar.app/Contents/MacOS/ColimaBar --snapshot /tmp/system.png System
 | `scripts/make-icon.swift` | Draws `Resources/AppIcon.icns`. |
 | `scripts/dmg-readme.txt` | The "Read Me First" file in the disk image. |
 | `build.sh` | Builds the app bundle, the disk image and the tests. |
+| `Makefile` | Shortcuts for build, test, lint and format. |
+| `.swift-format` | The `swift format` rules. |
 | `.github/workflows/ci.yml` | CI and the release job. |
 | `legacy/` | The old SwiftBar plugin. The app does not use it. |
 
@@ -108,11 +118,11 @@ Remove secrets, tokens and private host names from logs before you post them.
 1. Fork the repository and create a branch from `main`.
 2. Keep each pull request small and about one change.
 3. If you change logic, add or update tests.
-4. Run `./build.sh test` and `./build.sh` before you push.
+4. Run `make check` and `make build` before you push.
 5. Open the pull request. Fill in the template: What, Why and How tested.
 6. If you change the UI, add screenshots. Use `--snapshot` to make them.
 
-CI runs `swift test` and `./build.sh` on each pull request. CI must pass before a maintainer merges.
+CI runs `swift format lint`, ShellCheck, `swift test` and `./build.sh` on each pull request. CI must pass before a maintainer merges.
 
 ## Commit messages
 
@@ -126,7 +136,7 @@ Use a light form of [ASD-STE100 Simplified Technical English](https://www.asd-st
 
 - Write one idea per sentence. Keep instructions to about 20 words.
 - Use the active voice with a clear subject.
-- Use the imperative for instructions: "Run `./build.sh test` before you push."
+- Use the imperative for instructions: "Run `make check` before you push."
 - Put conditions before commands: "If the VM is stopped, start it."
 - Use one term for one concept. Use the README terms: dashboard, auto-start, auto-stop, the installer, the disk image, profile, VM.
 - Use plain words: "use", not "utilize"; "before", not "prior to".

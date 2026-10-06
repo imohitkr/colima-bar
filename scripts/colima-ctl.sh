@@ -256,7 +256,7 @@ case "$1" in
     # ColimaBar's action log (colima start/stop output) and Lima's host agent log.
     files=()
     for f in "$CTL_LOG" "$LIMA_LOG"; do [ -f "$f" ] && files+=("$f"); done
-    [ ${#files[@]} -gt 0 ] && open -a Console "${files[@]}" || notify "No Colima logs yet." ;;
+    if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
     echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|auto-stop MIN}" >&2

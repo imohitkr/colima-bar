@@ -84,7 +84,7 @@ fi
 
 if [ "${1:-}" = install ]; then
   mkdir -p ~/Applications
-  osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1 && sleep 1 || true
+  if osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1; then sleep 1; fi
   rm -rf ~/Applications/ColimaBar.app
   cp -R "$APP" ~/Applications/
   open ~/Applications/ColimaBar.app

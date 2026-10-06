@@ -113,9 +113,11 @@ You need the Xcode Command Line Tools.
 
 ```sh
 git clone https://github.com/imohitkr/colima-bar && cd colima-bar
-./build.sh install    # builds, installs to ~/Applications and launches
-./build.sh dmg        # builds build/ColimaBar-<version>.dmg
+make install    # builds, installs to ~/Applications and launches
+make dmg        # builds build/ColimaBar-<version>.dmg
 ```
+
+`make` with no target lists all targets. The Make targets call `./build.sh`, so `./build.sh install` and `./build.sh dmg` also work.
 
 ### After you install
 

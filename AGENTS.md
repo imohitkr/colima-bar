@@ -12,11 +12,16 @@ It uses Swift 5.10 and SwiftPM with Command Line Tools only. It runs on Apple si
 
 | Command | Use |
 |---|---|
-| `./build.sh` | Build `build/ColimaBar.app`. |
-| `./build.sh test` | Run the tests. |
+| `make build` | Build `build/ColimaBar.app`. |
+| `make test` | Run the tests. |
 | `timeout 300 swift test` | Run the tests with a time limit. On macOS, `timeout` comes from GNU coreutils and can be named `gtimeout`. |
-| `./build.sh dmg` | Build the disk image. |
-| `./build.sh install` | Run it only when the user asks. It quits and replaces the installed app. |
+| `make lint` | Check the Swift format (`.swift-format`) and, if ShellCheck is installed, the shell scripts. |
+| `make fmt` | Format the Swift code in place. |
+| `make check` | Run `make lint`, then `make test`. |
+| `make dmg` | Build the disk image. |
+| `make install` | Run it only when the user asks. It quits and replaces the installed app. |
+
+Run `make fmt` and `make lint` before you commit. CI fails on any lint finding.
 
 For screenshots, use a debug run: `build/ColimaBar.app/Contents/MacOS/ColimaBar --snapshot PATH [TAB]`. A debug run does not touch the proxy socket, the docker routes or the login item. CONTRIBUTING.md lists all debug flags.
 
