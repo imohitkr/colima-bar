@@ -88,7 +88,7 @@ final class Updater {
     }
 
     func openReleasePage() {
-        NSWorkspace.shared.open(available?.url ?? URL(string: "https://github.com/imohitkr/colima-bar/releases/latest")!)
+        NSWorkspace.shared.open(ReleaseLink.page(available?.url))
     }
 
     private func fetchLatest() async -> Release? {
@@ -101,11 +101,32 @@ final class Updater {
                   let j = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let tag = j["tag_name"] as? String,
                   let page = (j["html_url"] as? String).flatMap(URL.init(string:)) else { return nil }
-            return Release(version: Version.strip(tag), url: page)
+            return Release(version: Version.strip(tag), url: ReleaseLink.page(page))
         } catch {
             log.notice("update check failed: \(error.localizedDescription, privacy: .public)")
             return nil
         }
+    }
+}
+
+/// Release pages that ColimaBar opens. The page URL comes from the GitHub
+/// API response, so only a release page of this repo on github.com is used.
+enum ReleaseLink {
+    static let latest = URL(string: "https://github.com/imohitkr/colima-bar/releases/latest")!
+
+    static func isTrusted(_ url: URL) -> Bool {
+        guard let c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        return c.scheme?.lowercased() == "https"
+            && c.host?.lowercased() == "github.com"
+            && c.user == nil && c.password == nil && c.port == nil
+            && c.percentEncodedPath.hasPrefix("/imohitkr/colima-bar/releases/")
+            && !c.percentEncodedPath.split(separator: "/").contains("..")
+    }
+
+    /// `url` if it is trusted, else the latest release page.
+    static func page(_ url: URL?) -> URL {
+        guard let url, isTrusted(url) else { return latest }
+        return url
     }
 }
 

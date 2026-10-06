@@ -37,7 +37,7 @@ rm -rf ~/Applications/ColimaBar.app /Applications/ColimaBar.app ~/.cache/colima-
 rm -f ~/.local/bin/colima-ctl.sh
 # Keep the stable path as a link to Colima's socket, so a DOCKER_HOST that
 # still points at it (shell rc files, scripts) keeps working.
-mkdir -p "$(dirname "$STABLE")" && ln -sfn "$COLIMA_SOCK" "$STABLE"
+mkdir -p -m 700 "$(dirname "$STABLE")" && ln -sfn "$COLIMA_SOCK" "$STABLE"
 defaults delete com.imohitkr.ColimaBar >/dev/null 2>&1
 
 echo "ColimaBar removed. Docker clients now use Colima's socket: $COLIMA_SOCK"

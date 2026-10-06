@@ -12,8 +12,9 @@ enum VMState: Equatable { case unknown, running, stopped, notInstalled }
 /// Container data comes straight from the Docker Engine API on the selected
 /// profile's socket (no process per refresh, streaming stats). Colima itself
 /// has no API, so VM facts come from `colima list -j`, run only when the VM
-/// goes up/down, when a watched Colima directory changes, or when the last
-/// list is old (1 minute while running, 5 minutes while stopped).
+/// goes up/down, when a watched Colima directory changes, when the dashboard
+/// opens and the last list is over a minute old, or when the last list is
+/// over 5 minutes old.
 @MainActor @Observable
 final class ColimaModel {
     var state: VMState = .unknown {
@@ -34,6 +35,15 @@ final class ColimaModel {
     var volumes: [VolumeRow] = []
     var profiles: [ProfileRow] = []
     var routing = Routing.Status()
+    /// The dashboard's selected tab, set by DashboardView. No view reads it
+    /// here; it tells the model which costly data is on screen.
+    @ObservationIgnored var dashboardTab: Tab = .containers {
+        didSet {
+            guard dashboardTab != oldValue, visibleCount > 0 else { return }
+            if Self.showsDiskUsage(dashboardTab) { requestDF() }
+            if dashboardTab == .system { Task { await refreshRouting() } }
+        }
+    }
     var alerts: [AlertItem] = []            // newest first, also shown in the dashboard
     var notificationsAllowed = true
     var idleSince: Date?
@@ -135,7 +145,9 @@ final class ColimaModel {
     @ObservationIgnored private var tickTask: Task<Void, Never>?
     @ObservationIgnored private var tickSleep: Task<Void, Never>?  // the heartbeat's current sleep
     @ObservationIgnored private var containerRefresh: Task<Void, Never>?
-    @ObservationIgnored private var lastDF = Date.distantPast
+    @ObservationIgnored private var dfGate = DFGate()
+    @ObservationIgnored private var dfToken = 0         // bumps when dfGate resets; older df tasks then stop
+    @ObservationIgnored private var diskDirty = false   // an event changed images, volumes or disk use
     @ObservationIgnored private var lastColima = Date.distantPast
     @ObservationIgnored private var lastPing = Date()
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
@@ -181,18 +193,27 @@ final class ColimaModel {
         }
     }
 
-    /// The heartbeat runs once a second. While the VM is stopped, nothing is
-    /// in progress and no dashboard is open, it runs every 5 seconds instead.
+    /// The heartbeat runs once a second while a dashboard is open or an
+    /// action is in progress. Otherwise it runs every 5 seconds, also while
+    /// the VM runs: auto-stop does not need finer steps, and opening the
+    /// dashboard ends the current sleep at once.
     nonisolated static func tickInterval(state: VMState, busy: Bool, dashboardOpen: Bool) -> Duration {
-        state == .stopped && !busy && !dashboardOpen ? .seconds(5) : .seconds(1)
+        !busy && !dashboardOpen ? .seconds(5) : .seconds(1)
     }
 
     /// How old the last `colima list` can be before the heartbeat runs it
-    /// again. The directory watcher catches most changes, so a stopped VM
-    /// needs only a rare check.
+    /// again. The directory watcher and the socket ping catch state changes,
+    /// so a running or stopped VM needs only a rare check.
     nonisolated static func staleAfter(state: VMState) -> TimeInterval {
-        state == .stopped ? 5 * 60 : 60
+        state == .stopped || state == .running ? 5 * 60 : 60
     }
+
+    /// Opening the dashboard runs `colima list` only when the last one is at
+    /// least this old.
+    nonisolated static let statusMaxAgeOnOpen: TimeInterval = 60
+
+    /// The Images, Volumes and System tabs show data from `/system/df`.
+    nonisolated static func showsDiskUsage(_ tab: Tab) -> Bool { tab != .containers }
 
     /// Ends the heartbeat's current sleep, so a tick runs now and the next
     /// sleep uses the interval for the new state.
@@ -292,7 +313,7 @@ final class ColimaModel {
         await refreshStatus()
         if state == .running {
             await refreshContainers()
-            if visibleCount > 0 { await refreshDF() }
+            requestDF()
         }
     }
 
@@ -361,10 +382,11 @@ final class ColimaModel {
                 revealIcon = false
                 await refreshContainers()
                 guard gen == generation else { return }
+                requestDF()
                 // `colima start` switches the docker context back to colima.
                 if !isDebug { Task {
                     await Routing.apply()
-                    routing = await Routing.status()
+                    if visibleCount > 0, dashboardTab == .system { routing = await Routing.status() }
                 } }
             }
         } else {
@@ -375,6 +397,7 @@ final class ColimaModel {
     private func clearVMData() {
         events?.cancel()
         events = nil
+        resetDF()
         syncStatStreams()
         set(\.containers, [])
         set(\.stats, [:])
@@ -419,11 +442,48 @@ final class ColimaModel {
         return true
     }
 
-    func refreshDF() async {
+    /// True while a dashboard shows a tab with `/system/df` data.
+    private var wantsDF: Bool {
+        visibleCount > 0 && Self.showsDiskUsage(dashboardTab) && state == .running && hasDockerSocket
+    }
+
+    /// Asks for fresh `/system/df` data. dockerd walks every volume and
+    /// container layer for it, which can take seconds. So it runs only while
+    /// a tab shows the data, one at a time, and at most once per 30 s (see
+    /// DFGate). Requests in between join into one run.
+    func requestDF() {
+        guard wantsDF else { return }
+        scheduleDF(dfGate.request(now: Date()))
+    }
+
+    private func scheduleDF(_ step: DFGate.Step) {
+        guard case .run(let wait) = step else { return }
+        let gen = generation
+        let token = dfToken
+        Task {
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard gen == generation, token == dfToken else { return }
+            // The tab may have closed during the wait.
+            guard wantsDF else { dfGate.skip(); return }
+            dfGate.begin()
+            diskDirty = false
+            await refreshDF()
+            guard gen == generation, token == dfToken else { return }
+            scheduleDF(dfGate.end(now: Date()))
+        }
+    }
+
+    /// Forgets the df schedule, for example when the VM stops.
+    private func resetDF() {
+        dfToken += 1
+        dfGate = DFGate()
+        diskDirty = false
+    }
+
+    private func refreshDF() async {
         let gen = generation
         guard let r = await api.get("/system/df", timeout: 30), r.ok, gen == generation,
               let d = try? JSONDecoder().decode(APIDF.self, from: r.body) else { return }
-        lastDF = Date()
         let imgs = d.Images ?? []
         let ctrs = d.Containers ?? []
         let vols = d.Volumes ?? []
@@ -616,11 +676,16 @@ final class ColimaModel {
 
     // MARK: - Live stats
 
+    /// Only what the open tab needs: `colima list` when the last one is over
+    /// a minute old, df for the disk tabs, and routing for the System tab.
     private func becameVisible() {
         Task {
-            await refreshAll()
-            if Date().timeIntervalSince(lastDF) > 30 { await refreshDF() }
-            routing = await Routing.status()
+            if Date().timeIntervalSince(lastColima) >= Self.statusMaxAgeOnOpen { await refreshStatus() }
+            if state == .running {
+                await refreshContainers()
+                requestDF()
+            }
+            if dashboardTab == .system { routing = await Routing.status() }
         }
         syncStatStreams()
     }
@@ -667,12 +732,41 @@ final class ColimaModel {
 
     // MARK: - Events
 
+    /// The event types and actions that `handle` uses. dockerd drops all
+    /// others, so healthcheck exec events (several per second with many
+    /// containers) never wake the app. "health_status" makes dockerd match
+    /// every action by prefix, so it also matches "health_status: unhealthy".
+    /// No other action here is a prefix of an unwanted one.
+    nonisolated static let eventTypes = ["container", "image", "volume"]
+    nonisolated static let eventActions = [
+        // container
+        "create", "start", "restart", "die", "kill", "stop", "oom", "pause", "unpause",
+        "rename", "destroy", "health_status",
+        // image
+        "pull", "tag", "untag", "delete", "import", "load",
+        // all three types
+        "prune",
+    ]
+
+    nonisolated static var eventFilter: String {
+        let f = ["type": eventTypes, "event": eventActions]
+        let data = (try? JSONSerialization.data(withJSONObject: f, options: [.sortedKeys])) ?? Data()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    /// Events that change nothing ColimaBar shows. The server filter already
+    /// drops them; this check runs on the stream thread in case one slips through.
+    nonisolated static func ignores(action: String) -> Bool {
+        action.hasPrefix("exec_") || action == "top"
+    }
+
     private func startEvents() {
         guard hasDockerSocket else { return }
-        let filters = DockerAPI.q(#"{"type":["container","image","volume"]}"#)
+        let filters = DockerAPI.q(Self.eventFilter)
         let gen = generation
         events = api.stream("/events?filters=\(filters)", onLine: { [weak self] line in
-            guard let ev = try? JSONDecoder().decode(DockerEvent.self, from: line) else { return }
+            guard let ev = try? JSONDecoder().decode(DockerEvent.self, from: line),
+                  !Self.ignores(action: ev.Action ?? "") else { return }
             Task { @MainActor in
                 guard let self, self.generation == gen else { return }
                 self.handle(ev)
@@ -693,7 +787,7 @@ final class ColimaModel {
         let attrs = ev.Actor?.Attributes ?? [:]
         let action = ev.Action ?? ""
         // Stats/exec events fire constantly and change nothing we show.
-        if action.hasPrefix("exec_") || action == "top" { return }
+        if Self.ignores(action: action) { return }
         // testcontainers' containers are torn down (often non-zero) on every
         // test run; their failures already show up in the test output.
         let isTestcontainer = attrs["org.testcontainers"] == "true"
@@ -710,13 +804,13 @@ final class ColimaModel {
         }
         // Coalesce a burst of events (compose up/down) into one refresh.
         let touchesDisk = ev.Type != "container" || ["create", "destroy"].contains(action)
-        if touchesDisk { lastDF = .distantPast }
+        if touchesDisk { diskDirty = true }
         containerRefresh?.cancel()
         containerRefresh = Task {
             try? await Task.sleep(for: .milliseconds(300))
             guard !Task.isCancelled else { return }
             await refreshContainers()
-            if visibleCount > 0, lastDF == .distantPast { await refreshDF() }
+            if diskDirty { requestDF() }
         }
     }
 
@@ -793,25 +887,43 @@ final class ColimaModel {
         }
     }
 
-    /// stop|start|restart every container of a compose project.
+    /// stop|start|restart every container of a compose project. At most
+    /// `projectConcurrency` requests run at once: each one holds a thread
+    /// for up to 180 s.
     func project(_ name: String, _ verb: String) {
         let ids = containers.filter { $0.project == name && (verb == "start" ? !$0.isRunning : $0.isRunning || verb == "restart") }
             .map(\.id)
         let names = Dictionary(uniqueKeysWithValues: containers.map { ($0.id, $0.name) })
-        Task {
-            let failed = await withTaskGroup(of: String?.self) { g in
-                for id in ids {
-                    g.addTask { [api] in
-                        let r = await api.post("/containers/\(id)/\(verb)", timeout: 180)
-                        return (r?.ok ?? false) ? nil : names[id] ?? String(id.prefix(12))
-                    }
-                }
-                return await g.reduce(into: [String]()) { if let n = $1 { $0.append(n) } }
+        Task { [api] in
+            let failed = await Self.failures(ids, limit: Self.projectConcurrency) { id in
+                let r = await api.post("/containers/\(id)/\(verb)", timeout: 180)
+                return (r?.ok ?? false) ? nil : names[id] ?? String(id.prefix(12))
             }
             if !failed.isEmpty {
                 Notifier.shared.post("\(verb.capitalized) failed for \(failed.sorted().joined(separator: ", ")).")
             }
             await refreshContainers()
+        }
+    }
+
+    nonisolated static let projectConcurrency = 8
+
+    /// Runs `body` for each item, at most `limit` at a time, and returns the
+    /// non-nil results (the names that failed).
+    nonisolated static func failures<T: Sendable>(_ items: [T], limit: Int,
+                                                  _ body: @escaping @Sendable (T) async -> String?) async -> [String] {
+        await withTaskGroup(of: String?.self) { g in
+            var rest = items[...]
+            for _ in 0..<min(max(limit, 1), items.count) {
+                let item = rest.removeFirst()
+                g.addTask { await body(item) }
+            }
+            var out: [String] = []
+            for await r in g {
+                if let r { out.append(r) }
+                if let item = rest.popFirst() { g.addTask { await body(item) } }
+            }
+            return out
         }
     }
 
@@ -846,6 +958,49 @@ final class ColimaModel {
     private func push(_ arr: inout [Double], _ v: Double) {
         arr.append(v)
         if arr.count > historyLen { arr.removeFirst(arr.count - historyLen) }
+    }
+}
+
+/// Decides when the next `/system/df` runs. At most one runs at a time, and
+/// a new one starts at least `minGap` after the last one ended. Requests that
+/// come in meanwhile join into one more run after the gap.
+struct DFGate {
+    enum Step: Equatable {
+        case none
+        case run(after: TimeInterval)
+    }
+
+    var minGap: TimeInterval = 30
+    private(set) var scheduled = false   // a run waits for the gap or is in flight
+    private(set) var inFlight = false
+    private(set) var again = false       // requested while a run was in flight
+    private(set) var lastEnd: Date?
+
+    mutating func request(now: Date) -> Step {
+        if inFlight { again = true; return .none }
+        if scheduled { return .none }     // the waiting run covers this request
+        scheduled = true
+        let wait = lastEnd.map { max(0, minGap - now.timeIntervalSince($0)) } ?? 0
+        return .run(after: wait)
+    }
+
+    mutating func begin() { inFlight = true }
+
+    /// Call when the run ends (with or without data). Returns the run that
+    /// covers requests made while it was in flight.
+    mutating func end(now: Date) -> Step {
+        inFlight = false
+        scheduled = false
+        lastEnd = now
+        guard again else { return .none }
+        again = false
+        return request(now: now)
+    }
+
+    /// The waiting run did not start because nothing shows the data now.
+    mutating func skip() {
+        scheduled = false
+        again = false
     }
 }
 

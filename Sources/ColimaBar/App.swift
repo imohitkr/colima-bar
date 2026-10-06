@@ -113,6 +113,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             registerLoginItemOnce()
             Updater.shared.start()
         }
+        // An older copy restarted into this one after an update while the
+        // user opened the app (see relaunchIfUpdated()). Do what the reopen
+        // would have done. Read the request in every case, so it is used once.
+        if !Self.isDebugRun, Self.takeRevealRequest() || CommandLine.arguments.contains("--reveal") {
+            model.revealIcon = true
+            reveal(after: 1)
+        }
         if CommandLine.arguments.contains("--window") { showWindow() }
         // Debug: `--popover [PATH]` opens the popover on launch and, with a
         // path, renders it to a PNG and quits.
@@ -165,12 +172,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// - A replacement copy (`--replace`) takes over from the older copy.
     /// - A copy started by hand while the agent is enabled asks launchd to
     ///   start the agent instead, then exits.
+    /// - A newer installed copy takes over from an older copy at another
+    ///   path (see takesOver).
     /// - Otherwise a second copy sends the running one a reopen event (which
     ///   brings a hidden icon back) and exits.
     private func ensureSingleSupervisedInstance() {
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
             .filter { $0 != .current }
-        if Self.isLaunchAgent || Self.isReplacement {
+        // An update can go to another path: the new copy in /Applications and
+        // the old one still running from ~/Applications. A reopen event only
+        // reaches the old copy, so this newer copy takes over like `--replace`.
+        // A normal quit exits 0, so launchd does not restart an old agent
+        // (KeepAlive restarts only on a failed exit). Below, refreshIfNeeded()
+        // points the login item at this copy, and kickstart() starts it.
+        let takeOver = !Self.isLaunchAgent && !Self.isReplacement && others.first.map {
+            Self.takesOver(mine: Self.version, other: $0.bundleURL.flatMap(Self.onDiskVersion(of:)),
+                           installed: LoginItem.isInstalled(Bundle.main.bundlePath))
+        } == true
+        if takeOver { log.notice("a newer copy takes over from \(others.first?.bundleURL?.path ?? "?", privacy: .public)") }
+        if Self.isLaunchAgent || Self.isReplacement || takeOver {
             // Quitting runs the other copy's shutdown, which frees the proxy
             // socket before this copy starts listening on it.
             for other in others { other.terminate() }
@@ -400,7 +420,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         item?.isVisible = true
         if !Self.isDebugRun { model.shutdown() }
         // A non-zero exit makes launchd start the agent again (KeepAlive).
-        if relaunching, Self.isLaunchAgent { exit(EX_TEMPFAIL) }
+        if relaunching, Self.isLaunchAgent {
+            // exit() skips the normal preference flush; write revealOnLaunch now.
+            CFPreferencesAppSynchronize(kCFPreferencesCurrentApplication)
+            exit(EX_TEMPFAIL)
+        }
     }
 
     /// CFBundleShortVersionString as it is on disk now. Bundle.main caches
@@ -410,6 +434,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         return plist?["CFBundleShortVersionString"] as? String
     }
 
+    /// How a running copy restarts after an update replaced its bundle.
+    enum Restart: Equatable {
+        case none
+        /// Quit with a failed exit, so launchd starts the agent again.
+        case agent
+        /// Open a new instance with `--replace`, then quit.
+        case manual
+    }
+
+    /// Any change of the version on disk restarts, a downgrade too.
+    nonisolated static func restart(running: String, onDisk: String?, isAgent: Bool) -> Restart {
+        guard let onDisk, onDisk != running else { return .none }
+        return isAgent ? .agent : .manual
+    }
+
+    /// A second copy takes over from the running copy only when it is
+    /// installed (not run from a DMG or Downloads) and its version is newer
+    /// than the running copy's version on disk.
+    nonisolated static func takesOver(mine: String, other: String?, installed: Bool) -> Bool {
+        guard installed, let other else { return false }
+        return Version.isNewer(mine, than: other)
+    }
+
+    /// UserDefaults key: the time (seconds since 1970) when an old copy
+    /// restarted into the new version for a reopen. The new copy then
+    /// reveals the icon and opens the dashboard.
+    nonisolated static let revealKey = "revealOnLaunch"
+
+    /// A reveal request counts for 60 s. An older one is from a restart
+    /// that failed or was long ago.
+    nonisolated static func revealRequestIsFresh(_ requestedAt: Double?, now: Double) -> Bool {
+        guard let requestedAt else { return false }
+        let age = now - requestedAt
+        return age >= 0 && age < 60
+    }
+
+    /// Reads and removes the reveal request.
+    private static func takeRevealRequest() -> Bool {
+        let at = UserDefaults.standard.object(forKey: revealKey) as? Double
+        if at != nil { UserDefaults.standard.removeObject(forKey: revealKey) }
+        return revealRequestIsFresh(at, now: Date().timeIntervalSince1970)
+    }
+
     /// An update (DMG, installer) replaces the bundle while this process
     /// runs. Opening the app then only sends a reopen event to this old
     /// process, so the new version never starts. Restart into the new code:
@@ -417,20 +484,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// - A copy started by hand opens a new instance with `--replace`, then
     ///   quits. The new instance waits until this copy has quit (and freed
     ///   the proxy socket) instead of sending it a reopen event.
+    /// The new instance reveals the icon and opens the dashboard, as the
+    /// reopen asked: `--reveal` for a copy started by hand, and a UserDefaults
+    /// request for the agent (launchd starts it without arguments).
     /// Returns true if a restart has begun.
     private func relaunchIfUpdated() -> Bool {
-        guard !Self.isDebugRun, !relaunching,
-              let onDisk = Self.onDiskVersion(of: Bundle.main.bundleURL), onDisk != Self.version
-        else { return false }
+        guard !Self.isDebugRun, !relaunching else { return false }
+        let onDisk = Self.onDiskVersion(of: Bundle.main.bundleURL)
+        let restart = Self.restart(running: Self.version, onDisk: onDisk, isAgent: Self.isLaunchAgent)
+        guard restart != .none else { return false }
         relaunching = true
-        log.notice("bundle on disk is \(onDisk, privacy: .public), running \(Self.version, privacy: .public); restarting")
-        if Self.isLaunchAgent {
+        log.notice("bundle on disk is \(onDisk ?? "?", privacy: .public), running \(Self.version, privacy: .public); restarting")
+        // Also for a copy started by hand: if the agent takes over from the
+        // new instance, the agent reads it.
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.revealKey)
+        if restart == .agent {
             NSApp.terminate(nil)
             return true
         }
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.createsNewApplicationInstance = true
-        cfg.arguments = ["--replace"]
+        cfg.arguments = ["--replace", "--reveal"]
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { [weak self] _, error in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -438,6 +512,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     // Keep this copy running, so the proxy stays up.
                     self.log.error("couldn't start the new version: \(error.localizedDescription, privacy: .public)")
                     self.relaunching = false
+                    UserDefaults.standard.removeObject(forKey: Self.revealKey)
+                    if self.model.iconHidden { self.model.revealIcon = true }
+                    self.reveal()
                     return
                 }
                 NSApp.terminate(nil)
@@ -453,11 +530,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // Only override the option while the icon is actually hidden;
         // otherwise the next stop would leave it visible.
         if model.iconHidden { model.revealIcon = true }
+        reveal()
+        return false
+    }
+
+    /// Shows the icon and opens the dashboard: the popover when the icon is
+    /// on screen, otherwise the window.
+    private func reveal(after delay: Double = 0.25) {
         appliedHidden = false
         item.isVisible = true
         // macOS places a just-shown status item asynchronously; anchor the
         // popover once it is on screen, or fall back to the window.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, !self.popover.isShown else { return }
             if let w = self.item.button?.window, w.screen != nil, w.isVisible,
                w.occlusionState.contains(.visible) {
@@ -466,7 +550,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 self.showWindow()
             }
         }
-        return false
     }
 
     // MARK: - Visibility drives live stats
@@ -489,7 +572,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             w.isReleasedWhenClosed = false
             w.contentViewController = NSHostingController(rootView:
                 DashboardView(model: model, ui: ui, inWindow: true))
-            w.setFrameAutosaveName("ColimaBarDashboard")
+            // The closed window may not be freed yet and still hold the name.
+            if !w.setFrameAutosaveName(Self.windowFrameName) { w.setFrameUsingName(Self.windowFrameName) }
             w.delegate = self
             window = w
         }
@@ -508,7 +592,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         model.visibleCount += on ? 1 : -1
     }
 
-    func windowWillClose(_ n: Notification) { setWindowCounted(false) }
+    static let windowFrameName = "ColimaBarDashboard"
+
+    func windowWillClose(_ n: Notification) {
+        setWindowCounted(false)
+        // A closed window keeps its SwiftUI tree, which still runs body on
+        // every model change. Release it; showWindow() builds a new one, and
+        // ViewState keeps the tab and the search.
+        guard let w = n.object as? NSWindow, w === window else { return }
+        w.delegate = nil
+        window = nil
+        DispatchQueue.main.async { w.contentViewController = nil }
+    }
     func windowDidMiniaturize(_ n: Notification) { setWindowCounted(false) }
     func windowDidDeminiaturize(_ n: Notification) { setWindowCounted(true) }
 }

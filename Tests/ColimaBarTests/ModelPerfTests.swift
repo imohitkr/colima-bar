@@ -44,20 +44,21 @@ import Testing
 }
 
 @Suite struct HeartbeatTimingTests {
-    @Test func staleLimitIsLongerOnlyWhileStopped() {
+    @Test func staleLimitIsLongWhileStoppedOrRunning() {
         #expect(ColimaModel.staleAfter(state: .stopped) == 300)
-        #expect(ColimaModel.staleAfter(state: .running) == 60)
+        #expect(ColimaModel.staleAfter(state: .running) == 300)
         #expect(ColimaModel.staleAfter(state: .unknown) == 60)
         #expect(ColimaModel.staleAfter(state: .notInstalled) == 60)
     }
 
-    @Test func tickSlowsOnlyWhenStoppedIdleAndClosed() {
+    @Test func tickSlowsWhenIdleAndClosed() {
         #expect(ColimaModel.tickInterval(state: .stopped, busy: false, dashboardOpen: false) == .seconds(5))
         #expect(ColimaModel.tickInterval(state: .stopped, busy: false, dashboardOpen: true) == .seconds(1))
         #expect(ColimaModel.tickInterval(state: .stopped, busy: true, dashboardOpen: false) == .seconds(1))
-        #expect(ColimaModel.tickInterval(state: .running, busy: false, dashboardOpen: false) == .seconds(1))
-        #expect(ColimaModel.tickInterval(state: .unknown, busy: false, dashboardOpen: false) == .seconds(1))
-        #expect(ColimaModel.tickInterval(state: .notInstalled, busy: false, dashboardOpen: false) == .seconds(1))
+        #expect(ColimaModel.tickInterval(state: .running, busy: false, dashboardOpen: false) == .seconds(5))
+        #expect(ColimaModel.tickInterval(state: .running, busy: false, dashboardOpen: true) == .seconds(1))
+        #expect(ColimaModel.tickInterval(state: .running, busy: true, dashboardOpen: false) == .seconds(1))
+        #expect(ColimaModel.tickInterval(state: .unknown, busy: false, dashboardOpen: false) == .seconds(5))
     }
 }
 

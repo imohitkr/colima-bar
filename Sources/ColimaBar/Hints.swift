@@ -128,7 +128,7 @@ enum Help {
     static let linkVarRun = "Create /var/run/docker.sock as a symlink to the ColimaBar socket. ColimaBar asks for your admin password."
     static let autoStop = "Stop the VM after it is idle for the selected time. Running containers and docker builds, pulls or pushes keep it running. If auto-start is on, the next docker command starts it again."
     static let autoStopMinutes = "The time with no running containers and no docker builds, pulls or pushes before the VM stops."
-    static let autoStopCustom = "Type a number of minutes from 1 to 1440 (24 hours). The new time applies while you type."
+    static let autoStopCustom = "Type a number of minutes from 1 to 1440 (24 hours). Press Return or click elsewhere to apply it."
     static let hideIcon = "Hide the icon while Colima is stopped. ColimaBar continues to run. If auto-start is on, docker still starts Colima. To show the icon, open ColimaBar from Spotlight."
 
     static let enableNotifications = "Open System Settings > Notifications > ColimaBar and turn on Allow Notifications."

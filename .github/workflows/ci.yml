@@ -12,19 +12,24 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Read-only by default. Only the release job gets write access.
 permissions:
-  contents: write   # create releases on tags
+  contents: read
 
+# Actions are pinned to full commit SHAs, so a moved tag cannot change them.
 jobs:
   build:
     runs-on: macos-15
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0   # git describe for the version
+          persist-credentials: false
 
-      - uses: actions/cache@v4
+      # Tag builds start clean, so a poisoned cache cannot reach a release.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           path: .build
           key: spm-${{ runner.os }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
@@ -38,19 +43,44 @@ jobs:
       - name: Build app
         run: ./build.sh
 
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: macos-15
+    timeout-minutes: 20
+    permissions:
+      contents: write       # create the release
+      id-token: write       # sign the provenance attestation
+      attestations: write   # store the attestation
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0   # git describe for the version
+          persist-credentials: false
+
       # Stable asset names, so releases/latest/download/ColimaBar.{dmg,zip}
       # always points at the newest version (install.sh and the README use it).
       - name: Package
-        if: startsWith(github.ref, 'refs/tags/v')
         run: |
           ./build.sh dmg
           cp build/ColimaBar-*.dmg ColimaBar.dmg
           ditto -c -k --keepParent build/ColimaBar.app ColimaBar.zip
 
+      # Lets users check a download with
+      # `gh attestation verify ColimaBar.zip --repo imohitkr/colima-bar`.
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            ColimaBar.dmg
+            ColimaBar.zip
+
       - name: Release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        # Immutable releases: a published release cannot change. Upload the
+        # assets to a draft first, then publish it.
         run: |
           gh release create "$GITHUB_REF_NAME" ColimaBar.dmg ColimaBar.zip \
-            --title "ColimaBar $GITHUB_REF_NAME" --generate-notes
+            --title "ColimaBar $GITHUB_REF_NAME" --generate-notes --draft
+          gh release edit "$GITHUB_REF_NAME" --draft=false

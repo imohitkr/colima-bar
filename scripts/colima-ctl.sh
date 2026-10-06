@@ -6,8 +6,9 @@ export XDG_CONFIG_HOME="$HOME/.config"
 
 # Profile to act on: ColimaBar passes the selected one in COLIMABAR_PROFILE.
 PROFILE="${COLIMABAR_PROFILE:-default}"
+# A leading "." would allow "." and "..", which point outside the profile folder.
 case "$PROFILE" in
-  *[!A-Za-z0-9._-]*|"") echo "invalid profile name: $PROFILE" >&2; exit 1 ;;
+  *[!A-Za-z0-9._-]*|.*|"") echo "invalid profile name: $PROFILE" >&2; exit 1 ;;
 esac
 CONFIG="$XDG_CONFIG_HOME/colima/$PROFILE/colima.yaml"
 SOCK="$XDG_CONFIG_HOME/colima/$PROFILE/docker.sock"
@@ -54,7 +55,7 @@ confirm() {
 # lock_vm [quiet] -> "quiet" skips the notice (timer-driven auto-stop).
 HOLD_LOCK=""
 lock_vm() {
-  mkdir -p "$STATE_DIR"
+  mkdir -p -m 700 "$STATE_DIR"
   if ! mkdir "$LOCK" 2>/dev/null; then
     # Take over a stale lock atomically: only one script wins the mv.
     if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +30 2>/dev/null)" ] \
@@ -100,7 +101,7 @@ trap on_term TERM INT
 # with_busy "label" cmd... -> writes the busy marker ColimaBar watches.
 with_busy() {
   local label="$1"; shift
-  mkdir -p "$STATE_DIR"
+  mkdir -p -m 700 "$STATE_DIR"
   echo "$label" > "$BUSY"
   WROTE_BUSY=1
   "$@" &
@@ -196,13 +197,16 @@ case "$1" in
     printf 'export DOCKER_HOST=unix://%s' "$HOME/.cache/colima-bar/docker.sock" | pbcopy ;;
 
   # Per-container actions: ctr-start|ctr-stop|ctr-restart|ctr-rm|ctr-logs|ctr-shell NAME
-  ctr-start)   docker start "$2" >/dev/null || { notify "Failed to start $2"; exit 1; } ;;
-  ctr-rm)      confirm "Remove container $2? If it is running, it stops first." || exit 2
-               docker rm -f "$2" >/dev/null || { notify "Failed to remove $2"; exit 1; } ;;
-  ctr-stop)    docker stop "$2" >/dev/null || { notify "Failed to stop $2"; exit 1; } ;;
-  ctr-restart) docker restart "$2" >/dev/null || { notify "Failed to restart $2"; exit 1; } ;;
-  ctr-logs)    exec docker logs -f --tail 200 "$2" ;;
-  ctr-shell)   exec docker exec -it "$2" sh -c 'command -v bash >/dev/null && exec bash || exec sh' ;;
+  # "--" ends the options, so a name that starts with "-" is not read as a flag.
+  ctr-start)   docker start -- "$2" >/dev/null || { notify "Failed to start $2"; exit 1; } ;;
+  # A clean stop first (up to 10 s), so the container can shut down properly.
+  # docker stop does nothing to a container that is not running.
+  ctr-rm)      confirm "Remove container $2? If it is running, it stops first (up to 10 seconds)." || exit 2
+               { docker stop -- "$2" && docker rm -- "$2"; } >/dev/null || { notify "Failed to remove $2"; exit 1; } ;;
+  ctr-stop)    docker stop -- "$2" >/dev/null || { notify "Failed to stop $2"; exit 1; } ;;
+  ctr-restart) docker restart -- "$2" >/dev/null || { notify "Failed to restart $2"; exit 1; } ;;
+  ctr-logs)    exec docker logs -f --tail 200 -- "$2" ;;
+  ctr-shell)   exec docker exec -it -- "$2" sh -c 'command -v bash >/dev/null && exec bash || exec sh' ;;
   # Idle auto-stop from ColimaBar: no confirmation, just a notification.
   auto-stop)
     lock_vm quiet
@@ -211,13 +215,13 @@ case "$1" in
   # Images and volumes: img-rm REF | img-pull REF | vol-rm NAME
   img-rm)
     confirm "Remove image $2?" || exit 2
-    out=$(docker rmi "$2" 2>&1) || { notify "Remove failed: ${out##*: }"; exit 1; } ;;
+    out=$(docker rmi -- "$2" 2>&1) || { notify "Remove failed: ${out##*: }"; exit 1; } ;;
   img-pull)
     # Not a VM action: no busy marker, so the dashboard stays usable.
-    docker pull -q "$2" >/dev/null || { notify "Pull failed for $2"; exit 1; } ;;
+    docker pull -q -- "$2" >/dev/null || { notify "Pull failed for $2"; exit 1; } ;;
   vol-rm)
     confirm "Remove volume $2? Data in it is lost for good." || exit 2
-    out=$(docker volume rm "$2" 2>&1) || { notify "Remove failed: ${out##*: }"; exit 1; } ;;
+    out=$(docker volume rm -- "$2" 2>&1) || { notify "Remove failed: ${out##*: }"; exit 1; } ;;
 
   stop-all)
     n=$(running_count)

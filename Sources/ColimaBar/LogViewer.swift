@@ -8,14 +8,12 @@ struct LogLine: Identifiable, Equatable {
     let time: String     // HH:mm:ss.SSS, local time
     let text: String
     let stderr: Bool
-    let lower: String    // text lower-cased once, for filtering
 
     init(id: Int, time: String, text: String, stderr: Bool) {
         self.id = id
         self.time = time
         self.text = text
         self.stderr = stderr
-        self.lower = text.lowercased()
     }
 
     /// Builds a line from "2026-10-02T14:03:11.123456789Z message" on the
@@ -131,23 +129,110 @@ enum LogTime {
     }
 }
 
-/// Case-insensitive search as a byte scan. Callers lower-case both sides
-/// first, so the scan compares UTF-8 bytes exactly. This is about 30 times
-/// faster than Foundation's `contains`.
+/// Case-insensitive search as a byte scan, without a stored lower-case copy
+/// of each line (that copy doubled the memory per line). It folds A-Z to
+/// a-z into a reused scratch buffer and runs memmem on it. Other bytes
+/// compare exactly. When the query has non-ASCII letters and the plain scan
+/// fails, it lower-cases the line, as the filter did before, so "ÄPFEL"
+/// still matches "äpfel".
 enum LogFilter {
     static func needle(_ query: String) -> [UInt8] { Array(query.lowercased().utf8) }
 
-    static func contains(_ lower: String, _ needle: [UInt8]) -> Bool {
-        if needle.isEmpty { return true }
-        if let r = lower.utf8.withContiguousStorageIfAvailable({ scan($0, needle) }) { return r }
-        return Array(lower.utf8).withUnsafeBufferPointer { scan($0, needle) }
+    /// Checks one line. Use a `Matcher` to check many lines with one query.
+    static func contains(_ text: String, _ needle: [UInt8]) -> Bool {
+        var m = Matcher(needle: needle)
+        return m.matches(text)
     }
 
-    private static func scan(_ hay: UnsafeBufferPointer<UInt8>, _ needle: [UInt8]) -> Bool {
-        guard hay.count >= needle.count else { return false }
-        return needle.withUnsafeBufferPointer { n in
-            memmem(hay.baseAddress, hay.count, n.baseAddress, n.count) != nil
+    /// Holds the query and a scratch buffer for many lines. Not thread-safe.
+    struct Matcher {
+        let needle: [UInt8]
+        private let needleASCII: Bool   // false if the query has non-ASCII cased letters
+        private var scratch: [UInt8] = []
+
+        init(query: String) { self.init(needle: LogFilter.needle(query)) }
+
+        init(needle: [UInt8]) {
+            self.needle = needle
+            // Only letters with an upper and a lower case need the slow path.
+            // Emoji, CJK and symbols in the query do not.
+            needleASCII = !String(decoding: needle, as: UTF8.self).contains {
+                !$0.isASCII && $0.lowercased() != $0.uppercased()
+            }
         }
+
+        mutating func matches(_ text: String) -> Bool {
+            if needle.isEmpty { return true }
+            var hay = text
+            if let r = hay.utf8.withContiguousStorageIfAvailable({ scan($0) }) { return r }
+            hay.makeContiguousUTF8()
+            return hay.utf8.withContiguousStorageIfAvailable { scan($0) } ?? false
+        }
+
+        private mutating func scan(_ hay: UnsafeBufferPointer<UInt8>) -> Bool {
+            guard hay.count >= needle.count else { return false }
+            if scratch.count < hay.count { scratch = [UInt8](repeating: 0, count: max(hay.count, 256)) }
+            let found = scratch.withUnsafeMutableBufferPointer { out in
+                Self.fold(hay, into: out)
+                return needle.withUnsafeBufferPointer { n in
+                    memmem(out.baseAddress, hay.count, n.baseAddress, n.count) != nil
+                }
+            }
+            if found || needleASCII { return found }
+            // Only ASCII bytes change above. Lower-case non-ASCII letters too,
+            // but only for lines that have non-ASCII bytes.
+            guard hay.contains(where: { $0 >= 0x80 }) else { return false }
+            let lower = Array(String(decoding: hay, as: UTF8.self).lowercased().utf8)
+            return lower.withUnsafeBufferPointer { l in
+                needle.withUnsafeBufferPointer { n in
+                    memmem(l.baseAddress, l.count, n.baseAddress, n.count) != nil
+                }
+            }
+        }
+
+        /// Copies `hay` to `out` with A-Z changed to a-z. It works on 8 bytes
+        /// at a time: for each byte below 0x80 it tests "A" <= b <= "Z" with
+        /// one addition per bound and sets bit 0x20 where both hold.
+        static func fold(_ hay: UnsafeBufferPointer<UInt8>, into out: UnsafeMutableBufferPointer<UInt8>) {
+            guard let src = hay.baseAddress, let dst = out.baseAddress else { return }
+            let ones: UInt64 = 0x0101_0101_0101_0101
+            let high = ones &* 0x80
+            let n = hay.count
+            var i = 0
+            while i + 8 <= n {
+                let x = UnsafeRawPointer(src + i).loadUnaligned(as: UInt64.self)
+                let low7 = x & ~high
+                let atLeastA = (low7 &+ ones &* (0x80 - 0x41)) & high
+                let pastZ = (low7 &+ ones &* (0x80 - 0x5B)) & high
+                let upper = atLeastA & ~pastZ & ~x
+                UnsafeMutableRawPointer(dst + i).storeBytes(of: x | (upper >> 2), as: UInt64.self)
+                i += 8
+            }
+            while i < n {
+                let b = src[i]
+                dst[i] = b | (b &- 0x41 < 26 ? 0x20 : 0)
+                i += 1
+            }
+        }
+    }
+}
+
+/// Decides how many of the oldest lines to drop, so that at most
+/// `maxLines` lines and `maxBytes` bytes of text remain.
+enum LogTrim {
+    /// The UTF-8 size of a line's text. Native strings store it, so this is O(1).
+    static func size(_ l: LogLine) -> Int { l.text.utf8.count }
+
+    /// Returns the number of lines to drop from the front and their bytes.
+    static func dropCount(_ lines: [LogLine], bytes: Int, maxLines: Int, maxBytes: Int) -> (count: Int, bytes: Int) {
+        var drop = max(0, lines.count - maxLines)
+        var freed = 0
+        for i in 0..<drop { freed += size(lines[i]) }
+        while bytes - freed > maxBytes, drop < lines.count {
+            freed += size(lines[drop])
+            drop += 1
+        }
+        return (drop, freed)
     }
 }
 
@@ -224,17 +309,23 @@ struct LogDemuxer {
 }
 
 /// Parsed lines wait here between the reader thread and the next flush on
-/// the main thread. It keeps at most `cap` lines and drops the oldest, so a
-/// slow main thread cannot make memory grow without limit.
+/// the main thread. It keeps at most `cap` lines and `byteCap` bytes of text
+/// and drops the oldest, so a slow main thread or a hidden window cannot
+/// make memory grow without limit.
 final class LogBuffer: @unchecked Sendable {
     let cap: Int
+    let byteCap: Int
     private let lock = NSLock()
     private var lines: [LogLine] = []
+    private var bytes = 0
     private var nextID = 0
     private var last: String?
     private var flushPending = false
 
-    init(cap: Int) { self.cap = cap }
+    init(cap: Int, byteCap: Int = LogStore.defaultMaxBytes) {
+        self.cap = cap
+        self.byteCap = byteCap
+    }
 
     /// Gives the lines their ids and stores them. Returns true when the
     /// caller must schedule a flush; one is already pending otherwise.
@@ -245,11 +336,12 @@ final class LogBuffer: @unchecked Sendable {
         for var l in new {
             l.id = nextID
             nextID += 1
+            bytes += LogTrim.size(l)
             lines.append(l)
         }
         if let lastTimestamp { last = lastTimestamp }
         // Trim in batches, so each push does not move every line.
-        if lines.count > cap + LogStore.trimSlack { lines.removeFirst(lines.count - cap) }
+        if lines.count > cap + LogStore.trimSlack || bytes > byteCap + byteCap / LogStore.byteSlackDivisor { trim() }
         guard !flushPending, !lines.isEmpty else { return false }
         flushPending = true
         return true
@@ -260,10 +352,19 @@ final class LogBuffer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         flushPending = false
-        if lines.count > cap { lines.removeFirst(lines.count - cap) }
+        trim()
         let out = lines
         lines = []
+        bytes = 0
         return out
+    }
+
+    /// Call with the lock held.
+    private func trim() {
+        let d = LogTrim.dropCount(lines, bytes: bytes, maxLines: cap, maxBytes: byteCap)
+        guard d.count > 0 else { return }
+        lines.removeFirst(d.count)
+        bytes -= d.bytes
     }
 
     /// The timestamp of the newest line, as Docker sent it. `since` needs
@@ -276,7 +377,8 @@ final class LogBuffer: @unchecked Sendable {
 }
 
 /// Live log state for one container. Bytes arrive on a background thread,
-/// are parsed there, and published to the UI ten times a second at most.
+/// are parsed there, and published to the UI four times a second at most.
+/// While the window is minimized or covered, nothing is published.
 @MainActor @Observable
 final class LogStore {
     let containerID: String
@@ -297,26 +399,51 @@ final class LogStore {
     @ObservationIgnored private var handle: StreamHandle?
     @ObservationIgnored private let buffer: LogBuffer
     @ObservationIgnored private var closed = false
+    /// False while the window is minimized or not visible on screen.
+    @ObservationIgnored private var onScreen = true
+    /// The time of the last log request that the daemon accepted.
+    @ObservationIgnored private var lastStart: Date?
+    /// Bytes of text in `lines`.
+    @ObservationIgnored private var textBytes = 0
     let maxLines: Int
+    let maxBytes: Int
     /// `lines` may grow this far past `maxLines` before a trim. Trimming in
     /// batches keeps the cost of `removeFirst` low per line.
     nonisolated static let trimSlack = 2000
+    /// The text of all lines may grow by maxBytes / this before a trim.
+    nonisolated static let byteSlackDivisor = 16
+    /// A window keeps at most this much text, also when its lines are long.
+    nonisolated static let defaultMaxBytes = 32 << 20
+    /// How long new lines wait, so that they are published as one batch.
+    nonisolated static let flushDelay = Duration.milliseconds(250)
 
-    init(api: DockerAPI, containerID: String, name: String, maxLines: Int = 20_000) {
+    init(api: DockerAPI, containerID: String, name: String, maxLines: Int = 20_000,
+         maxBytes: Int = LogStore.defaultMaxBytes) {
         self.api = api
         self.containerID = containerID
         self.name = name
         self.maxLines = maxLines
-        self.buffer = LogBuffer(cap: maxLines)
+        self.maxBytes = maxBytes
+        self.buffer = LogBuffer(cap: maxLines, byteCap: maxBytes)
     }
 
-    private func matches(_ l: LogLine, _ needle: [UInt8]) -> Bool {
-        (!stderrOnly || l.stderr) && LogFilter.contains(l.lower, needle)
+    private func filtered(_ batch: [LogLine]) -> [LogLine] {
+        var m = LogFilter.Matcher(query: search)
+        let errOnly = stderrOnly
+        return batch.filter { (!errOnly || $0.stderr) && m.matches($0.text) }
     }
 
     private func refilter() {
-        let n = LogFilter.needle(search)
-        visible = lines.filter { matches($0, n) }
+        visible = filtered(lines)
+    }
+
+    /// Called when the window is minimized, covered or shown again. While it
+    /// is hidden, lines wait in `buffer` (capped). The first flush after it
+    /// shows again publishes them.
+    func setOnScreen(_ on: Bool) {
+        guard on != onScreen else { return }
+        onScreen = on
+        if on { ingest(buffer.drain()) }
     }
 
     func start() {
@@ -333,6 +460,7 @@ final class LogStore {
     func clear() {
         lines.removeAll()
         visible.removeAll()
+        textBytes = 0
     }
 
     var allText: String {
@@ -341,6 +469,7 @@ final class LogStore {
 
     private func connect(tail: Int) async {
         guard !closed else { return }
+        let asked = Date()
         // No reply means the socket refused or timed out, for example while
         // `colima restart` runs. Only HTTP 404 means the container is gone.
         guard let r = await api.get("/containers/\(containerID)/json") else {
@@ -359,13 +488,10 @@ final class LogStore {
         let tty = config["Tty"] as? Bool ?? false
         // The window may have closed while we waited for the inspect call.
         guard !closed else { return }
-        var q = "follow=1&stdout=1&stderr=1&timestamps=1"
-        if let ts = buffer.lastTimestamp, let since = Self.sinceParam(ts) {
-            // Everything after the last line we have; `tail` would cut it.
-            q += "&tail=all&since=\(since)"
-        } else {
-            q += "&tail=\(tail)"
-        }
+        let q = Self.logQuery(lastTimestamp: buffer.lastTimestamp, lastStart: lastStart, tail: tail)
+        // Prefer the daemon's clock: the VM clock can drift from the Mac's,
+        // for example after sleep. The header has whole seconds only.
+        lastStart = r.headers["date"].flatMap(Self.httpDate)?.addingTimeInterval(-1) ?? asked
         status = "Live"
         let box = DemuxBox(LogDemuxer(tty: tty))
         let buffer = self.buffer
@@ -387,6 +513,43 @@ final class LogStore {
         })
     }
 
+    /// The query for a log request. After the first line it asks for
+    /// everything after that line. If no line has arrived yet but an earlier
+    /// request ran, it asks for everything since that request: a container
+    /// that starts and dies between two attempts still shows its output
+    /// (often the reason it crashed). No line arrived, so none repeats.
+    nonisolated static func logQuery(lastTimestamp: String?, lastStart: Date?, tail: Int) -> String {
+        var q = "follow=1&stdout=1&stderr=1&timestamps=1"
+        if let ts = lastTimestamp, let since = sinceParam(ts) {
+            // Everything after the last line we have; `tail` would cut it.
+            q += "&tail=all&since=\(since)"
+        } else if let lastStart {
+            q += "&tail=all&since=\(sinceParam(date: lastStart))"
+        } else {
+            q += "&tail=\(tail)"
+        }
+        return q
+    }
+
+    /// A date as UNIX "seconds.nanoseconds" for `since`.
+    nonisolated static func sinceParam(date: Date) -> String {
+        let t = date.timeIntervalSince1970
+        var secs = Int64(t.rounded(.down))
+        var nanos = Int64(((t - Double(secs)) * 1e9).rounded())
+        if nanos >= 1_000_000_000 { nanos -= 1_000_000_000; secs += 1 }
+        let n = String(nanos)
+        return "\(secs)." + String(repeating: "0", count: 9 - n.count) + n
+    }
+
+    /// Parses an HTTP "Date" header, for example "Tue, 06 Oct 2026 10:00:00 GMT".
+    nonisolated static func httpDate(_ s: String) -> Date? {
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "GMT")
+        f.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return f.date(from: s)
+    }
+
     /// The Engine API takes `since` as UNIX "seconds.nanoseconds", not the
     /// RFC 3339 timestamps it prints. `since` is inclusive, so this adds 1 ns
     /// to skip the line we already have.
@@ -399,24 +562,27 @@ final class LogStore {
         return "\(secs)." + String(repeating: "0", count: 9 - n.count) + n
     }
 
-    /// Waits so that lines arriving in the next 100 ms join this batch, then
-    /// publishes the batch.
+    /// Waits so that lines arriving in the next 250 ms join this batch, then
+    /// publishes the batch. While the window is hidden, it publishes nothing:
+    /// the buffer then asks for no more flushes until `setOnScreen(true)`.
     private func flush() async {
-        try? await Task.sleep(for: .milliseconds(100))
+        try? await Task.sleep(for: Self.flushDelay)
+        guard onScreen else { return }
         ingest(buffer.drain())
     }
 
     /// Appends a batch of lines and filters only the new ones.
     func ingest(_ batch: [LogLine]) {
         guard !batch.isEmpty else { return }
-        let n = LogFilter.needle(search)
         lines.append(contentsOf: batch)
-        visible.append(contentsOf: batch.filter { matches($0, n) })
-        if lines.count > maxLines + Self.trimSlack {
-            lines.removeFirst(lines.count - maxLines)
-            if let first = lines.first?.id {
-                visible.removeFirst(visible.firstIndex(where: { $0.id >= first }) ?? visible.count)
-            }
+        textBytes += batch.reduce(0) { $0 + LogTrim.size($1) }
+        visible.append(contentsOf: filtered(batch))
+        if lines.count > maxLines + Self.trimSlack || textBytes > maxBytes + maxBytes / Self.byteSlackDivisor {
+            let d = LogTrim.dropCount(lines, bytes: textBytes, maxLines: maxLines, maxBytes: maxBytes)
+            lines.removeFirst(d.count)
+            textBytes -= d.bytes
+            let first = lines.first?.id ?? Int.max
+            visible.removeFirst(visible.firstIndex(where: { $0.id >= first }) ?? visible.count)
         }
     }
 
@@ -543,15 +709,22 @@ private struct LogRow: View {
     }
 }
 
-/// Scrolls to the newest visible line when lines arrive and Follow is on.
-/// It is a separate view, so reading `lines` here does not re-render the list.
+/// Scrolls to the newest visible line when Follow is on and the visible
+/// lines change (new lines, a new search or stderr filter), and when Follow
+/// is turned on. It is a separate view, so these reads do not re-render the list.
 private struct FollowScroller: View {
     let store: LogStore
     let proxy: ScrollViewProxy
 
+    private struct Key: Equatable {
+        let last: Int?
+        let count: Int
+        let follow: Bool
+    }
+
     var body: some View {
         Color.clear
-            .onChange(of: store.lines.last?.id) {
+            .onChange(of: Key(last: store.visible.last?.id, count: store.visible.count, follow: store.follow)) {
                 if store.follow, let last = store.visible.last { proxy.scrollTo(last.id, anchor: .bottom) }
             }
     }
@@ -598,6 +771,17 @@ final class LogWindows: NSObject, NSWindowDelegate {
         w.center()
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
+    }
+
+    // A minimized or covered window does no UI work for new lines.
+    func windowDidChangeOcclusionState(_ n: Notification) { updateOnScreen(n) }
+    func windowDidMiniaturize(_ n: Notification) { updateOnScreen(n) }
+    func windowDidDeminiaturize(_ n: Notification) { updateOnScreen(n) }
+
+    private func updateOnScreen(_ n: Notification) {
+        guard let w = n.object as? NSWindow,
+              let entry = windows.values.first(where: { $0.0 === w }) else { return }
+        entry.1.setOnScreen(!w.isMiniaturized && w.occlusionState.contains(.visible))
     }
 
     func windowWillClose(_ n: Notification) {

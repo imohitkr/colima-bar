@@ -21,6 +21,10 @@ main() {
   local repo="imohitkr/colima-bar"
   local version="${COLIMABAR_VERSION:-}"
   local url
+  if [ -n "$version" ] && ! [[ "$version" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "COLIMABAR_VERSION must look like v0.4.0, not: $version" >&2
+    exit 1
+  fi
   if [ -n "$version" ]; then
     url="https://github.com/$repo/releases/download/$version/ColimaBar.zip"
   else
@@ -59,11 +63,26 @@ main() {
   trap 'rm -rf "$tmp"' EXIT
 
   echo "Downloading $url"
-  curl -fL --progress-bar -o "$tmp/ColimaBar.zip" "$url"
+  curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/ColimaBar.zip" "$url"
+
+  # CI attaches a build provenance attestation to each release file. It
+  # proves that this repo's workflow built the file. The check needs the
+  # GitHub CLI, so skip it with a notice when gh is missing or logged out.
+  if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
+    echo "Verifying the download with gh attestation verify"
+    gh attestation verify "$tmp/ColimaBar.zip" --repo "$repo" >/dev/null || {
+      echo "The download does not match a build from $repo. Stopping." >&2
+      exit 1
+    }
+  else
+    echo "Did not verify the download (needs gh). To verify it, run: gh attestation verify ColimaBar.zip --repo $repo"
+  fi
+
   ditto -x -k "$tmp/ColimaBar.zip" "$tmp"
   [ -d "$tmp/ColimaBar.app" ] || { echo "The download does not contain ColimaBar.app." >&2; exit 1; }
+  # Corruption check only. The ad-hoc signature does not prove who built the app.
   codesign --verify --deep "$tmp/ColimaBar.app" 2>/dev/null || {
-    echo "The downloaded app has an invalid signature. Stopping." >&2
+    echo "The downloaded app is damaged (invalid signature). Stopping." >&2
     exit 1
   }
   xattr -dr com.apple.quarantine "$tmp/ColimaBar.app" 2>/dev/null || true

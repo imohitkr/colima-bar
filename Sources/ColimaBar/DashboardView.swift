@@ -63,6 +63,8 @@ struct DashboardView: View {
         .frame(width: inWindow ? nil : 480, height: inWindow ? nil : 640)
         .frame(minWidth: inWindow ? 480 : nil, minHeight: inWindow ? 500 : nil)
         .transaction { $0.animation = nil }
+        // The model fetches disk usage and routing only for the tabs that show them.
+        .onChange(of: ui.tab, initial: true) { model.dashboardTab = ui.tab }
         .background {
             Button("") { Task { await model.refreshAll() } }.keyboardShortcut("r").hidden()
             Button("") { searchFocused = true }.keyboardShortcut("f").hidden()

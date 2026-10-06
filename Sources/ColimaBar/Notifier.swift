@@ -25,6 +25,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// Called with whether macOS currently allows ColimaBar's notifications.
     var onPermission: ((Bool) -> Void)?
 
+    /// A crash-looping container dies about once a minute. This limits the
+    /// banners for one container and alert kind to one per 10 minutes.
+    private var throttle = AlertThrottle(window: 10 * 60)
+
     /// Must run before the app finishes launching so a click that launches
     /// the app isn't lost.
     func install() {
@@ -43,6 +47,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     func post(_ body: String, title: String = "Colima", container: (id: String, name: String)? = nil,
               profile: String? = nil, record: Bool = true, url: URL? = nil) {
         if record { onAlert?(title, body, container) }
+        // The dashboard list above still gets every alert. Only the banner is skipped.
+        if let container, !throttle.allow(AlertThrottle.key(container: container.id, body: body)) { return }
         Task {
             guard await authorized() else { return }
             let content = UNMutableNotificationContent()
@@ -123,7 +129,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let id = info["id"] as? String ?? ""
         let name = info["name"] as? String ?? ""
         let profile = (info["profile"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let link = (info["url"] as? String).flatMap(URL.init(string:))
+        // Open web pages only, never a file or another app's URL scheme.
+        let link = (info["url"] as? String).flatMap(URL.init(string:)).flatMap { $0.scheme?.lowercased() == "https" ? $0 : nil }
         Task { @MainActor in
             if let link { NSWorkspace.shared.open(link) }
             if !id.isEmpty {
@@ -137,4 +144,32 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
 
     static func isViewLogs(_ a: String) -> Bool { a == viewLogs }
     static func isRestart(_ a: String) -> Bool { a == restart }
+}
+
+/// Decides if a container alert may post a banner. The same key posts at most
+/// once per `window` seconds. `clock` is replaceable for tests.
+struct AlertThrottle {
+    let window: TimeInterval
+    let clock: () -> Date
+    private var last: [String: Date] = [:]
+
+    init(window: TimeInterval, clock: @escaping () -> Date = Date.init) {
+        self.window = window
+        self.clock = clock
+    }
+
+    /// The exit code is not part of the key. Thus a loop that exits with
+    /// different codes still counts as one kind of alert.
+    static func key(container: String, body: String) -> String {
+        container + "|" + body.filter { !$0.isNumber }
+    }
+
+    /// True if `key` did not post within the window. A true result starts a new window.
+    mutating func allow(_ key: String) -> Bool {
+        let now = clock()
+        if last.count > 100 { last = last.filter { now.timeIntervalSince($0.value) < window } }
+        if let t = last[key], now.timeIntervalSince(t) < window { return false }
+        last[key] = now
+        return true
+    }
 }

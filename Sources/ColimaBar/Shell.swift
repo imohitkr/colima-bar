@@ -122,7 +122,8 @@ enum Shell {
             try? fm.removeItem(atPath: Paths.ctlLog)
         }
         if !fm.fileExists(atPath: Paths.ctlLog) {
-            try? fm.createDirectory(atPath: Paths.cacheDir, withIntermediateDirectories: true)
+            try? fm.createDirectory(atPath: Paths.cacheDir, withIntermediateDirectories: true,
+                                    attributes: [.posixPermissions: 0o700])
             fm.createFile(atPath: Paths.ctlLog, contents: nil, attributes: [.posixPermissions: 0o600])
         }
         guard let h = FileHandle(forWritingAtPath: Paths.ctlLog) else { return FileHandle.nullDevice }

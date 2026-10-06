@@ -107,6 +107,13 @@ import Testing
     @Test func activeTransfersCountsOnlyLongBusyConnections() {
         let px = SocketProxy(upstream: upstream, path: stable)
         #expect(px.activeTransfers() == 0)
+        let now = Date()
+        px.addConnection(work: true, lastIO: now.addingTimeInterval(-10 * 60))    // silent build step
+        px.addConnection(work: true, lastIO: now.addingTimeInterval(-40 * 60))    // stalled
+        px.addConnection(work: false, lastIO: now)                                // poller
+        #expect(px.activeTransfers(now: now, stall: 30 * 60) == 1)
+        #expect(px.activeTransfers(now: now, stall: 60 * 60) == 2)
+        #expect(px.activeTransfers(now: now, stall: 60) == 0)
     }
 
     @Test func pullAfterPingOnTheSameConnectionCounts() throws {

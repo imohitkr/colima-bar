@@ -249,7 +249,8 @@ struct ImagesTab: View {
         let q = search.lowercased()
         let list = model.images.filter { q.isEmpty || $0.repo.lowercased().contains(q) || $0.tag.lowercased().contains(q) }
         let unused = model.images.filter { $0.containers == 0 }
-        VStack(alignment: .leading, spacing: 6) {
+        // Lazy: a long list builds only the rows on screen.
+        LazyVStack(alignment: .leading, spacing: 6) {
             SectionHeader(title: "\(model.images.count) images · \(unused.count) unused") {
                 Button("Remove dangling") { model.ctl("prune", "dangling") }.buttonStyle(.borderless).font(.caption)
                     .hint(Help.removeDangling)
@@ -303,7 +304,8 @@ struct VolumesTab: View {
         let q = search.lowercased()
         let list = model.volumes.filter { q.isEmpty || $0.name.lowercased().contains(q) || ($0.project?.lowercased().contains(q) ?? false) }
         let unused = model.volumes.filter { $0.links == 0 }
-        VStack(alignment: .leading, spacing: 6) {
+        // Lazy: a long list builds only the rows on screen.
+        LazyVStack(alignment: .leading, spacing: 6) {
             SectionHeader(title: "\(model.volumes.count) volumes · \(unused.count) unused") {
                 Button("Remove unused") { model.ctl("prune", "volumes") }.buttonStyle(.borderless).font(.caption)
                     .hint(Help.removeUnusedVolumes)
@@ -364,20 +366,33 @@ enum IdleMinutes {
         guard let n = Int(s.trimmingCharacters(in: .whitespaces)), range.contains(n) else { return nil }
         return n
     }
+
+    /// The minutes to apply when the custom field is committed (Return or
+    /// focus loss). Nil when the text is not valid or equals the current
+    /// value, so a commit that changes nothing does not reset the idle timer.
+    static func commit(_ s: String, current: Int) -> Int? {
+        guard let n = parse(s), n != current else { return nil }
+        return n
+    }
 }
 
 struct SystemTab: View {
     @Bindable var model: ColimaModel
     @Bindable var form: SystemForm
+    @FocusState private var minutesFocused: Bool
 
     private let presets = [("Light", 2, 4), ("Standard", 4, 8), ("Heavy", 8, 16)]
     private let cpuOpts = [2, 4, 6, 8, 10, 12]
     private let memOpts = [4, 8, 12, 16, 24, 32]
 
-    /// The fixed choices, plus the VM's current value when it is not one of
-    /// them (Colima's default VM has 2 GB), so the picker always has a selection.
-    static func options(_ fixed: [Int], _ current: Int) -> [Int] {
-        current <= 0 || fixed.contains(current) ? fixed : (fixed + [current]).sorted()
+    /// The fixed choices, plus the VM's value and the picked value when they
+    /// are not among them (Colima's default VM has 2 GB). The VM's value stays
+    /// after you pick another one, so you can pick it again, and the picker
+    /// always has a selection.
+    static func options(_ fixed: [Int], _ extra: Int...) -> [Int] {
+        var out = fixed
+        for v in extra where v > 0 && !out.contains(v) { out.append(v) }
+        return out.count == fixed.count ? fixed : out.sorted()
     }
 
     var body: some View {
@@ -403,13 +418,13 @@ struct SystemTab: View {
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 GridRow {
                     Text("CPU").font(.caption).foregroundStyle(.secondary)
-                    Picker("", selection: $form.cpu) { ForEach(Self.options(cpuOpts, form.cpu), id: \.self) { Text("\($0)").tag($0) } }
+                    Picker("", selection: $form.cpu) { ForEach(Self.options(cpuOpts, model.vm.cpus, form.cpu), id: \.self) { Text("\($0)").tag($0) } }
                         .pickerStyle(.segmented).labelsHidden()
                         .hint(Help.cpu)
                 }
                 GridRow {
                     Text("Memory").font(.caption).foregroundStyle(.secondary)
-                    Picker("", selection: $form.mem) { ForEach(Self.options(memOpts, form.mem), id: \.self) { Text("\($0) GB").tag($0) } }
+                    Picker("", selection: $form.mem) { ForEach(Self.options(memOpts, model.vm.memGB, form.mem), id: \.self) { Text("\($0) GB").tag($0) } }
                         .pickerStyle(.segmented).labelsHidden()
                         .hint(Help.memory)
                 }
@@ -510,16 +525,26 @@ struct SystemTab: View {
                 .pickerStyle(.segmented).labelsHidden().frame(width: 250)
                 .hint(Help.autoStopMinutes)
                 if idleSelection.wrappedValue == IdleMinutes.custom {
-                    // Applied as soon as the text is a valid number, so what
-                    // the field shows is always the timeout in effect.
+                    // Applied on Return or when the field loses focus, not
+                    // per keystroke: while you change 30 to 45, the field
+                    // briefly holds "4", and a 4-minute timeout could stop
+                    // an idle VM.
                     TextField("min", text: $form.customMinutes)
                         .textFieldStyle(.roundedBorder).frame(width: 52)
                         .multilineTextAlignment(.trailing)
                         .foregroundStyle(IdleMinutes.parse(form.customMinutes) == nil ? Color.red : .primary)
                         .accessibilityLabel("Auto-stop minutes")
-                        .onChange(of: form.customMinutes) { applyCustomIdle() }
+                        .focused($minutesFocused)
+                        .onSubmit { applyCustomIdle() }
+                        .onChange(of: minutesFocused) { if !minutesFocused { applyCustomIdle() } }
+                        .onDisappear { applyCustomIdle() }
                         .hint(Help.autoStopCustom)
                     Text("min").font(.caption).foregroundStyle(.secondary)
+                    if IdleMinutes.commit(form.customMinutes, current: model.autoStopMinutes) != nil {
+                        // Small, so the row still fits the popover's width.
+                        Image(systemName: "return").font(.caption).foregroundStyle(.orange)
+                            .hint("Press Return to apply the new time.")
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -578,7 +603,10 @@ struct SystemTab: View {
             }
         }
         .toggleStyle(.switch).controlSize(.small)
-        .onAppear { syncPickers() }
+        .onAppear {
+            syncPickers()
+            syncIdle()
+        }
         .onChange(of: model.vm) { syncPickers() }
     }
 
@@ -600,6 +628,10 @@ struct SystemTab: View {
             let pending = enabled ? await Task.detached { LoginItem.disabledInSettings() }.value : false
             form.loginNeedsApproval = pending
         }
+    }
+
+    /// Only on appear: a VM change must not replace minutes you are typing.
+    private func syncIdle() {
         if !IdleMinutes.presets.contains(model.autoStopMinutes) {
             form.customIdle = true
             form.customMinutes = "\(model.autoStopMinutes)"
@@ -622,8 +654,10 @@ struct SystemTab: View {
             })
     }
 
+    /// Applies the custom field. A preset picked after "Custom" wins: the
+    /// field's focus loss and disappearance must not undo it.
     private func applyCustomIdle() {
-        guard let n = IdleMinutes.parse(form.customMinutes) else { return }
+        guard form.customIdle, let n = IdleMinutes.commit(form.customMinutes, current: model.autoStopMinutes) else { return }
         model.autoStopMinutes = n
     }
 }

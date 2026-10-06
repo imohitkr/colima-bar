@@ -92,15 +92,20 @@ enum Routing {
     }
 
     /// The value of a `docker.host` line in a Java properties file, or nil.
-    /// Java allows spaces around the key and `=` or `:` as the separator, so
-    /// this matches `^\s*docker\.host\s*[=:]\s*(.*)$`. A `#` comment line
-    /// doesn't match.
+    /// Java allows spaces around the key. The separator is `=`, `:` or only
+    /// whitespace (`docker.host tcp://remote:2375`), so this matches
+    /// `^\s*docker\.host(\s*[=:]|\s)\s*(.*)$`. A `#` comment line and
+    /// another key (`docker.hostname`) don't match.
     nonisolated static func dockerHostValue<S: StringProtocol>(_ line: S) -> String? {
-        var rest = line.drop { $0 == " " || $0 == "\t" }
+        let blank: (Character) -> Bool = { $0 == " " || $0 == "\t" || $0 == "\u{0C}" }
+        var rest = line.drop(while: blank)
         guard rest.hasPrefix("docker.host") else { return nil }
-        rest = rest.dropFirst("docker.host".count).drop { $0 == " " || $0 == "\t" }
-        guard let sep = rest.first, sep == "=" || sep == ":" else { return nil }
-        return rest.dropFirst().trimmingCharacters(in: .whitespacesAndNewlines)
+        rest = rest.dropFirst("docker.host".count)
+        // The key ends at whitespace, "=" or ":".
+        guard let end = rest.first, blank(end) || end == "=" || end == ":" else { return nil }
+        rest = rest.drop(while: blank)
+        if let sep = rest.first, sep == "=" || sep == ":" { rest = rest.dropFirst() }
+        return rest.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// Sets docker.host unless the user already points it somewhere that
@@ -242,13 +247,18 @@ enum LoginItem {
             return
         }
         guard !AppDelegate.isLaunchAgent else { return }
-        let installed = (exe.hasPrefix("/Applications/") || exe.hasPrefix("\(Paths.home)/Applications/"))
-            && !exe.contains("/AppTranslocation/")
-        guard installed || !FileManager.default.isExecutableFile(atPath: current) else { return }
+        guard isInstalled(exe) || !FileManager.default.isExecutableFile(atPath: current) else { return }
         log.notice("login agent points at another binary; updating it")
         try? writePlist()
         launchctl(["bootout", "\(domain)/\(label)"])
         bootstrap()
+    }
+
+    /// True for a path inside /Applications or ~/Applications that macOS
+    /// did not translocate (a copy run from a DMG or Downloads is not).
+    nonisolated static func isInstalled(_ path: String) -> Bool {
+        (path.hasPrefix("/Applications/") || path.hasPrefix("\(Paths.home)/Applications/"))
+            && !path.contains("/AppTranslocation/")
     }
 
     /// Loads the job. Right after a bootout, launchd can still be removing

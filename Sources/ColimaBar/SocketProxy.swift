@@ -173,11 +173,16 @@ final class SocketProxy: @unchecked Sendable {
     /// Opens a connection to Colima's socket (injectable for tests).
     var connectUpstream: @Sendable (String) -> Result<Int32, ProxyError> = { UnixSocket.tryConnect($0) }
 
-    /// While the VM is down, a client that sends nothing for this many
-    /// seconds is closed. Otherwise each idle keep-alive client holds a
-    /// thread and an fd forever. Spliced connections have no timeout:
+    /// While the VM is down, or before its first request, a client that
+    /// sends nothing for this many seconds is closed. Otherwise each idle
+    /// client holds a thread and an fd forever. Spliced connections have no timeout:
     /// attach, logs and events streams can be silent for a long time.
     var idleTimeout = 5 * 60
+
+    /// The largest request head (request line and headers) the VM-down path
+    /// reads. A larger head gets 431 and the connection closes, so a client
+    /// cannot make the proxy buffer without limit.
+    static let maxHead = 64 * 1024
 
     /// How long a request waits for a wake. wake() must finish well inside it.
     /// wake() worst case: 300 s waiting for another start + 600 s for
@@ -300,12 +305,14 @@ final class SocketProxy: @unchecked Sendable {
         case .up(let up):
             // Read the start of the first request to classify the connection
             // (auto-stop activity); the bytes are forwarded as they are.
+            // A client that sends nothing closes after idleTimeout. splice()
+            // removes the timeout again before it streams.
+            UnixSocket.setTimeout(client, idleTimeout)
             var buf = [UInt8](repeating: 0, count: 8192)
-            let n = read(client, &buf, buf.count)
+            var n = read(client, &buf, buf.count)
+            while n < 0, errno == EINTR { n = read(client, &buf, buf.count) }
             guard n > 0 else { close(client); close(up); return }
-            let first = Data(buf[0..<n])
-            let line = String(decoding: first.prefix { $0 != 0x0D && $0 != 0x0A }, as: UTF8.self)
-            splice(client, up, initial: first, work: Self.isWork(line))
+            splice(client, up, initial: Data(buf[0..<n]), work: Self.isWork(Self.requestLine(buf, n)))
             return
         case .failed(let err):
             refuse(client, err)
@@ -316,17 +323,27 @@ final class SocketProxy: @unchecked Sendable {
         // An idle client closes after idleTimeout. splice() removes the
         // timeout again before it streams.
         UnixSocket.setTimeout(client, idleTimeout)
+        let marker = Data("\r\n\r\n".utf8)
         var pending = Data()
         var buf = [UInt8](repeating: 0, count: 65536)
         while true {
-            // Need one complete request head to decide what to do.
-            while pending.range(of: Data("\r\n\r\n".utf8)) == nil {
+            // Need one complete request head to decide what to do. Only the
+            // new bytes (and the 3 before them) are searched on each read.
+            var found = pending.range(of: marker)
+            while found == nil {
+                if pending.count >= Self.maxHead {
+                    reply(client, status: "431 Request Header Fields Too Large",
+                          "ColimaBar refused a request head larger than \(Self.maxHead / 1024) KB.")
+                    return
+                }
                 let n = read(client, &buf, buf.count)
                 if n < 0, errno == EINTR { continue }
                 if n <= 0 { close(client); return }
+                let from = pending.startIndex + max(0, pending.count - (marker.count - 1))
                 pending.append(buf, count: n)
+                found = pending.range(of: marker, in: from..<pending.endIndex)
             }
-            let head = pending.range(of: Data("\r\n\r\n".utf8))!
+            guard let head = found else { close(client); return }
             let requestLine = String(decoding: pending[..<head.lowerBound], as: UTF8.self)
                 .components(separatedBy: "\r\n").first ?? ""
             if let reply = pingReply(requestLine) {
@@ -350,7 +367,7 @@ final class SocketProxy: @unchecked Sendable {
             case .down:
                 break
             }
-            log.notice("waking Colima for: \(requestLine, privacy: .public)")
+            log.notice("waking Colima for: \(Self.logTarget(requestLine), privacy: .public)")
             guard waitForWake() else {
                 reply503(client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
                 return
@@ -376,15 +393,20 @@ final class SocketProxy: @unchecked Sendable {
     }
 
     private func reply503(_ client: Int32, _ message: String) {
+        reply(client, status: "503 Service Unavailable", message)
+    }
+
+    /// Sends a JSON error like the daemon's, then closes the connection.
+    private func reply(_ client: Int32, status: String, _ message: String) {
         let body = (try? JSONSerialization.data(withJSONObject: ["message": message], options: [.withoutEscapingSlashes]))
             ?? Data(#"{"message":"ColimaBar error"}"#.utf8)
-        let head = "HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
+        let head = "HTTP/1.1 \(status)\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\nConnection: close\r\n\r\n"
         _ = UnixSocket.writeAll(client, Data(head.utf8) + body)
         close(client)
     }
 
     /// Open connections doing real work: a build, pull, push, load, save,
-    /// import or commit (classified by the connection's first request, see
+    /// import or commit (classified by the connection's latest request, see
     /// isWork). They count while open, even through a silent build step, up
     /// to `stall` without any bytes. Pollers' GETs and `docker events` never
     /// count. Auto-stop treats any of these as "not idle".
@@ -394,11 +416,33 @@ final class SocketProxy: @unchecked Sendable {
         }
     }
 
-    /// The first line of a chunk, if the chunk could start an HTTP request.
+    /// Tests only: records a connection the way splice() does.
+    func addConnection(work: Bool, lastIO: Date) {
+        lock.withLock {
+            nextConn += 1
+            conns[nextConn] = (lastIO, lastIO, work)
+        }
+    }
+
+    static let methods: Set<String> = ["GET", "HEAD", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
+
+    /// The first line of a chunk, if the chunk starts an HTTP request: a
+    /// known method, a space and a "/" path. Body bytes (a build context tar
+    /// that starts with "Dockerfile", JSON, HTTP/2 frames) give "".
     static func requestLine(_ buf: [UInt8], _ n: Int) -> String {
         let head = buf[0..<min(n, 512)]
-        guard let first = head.first, first >= 0x41, first <= 0x5A else { return "" }   // method: A-Z
+        guard let space = head.prefix(8).firstIndex(of: 0x20), space + 1 < head.endIndex, head[space + 1] == 0x2F,
+              methods.contains(String(decoding: head[..<space], as: UTF8.self)) else { return "" }
         return String(decoding: head.prefix { $0 != 0x0D && $0 != 0x0A }, as: UTF8.self)
+    }
+
+    /// The method and path of a request line, without the query string.
+    /// A query can carry secrets (`POST /build?buildargs=...`), so only this
+    /// part goes to the log.
+    static func logTarget(_ requestLine: String) -> String {
+        let parts = requestLine.split(separator: " ", maxSplits: 2)
+        guard parts.count >= 2 else { return parts.first.map { String($0.prefix(16)) } ?? "" }
+        return "\(parts[0]) \(parts[1].split(separator: "?", maxSplits: 1).first ?? "")"
     }
 
     /// Whether an HTTP request line starts long-running work on the daemon.
@@ -486,26 +530,31 @@ final class SocketProxy: @unchecked Sendable {
             shutdown(client, SHUT_RD)
             done.signal()
         }
-        copy(from: client, to: upstream, conn: id, classify: !work)
+        copy(from: client, to: upstream, conn: id, classify: true)
         done.wait()
         close(client)
         close(upstream)
     }
 
-    /// With `classify`, each chunk that starts a new request is checked with
-    /// isWork: the docker CLI sends HEAD /_ping first and then reuses the same
-    /// keep-alive connection for the pull, push or build.
+    /// With `classify`, each chunk that starts a new request sets the
+    /// connection's work flag from isWork, to true or back to false. The
+    /// docker CLI sends HEAD /_ping first and then reuses the same keep-alive
+    /// connection for the pull, push or build. A pooled client (docker-java)
+    /// pulls once and then polls GET /containers/json on the same connection;
+    /// the poll must not keep the VM awake.
     private func copy(from src: Int32, to dst: Int32, conn: Int, classify: Bool = false) {
         var buf = [UInt8](repeating: 0, count: 65536)
         var lastTouch = Date.distantPast
-        var classify = classify
         while true {
             let n = read(src, &buf, buf.count)
             if n < 0, errno == EINTR { continue }
             if n <= 0 { break }
-            if classify, Self.isWork(Self.requestLine(buf, n)) {
-                lock.withLock { conns[conn]?.work = true }
-                classify = false
+            if classify {
+                let line = Self.requestLine(buf, n)
+                if !line.isEmpty {
+                    let work = Self.isWork(line)
+                    lock.withLock { conns[conn]?.work = work }
+                }
             }
             let now = Date()
             if now.timeIntervalSince(lastTouch) >= 1 { touch(conn); lastTouch = now }
