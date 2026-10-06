@@ -8,6 +8,14 @@
 # without the Gatekeeper prompt that a browser download gets.
 set -euo pipefail
 
+wait_for_exit() {
+  local i
+  for i in $(seq 1 20); do
+    pgrep -xq ColimaBar || return 0
+    sleep 0.5
+  done
+}
+
 # Everything runs inside main, so a partly downloaded script does nothing.
 main() {
   local repo="imohitkr/colima-bar"
@@ -63,11 +71,25 @@ main() {
   if pgrep -xq ColimaBar; then
     echo "Quitting the running ColimaBar"
     osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1 || true
-    local i
-    for i in $(seq 1 20); do
-      pgrep -xq ColimaBar || break
-      sleep 0.5
-    done
+    wait_for_exit
+    # The Apple event can fail (Automation permission, an open alert).
+    # ColimaBar also quits cleanly on SIGTERM, so launchd does not relaunch it.
+    if pgrep -xq ColimaBar; then
+      pkill -TERM -x ColimaBar 2>/dev/null || true
+      wait_for_exit
+    fi
+    if pgrep -xq ColimaBar; then
+      echo "ColimaBar is still running. Quit it from its menu, then run the installer again." >&2
+      exit 1
+    fi
+  fi
+
+  # Keep one copy only. A second copy could take over the login item.
+  local other=/Applications/ColimaBar.app
+  [ "$dest" = /Applications ] && other="$HOME/Applications/ColimaBar.app"
+  if [ -d "$other" ]; then
+    echo "Removing the other copy at $other"
+    rm -rf "$other" || echo "Could not remove $other. Delete it by hand." >&2
   fi
 
   mkdir -p "$dest"

@@ -12,6 +12,7 @@
 <p align="center">
   <a href="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml"><img src="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/Apple%20silicon-only-black?logo=apple" alt="Apple silicon only">
   <img src="https://img.shields.io/badge/Swift-5.10-F05138?logo=swift&logoColor=white" alt="Swift 5.10">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
 </p>
@@ -20,7 +21,7 @@
   <img src="docs/screenshots/containers.png" width="480" alt="Dashboard: containers grouped by Compose project, with health, ports, CPU and memory">
 </p>
 
-- **Zero-thought Docker**: every client (terminal, IDE, testcontainers) goes through one socket that boots Colima on the first real request. A cold `docker run` takes about 8 s.
+- **Zero-thought Docker**: every client (terminal, IDE, testcontainers) goes through one socket that boots Colima on the first real request. A cold `docker run` takes about 15 s.
 - **Live dashboard**: containers grouped by Compose project, health, ports, per-container CPU and memory, logs, images, volumes and VM settings in one popover.
 - **Quiet by default**: idles at ~0% CPU, can stop the VM when idle, and only notifies you when something actually breaks.
 
@@ -73,11 +74,15 @@ git clone https://github.com/imohitkr/colima-bar && cd colima-bar
 
 After you install, add the [`DOCKER_HOST` snippet](#auto-start-how-docker-clients-reach-colima) to your `~/.zshrc`.
 
+### Update
+
+ColimaBar checks GitHub once a day. When a new version is out, it notifies you once and shows an **Update** button in the dashboard footer. To update, run the installer command again. It replaces the app where it is and restarts it. If you use the disk image, download it again and replace the app in Applications.
+
 ## Features
 
 - **Auto-start on demand**: every docker client goes through ColimaBar's socket, which boots Colima when a real request arrives (see below)
 - **Auto-stop when idle** (opt-in): stop the VM after 5, 15, 30 or 60 minutes, or a custom time, with no running containers and no docker builds, pulls or pushes
-- **Hide the icon while Colima is stopped** (opt-in): the icon leaves the menu bar, but ColimaBar keeps running, so a docker command still starts Colima. To show the icon again, open ColimaBar from Spotlight. When you close the dashboard, the icon hides again.
+- **Hide the icon while Colima is stopped** (opt-in): the icon leaves the menu bar, but ColimaBar keeps running. If auto-start is on, a docker command still starts Colima. To show the icon again, open ColimaBar from Spotlight. When you close the dashboard, the icon hides again.
 - **Live usage**: aggregate container CPU and memory as a share of the VM, with 60-second sparklines
 - **Containers**: grouped by Compose project (start/stop/restart a whole project), health badges, per-container CPU/mem, `localhost` port links, restart/stop/start/remove, shell, filter, "running only"
 - **Log viewer**: live per-container logs in their own window, with search, follow, timestamps, a stderr filter and copy. They survive container restarts. Or follow them in iTerm.
@@ -86,6 +91,7 @@ After you install, add the [`DOCKER_HOST` snippet](#auto-start-how-docker-client
 - **Alerts, failures only**: a container exits non-zero, is OOM-killed or turns unhealthy, with **View logs** and **Restart** buttons; or an action fails. Nothing for routine start/stop.
 - **Profiles**: if you have more than one Colima profile, a picker appears; otherwise it stays hidden
 - Starts at login and relaunches itself if it ever crashes. Single instance. ⌘R refresh, ⌘F filter.
+- **Quit stops auto-start.** Colima and your containers keep running, but docker connects straight to Colima until ColimaBar starts again.
 - Tells you once when a new version is out (checks GitHub daily; turn it off on the System tab), and shows a download button in the dashboard.
 
 ## Auto-start: how docker clients reach Colima

@@ -59,6 +59,14 @@ lock_vm() {
     # Take over a stale lock atomically: only one script wins the mv.
     if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +30 2>/dev/null)" ] \
       && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null; then
+      # Another script may have taken over first and made a fresh lock that
+      # we just moved. If so, give it back.
+      if [ -z "$(find "$LOCK.stale.$$" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
+        [ -e "$LOCK" ] || mv "$LOCK.stale.$$" "$LOCK" 2>/dev/null
+        rm -rf "$LOCK.stale.$$"
+        [ "${1:-}" = quiet ] || notify "Another Colima action is still running for $PROFILE."
+        exit 2
+      fi
       rm -rf "$LOCK.stale.$$"
       mkdir "$LOCK" 2>/dev/null || exit 2
     else
@@ -189,8 +197,8 @@ case "$1" in
 
   # Per-container actions: ctr-start|ctr-stop|ctr-restart|ctr-rm|ctr-logs|ctr-shell NAME
   ctr-start)   docker start "$2" >/dev/null || { notify "Failed to start $2"; exit 1; } ;;
-  ctr-rm)      confirm "Remove container $2?" || exit 2
-               docker rm "$2" >/dev/null || { notify "Failed to remove $2"; exit 1; } ;;
+  ctr-rm)      confirm "Remove container $2? If it is running, it stops first." || exit 2
+               docker rm -f "$2" >/dev/null || { notify "Failed to remove $2"; exit 1; } ;;
   ctr-stop)    docker stop "$2" >/dev/null || { notify "Failed to stop $2"; exit 1; } ;;
   ctr-restart) docker restart "$2" >/dev/null || { notify "Failed to restart $2"; exit 1; } ;;
   ctr-logs)    exec docker logs -f --tail 200 "$2" ;;
@@ -235,7 +243,8 @@ case "$1" in
     cmd >/dev/null || { notify "Cleanup failed - $SEE_LOG"; exit 1; }
     ;;
 
-  ssh)    exec colima ssh ;;
+  # exec skips shell functions, so pass the profile here.
+  ssh)    exec command colima ssh --profile "$PROFILE" ;;
   config) open -t "$CONFIG" ;;
   logs)
     # ColimaBar's action log (colima start/stop output) and Lima's host agent log.

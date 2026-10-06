@@ -722,9 +722,19 @@ final class ColimaModel {
     func project(_ name: String, _ verb: String) {
         let ids = containers.filter { $0.project == name && (verb == "start" ? !$0.isRunning : $0.isRunning || verb == "restart") }
             .map(\.id)
+        let names = Dictionary(uniqueKeysWithValues: containers.map { ($0.id, $0.name) })
         Task {
-            await withTaskGroup(of: Void.self) { g in
-                for id in ids { g.addTask { [api] in _ = await api.post("/containers/\(id)/\(verb)", timeout: 180) } }
+            let failed = await withTaskGroup(of: String?.self) { g in
+                for id in ids {
+                    g.addTask { [api] in
+                        let r = await api.post("/containers/\(id)/\(verb)", timeout: 180)
+                        return (r?.ok ?? false) ? nil : names[id] ?? String(id.prefix(12))
+                    }
+                }
+                return await g.reduce(into: [String]()) { if let n = $1 { $0.append(n) } }
+            }
+            if !failed.isEmpty {
+                Notifier.shared.post("\(verb.capitalized) failed for \(failed.sorted().joined(separator: ", ")).")
             }
             await refreshContainers()
         }

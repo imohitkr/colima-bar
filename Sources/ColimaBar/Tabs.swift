@@ -362,6 +362,12 @@ struct SystemTab: View {
     private let cpuOpts = [2, 4, 6, 8, 10, 12]
     private let memOpts = [4, 8, 12, 16, 24, 32]
 
+    /// The fixed choices, plus the VM's current value when it is not one of
+    /// them (Colima's default VM has 2 GB), so the picker always has a selection.
+    static func options(_ fixed: [Int], _ current: Int) -> [Int] {
+        current <= 0 || fixed.contains(current) ? fixed : (fixed + [current]).sorted()
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: "VM resources")
@@ -385,13 +391,13 @@ struct SystemTab: View {
             Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
                 GridRow {
                     Text("CPU").font(.caption).foregroundStyle(.secondary)
-                    Picker("", selection: $form.cpu) { ForEach(cpuOpts, id: \.self) { Text("\($0)").tag($0) } }
+                    Picker("", selection: $form.cpu) { ForEach(Self.options(cpuOpts, form.cpu), id: \.self) { Text("\($0)").tag($0) } }
                         .pickerStyle(.segmented).labelsHidden()
                         .hint(Help.cpu)
                 }
                 GridRow {
                     Text("Memory").font(.caption).foregroundStyle(.secondary)
-                    Picker("", selection: $form.mem) { ForEach(memOpts, id: \.self) { Text("\($0) GB").tag($0) } }
+                    Picker("", selection: $form.mem) { ForEach(Self.options(memOpts, form.mem), id: \.self) { Text("\($0) GB").tag($0) } }
                         .pickerStyle(.segmented).labelsHidden()
                         .hint(Help.memory)
                 }
@@ -412,7 +418,7 @@ struct SystemTab: View {
             }
             .hint(Help.rosetta)
             Toggle(isOn: Binding(get: { model.k8s }, set: { model.ctl("k8s", $0 ? "on" : "off") })) {
-                Label("Kubernetes (k3s) · context: colima", systemImage: "circle.hexagongrid")
+                Label("Kubernetes (k3s) · context: \(model.kubeContext)", systemImage: "circle.hexagongrid")
             }
             .hint(Help.k8s)
             HStack {
@@ -596,7 +602,7 @@ struct SystemTab: View {
             set: { v in
                 if v == IdleMinutes.custom {
                     form.customIdle = true
-                    if form.customMinutes.isEmpty { form.customMinutes = "\(model.autoStopMinutes)" }
+                    form.customMinutes = "\(model.autoStopMinutes)"
                 } else {
                     form.customIdle = false
                     model.autoStopMinutes = v

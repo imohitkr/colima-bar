@@ -30,7 +30,8 @@ enum UnixSocket {
         let tmp = path + ".tmp"
         unlink(tmp)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0, var addr = address(tmp) else { throw ProxyError.socket(errno) }
+        guard fd >= 0 else { throw ProxyError.socket(errno) }
+        guard var addr = address(tmp) else { close(fd); throw ProxyError.socket(ENAMETOOLONG) }
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
@@ -172,8 +173,10 @@ final class SocketProxy: @unchecked Sendable {
             listenFD = -1
             return fd
         }
-        if fd >= 0 { close(fd) }
+        // Link first: a client that connects in between still reaches a live
+        // listener, never a closed one (ECONNREFUSED).
         linkStable(to: upstream)
+        if fd >= 0 { close(fd) }
     }
 
     /// Atomically replaces `path` with a symlink to `target` (symlink at a
@@ -271,6 +274,13 @@ final class SocketProxy: @unchecked Sendable {
         }
     }
 
+    /// The first line of a chunk, if the chunk could start an HTTP request.
+    static func requestLine(_ buf: [UInt8], _ n: Int) -> String {
+        let head = buf[0..<min(n, 512)]
+        guard let first = head.first, first >= 0x41, first <= 0x5A else { return "" }   // method: A-Z
+        return String(decoding: head.prefix { $0 != 0x0D && $0 != 0x0A }, as: UTF8.self)
+    }
+
     /// Whether an HTTP request line starts long-running work on the daemon.
     static func isWork(_ requestLine: String) -> Bool {
         let parts = requestLine.split(separator: " ")
@@ -353,19 +363,27 @@ final class SocketProxy: @unchecked Sendable {
             shutdown(client, SHUT_RD)
             done.signal()
         }
-        copy(from: client, to: upstream, conn: id)
+        copy(from: client, to: upstream, conn: id, classify: !work)
         done.wait()
         close(client)
         close(upstream)
     }
 
-    private func copy(from src: Int32, to dst: Int32, conn: Int) {
+    /// With `classify`, each chunk that starts a new request is checked with
+    /// isWork: the docker CLI sends HEAD /_ping first and then reuses the same
+    /// keep-alive connection for the pull, push or build.
+    private func copy(from src: Int32, to dst: Int32, conn: Int, classify: Bool = false) {
         var buf = [UInt8](repeating: 0, count: 65536)
         var lastTouch = Date.distantPast
+        var classify = classify
         while true {
             let n = read(src, &buf, buf.count)
             if n < 0, errno == EINTR { continue }
             if n <= 0 { break }
+            if classify, Self.isWork(Self.requestLine(buf, n)) {
+                lock.withLock { conns[conn]?.work = true }
+                classify = false
+            }
             let now = Date()
             if now.timeIntervalSince(lastTouch) >= 1 { touch(conn); lastTouch = now }
             var off = 0

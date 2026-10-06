@@ -108,6 +108,37 @@ import Testing
         let px = SocketProxy(upstream: upstream, path: stable)
         #expect(px.activeTransfers() == 0)
     }
+
+    @Test func pullAfterPingOnTheSameConnectionCounts() throws {
+        // The docker CLI sends HEAD /_ping, then reuses the keep-alive
+        // connection for the pull. The pull must keep the VM awake.
+        let lfd = try UnixSocket.listen(upstream)
+        Thread.detachNewThread {
+            let c = accept(lfd, nil, nil)
+            guard c >= 0 else { return }
+            var buf = [UInt8](repeating: 0, count: 4096)
+            while read(c, &buf, buf.count) > 0 {}   // a daemon that is still working
+            close(c)
+        }
+        let px = SocketProxy(upstream: upstream, path: stable)
+        px.start()
+        defer { px.stop(); close(lfd); unlink(upstream); unlink(stable) }
+
+        let fd = try #require(UnixSocket.connect(stable, timeout: 5))
+        defer { close(fd) }
+        _ = UnixSocket.writeAll(fd, Data("HEAD /_ping HTTP/1.1\r\nHost: d\r\n\r\n".utf8))
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(px.activeTransfers() == 0)
+        _ = UnixSocket.writeAll(fd, Data("POST /v1.54/images/create?fromImage=alpine HTTP/1.1\r\nHost: d\r\n\r\n".utf8))
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(px.activeTransfers() == 1)
+    }
+
+    @Test func requestLineIgnoresBodyBytes() {
+        #expect(SocketProxy.requestLine(Array("POST /build HTTP/1.1\r\n".utf8), 22) == "POST /build HTTP/1.1")
+        #expect(SocketProxy.requestLine([0x1f, 0x8b, 0x08], 3) == "")    // gzip body
+        #expect(SocketProxy.requestLine(Array("{\"a\":1}".utf8), 7) == "")
+    }
 }
 
 @Suite struct VersionTests {

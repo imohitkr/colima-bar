@@ -101,7 +101,7 @@ enum Help {
 
     // System: features
     static let rosetta = "Runs x86_64 (amd64) images on Apple Silicon through Apple's Rosetta 2, which is much faster than QEMU emulation. Turn it on if you use images with no arm64 build. Changing it restarts the VM."
-    static let k8s = "Runs a single-node k3s Kubernetes cluster inside the VM and adds a 'colima' kubectl context. Costs roughly 0.5 to 1 GB of RAM. Changing it restarts the VM."
+    static let k8s = "Runs a single-node k3s Kubernetes cluster inside the VM and adds a kubectl context: 'colima', or 'colima-PROFILE' for other profiles. Costs roughly 0.5 to 1 GB of RAM. Changing it restarts the VM."
     static let disk = "The VM's virtual disk, which holds images, containers, volumes and build cache. It can grow but never shrink. The file on your Mac only takes the space actually used."
 
     // System: disk usage
@@ -128,8 +128,8 @@ enum Help {
     static let linkVarRun = "Create /var/run/docker.sock as a symlink to ColimaBar's socket. Asks for your admin password."
     static let autoStop = "Stop the VM after it has been idle for the chosen time. Running containers and docker builds, pulls or pushes keep it awake. With auto-start on, the next docker command starts it again."
     static let autoStopMinutes = "How long the VM must have no running containers and no docker builds, pulls or pushes before it stops."
-    static let autoStopCustom = "Type a number of minutes from 1 to 1440 (24 hours), then press Return or click Set."
-    static let hideIcon = "Hide the icon while Colima is stopped. ColimaBar keeps running, so docker still starts Colima. To show it, open ColimaBar from Spotlight."
+    static let autoStopCustom = "Type a number of minutes from 1 to 1440 (24 hours). The new time applies as you type."
+    static let hideIcon = "Hide the icon while Colima is stopped. ColimaBar keeps running. If auto-start is on, docker still starts Colima. To show it, open ColimaBar from Spotlight."
 
     static let enableNotifications = "Open System Settings > Notifications > ColimaBar and turn on Allow Notifications."
 

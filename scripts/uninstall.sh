@@ -19,8 +19,14 @@ if [ "$(launchctl getenv DOCKER_HOST)" = "unix://$STABLE" ]; then
   launchctl unsetenv DOCKER_HOST
 fi
 launchctl unsetenv TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE
-if [ -f ~/.testcontainers.properties ]; then
-  sed -i '' "\|^docker.host=unix://$STABLE\$|d" ~/.testcontainers.properties
+TC=~/.testcontainers.properties
+if [ -L "$TC" ]; then
+  # sed -i refuses symlinks (dotfile managers); edit the file it points at.
+  t=$(readlink "$TC")
+  case "$t" in /*) TC="$t" ;; *) TC="$HOME/$t" ;; esac
+fi
+if [ -f "$TC" ]; then
+  sed -i '' "\|^docker.host=unix://$STABLE\$|d" "$TC"
 fi
 if [ "$(readlink /var/run/docker.sock 2>/dev/null)" = "$STABLE" ]; then
   echo "Removing /var/run/docker.sock (needs sudo)"
