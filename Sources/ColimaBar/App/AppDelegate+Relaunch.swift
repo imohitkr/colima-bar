@@ -31,11 +31,6 @@ extension AppDelegate {
         return Version.isNewer(mine, than: other)
     }
 
-    /// UserDefaults key: the time (seconds since 1970) when an old copy
-    /// restarted into the new version for a reopen. The new copy then
-    /// reveals the icon and opens the dashboard.
-    nonisolated static let revealKey = "revealOnLaunch"
-
     /// A reveal request counts for 60 s. An older one is from a restart
     /// that failed or was long ago.
     nonisolated static func revealRequestIsFresh(_ requestedAt: Double?, now: Double) -> Bool {

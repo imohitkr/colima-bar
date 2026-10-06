@@ -6,6 +6,9 @@ enum IdleMinutes {
     static let custom = -1
     static let range = 1...1440
 
+    /// `n` moved into `range`.
+    static func clamp(_ n: Int) -> Int { min(max(n, range.lowerBound), range.upperBound) }
+
     /// Minutes typed in the custom field, or nil if not a whole number in range.
     static func parse(_ s: String) -> Int? {
         guard let n = Int(s.trimmingCharacters(in: .whitespaces)), range.contains(n) else { return nil }

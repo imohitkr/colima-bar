@@ -18,15 +18,15 @@ final class Updater {
 
     /// The newest release when it is newer than this build, else nil.
     private(set) var available: Release?
-    var enabled = Defaults.bool("checkUpdates") ?? true {
+    var enabled = Defaults.bool(.checkUpdates) ?? true {
         didSet {
-            Defaults.set(enabled, "checkUpdates")
+            Defaults.set(enabled, .checkUpdates)
             if enabled { Task { await check(manual: false) } } else { available = nil }
         }
     }
 
     @ObservationIgnored private var loop: Task<Void, Never>?
-    @ObservationIgnored private let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "update")
+    @ObservationIgnored private let log = Logger(category: "update")
 
     func start() {
         loop?.cancel()
@@ -72,12 +72,12 @@ final class Updater {
             {
                 openReleasePage()
             }
-            Defaults.set(release.version, "notifiedVersion")
+            Defaults.set(release.version, .notifiedVersion)
             return
         }
         // Announce each version once; the footer button stays until updated.
-        if Defaults.string("notifiedVersion") != release.version {
-            Defaults.set(release.version, "notifiedVersion")
+        if Defaults.string(.notifiedVersion) != release.version {
+            Defaults.set(release.version, .notifiedVersion)
             Notifier.shared.post(
                 "ColimaBar \(release.version) is available (you have \(current)). Click to open the release page.",
                 title: "Update available", record: false, url: release.url)

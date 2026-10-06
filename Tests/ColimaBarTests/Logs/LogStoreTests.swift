@@ -5,14 +5,14 @@ import Testing
 
 @Suite @MainActor struct LogStoreTests {
     private func lines(_ n: Int, err: (Int) -> Bool = { _ in false }) -> [LogLine] {
-        (0..<n).map { LogLine(id: 0, time: "", text: "line \($0)", stderr: err($0)) }
+        (0..<n).map { LogLine(id: 0, time: "", text: "line \($0)", isStderr: err($0)) }
     }
 
     private func lines(_ n: Int, size: Int) -> [LogLine] {
         (0..<n).map { i in
             LogLine(
                 id: 0, time: "", text: String(format: "%05d", i) + String(repeating: "x", count: size - 5),
-                stderr: false)
+                isStderr: false)
         }
     }
 
@@ -67,13 +67,13 @@ import Testing
         s.stderrOnly = true
         #expect(s.visible.count == 3000)
         #expect(s.tailStart == 1000)
-        #expect(s.shown.allSatisfy { $0.stderr })
+        #expect(s.shown.allSatisfy { $0.isStderr })
         #expect(s.shown.last?.id == 8999 - 8999 % 3)
         s.search = "line 99"
         // "line 99", "line 990".."line 999" and "line 9900".."line 9999" (none past 8999).
         #expect(s.tailStart == 0)
         #expect(s.shown.map(\.text) == s.visible.map(\.text))
-        #expect(s.shown.allSatisfy { $0.stderr && $0.text.hasPrefix("line 99") })
+        #expect(s.shown.allSatisfy { $0.isStderr && $0.text.hasPrefix("line 99") })
         s.search = ""
         s.stderrOnly = false
         #expect(s.tailStart == 9000 - LogTail.limit)
@@ -83,7 +83,7 @@ import Testing
         let s = store(maxLines: 3000)
         let b = LogBuffer(cap: 100_000)
         s.follow = false
-        ingest(s, b, lines(3000 + LogStore.trimSlack))
+        ingest(s, b, lines(3000 + LogLimits.trimSlack))
         #expect(s.tailStart == s.visible.count - LogTail.limit)
         ingest(s, b, lines(1))  // past the slack: the store drops old lines
         #expect(s.lines.count == 3000)
@@ -111,9 +111,9 @@ import Testing
         let b = LogBuffer(cap: 100)
         _ = b.push(
             [
-                LogLine(id: 0, time: "", text: "Error: disk full", stderr: true),
-                LogLine(id: 0, time: "", text: "all good", stderr: false),
-                LogLine(id: 0, time: "", text: "another ERROR", stderr: false),
+                LogLine(id: 0, time: "", text: "Error: disk full", isStderr: true),
+                LogLine(id: 0, time: "", text: "all good", isStderr: false),
+                LogLine(id: 0, time: "", text: "another ERROR", isStderr: false),
             ], lastTimestamp: nil)
         store.ingest(b.drain())
         store.search = "error"
@@ -128,14 +128,14 @@ import Testing
     @Test @MainActor func trimsInBatches() {
         let store = LogStore(api: DockerAPI(socketPath: "/nonexistent"), containerID: "c", name: "n", maxLines: 100)
         let b = LogBuffer(cap: 10_000)
-        _ = b.push(lines(100 + LogStore.trimSlack), lastTimestamp: nil)
+        _ = b.push(lines(100 + LogLimits.trimSlack), lastTimestamp: nil)
         store.ingest(b.drain())
-        #expect(store.lines.count == 100 + LogStore.trimSlack)  // within the slack: no trim yet
+        #expect(store.lines.count == 100 + LogLimits.trimSlack)  // within the slack: no trim yet
         store.search = "line 2"
         _ = b.push(lines(1), lastTimestamp: nil)
         store.ingest(b.drain())
         #expect(store.lines.count == 100)
-        #expect(store.lines.last?.id == 100 + LogStore.trimSlack)
+        #expect(store.lines.last?.id == 100 + LogLimits.trimSlack)
         // Visible lines older than the first kept line are gone too.
         let first = store.lines.first!.id
         #expect(store.visible.allSatisfy { $0.id >= first })

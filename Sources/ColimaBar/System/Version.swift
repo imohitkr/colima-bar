@@ -7,9 +7,11 @@ enum Version {
 
     static func parts(_ s: String) -> [Int]? {
         let core = strip(s).split(separator: "-").first.map(String.init) ?? ""
-        let nums = core.split(separator: ".").map { Int($0) }
-        guard !nums.isEmpty, nums.allSatisfy({ $0 != nil }) else { return nil }
-        return nums.map { $0! }
+        let fields = core.split(separator: ".")
+        let nums = fields.compactMap { Int($0) }
+        // Every field must be a number.
+        guard !nums.isEmpty, nums.count == fields.count else { return nil }
+        return nums
     }
 
     /// True if `a` is a higher version than `b`. Unparseable versions (e.g. a

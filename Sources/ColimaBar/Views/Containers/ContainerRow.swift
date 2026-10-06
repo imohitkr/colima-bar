@@ -48,29 +48,29 @@ struct ContainerRow: View {
             if c.isRunning {
                 IconButton("text.alignleft", Help.logs) { model.openLogs(id: c.id, name: c.name) }
                 IconButton("chevron.left.forwardslash.chevron.right", Help.shell) {
-                    model.terminal("ctr-shell", c.name)
+                    model.terminal(.containerShell, c.name)
                 }
-                IconButton("arrow.clockwise", Help.ctrRestart) { model.container(c.id, "restart") }
-                IconButton("stop.fill", Help.ctrStop) { model.container(c.id, "stop") }
+                IconButton("arrow.clockwise", Help.ctrRestart) { model.container(c.id, .restart) }
+                IconButton("stop.fill", Help.ctrStop) { model.container(c.id, .stop) }
             } else {
                 IconButton("text.alignleft", Help.logs) { model.openLogs(id: c.id, name: c.name) }
-                IconButton("play.fill", Help.ctrStart) { model.container(c.id, "start") }
-                IconButton("trash", Help.ctrRemove) { model.ctl("ctr-rm", c.name) }
+                IconButton("play.fill", Help.ctrStart) { model.container(c.id, .start) }
+                IconButton("trash", Help.ctrRemove) { model.run(.containerRemove, c.name) }
             }
             Menu {
-                Button("Logs in iTerm") { model.terminal("ctr-logs", c.name) }
+                Button("Logs in iTerm") { model.terminal(.containerLogs, c.name) }
                 Divider()
-                Button("Copy name") { copy(c.name) }
-                Button("Copy ID") { copy(String(c.id.prefix(12))) }
-                Button("Copy image") { copy(c.image) }
-                Button("Copy exec command") { copy("docker exec -it \(c.name) sh") }
+                Button("Copy name") { Pasteboard.copy(c.name) }
+                Button("Copy ID") { Pasteboard.copy(String(c.id.prefix(12))) }
+                Button("Copy image") { Pasteboard.copy(c.image) }
+                Button("Copy exec command") { Pasteboard.copy("docker exec -it \(c.name) sh") }
                 if !c.ports.isEmpty {
                     Divider()
                     ForEach(c.ports, id: \.self) { p in Button("Open localhost:\(p)") { model.open(port: p) } }
                 }
                 if c.isRunning {
                     Divider()
-                    Button("Remove…") { model.ctl("ctr-rm", c.name) }
+                    Button("Remove…") { model.run(.containerRemove, c.name) }
                 }
             } label: {
                 Image(systemName: "ellipsis")
@@ -107,7 +107,7 @@ struct StatCells: View {
         Text(stat.map { String(format: "%.1f%%", $0.cpu) } ?? "–")
             .frame(width: 46, alignment: .trailing)
             .hint(Help.ctrCPU)
-        Text(stat.map { Fmt.bytes($0.memBytes) } ?? "–")
+        Text(stat.map { ByteFormat.bytes($0.memBytes) } ?? "–")
             .frame(width: 54, alignment: .trailing)
             .hint(Help.ctrMem)
     }

@@ -31,7 +31,7 @@ extension ColimaModel {
     nonisolated static let statusMaxAgeOnOpen: TimeInterval = 60
 
     /// The Images, Volumes and System tabs show data from `/system/df`.
-    nonisolated static func showsDiskUsage(_ tab: Tab) -> Bool { tab != .containers }
+    nonisolated static func showsDiskUsage(_ tab: DashboardTab) -> Bool { tab != .containers }
 
     nonisolated static func derivedLists(_ containers: [Container])
         -> (running: [Container], stopped: [Container], unhealthy: Int)
@@ -44,12 +44,6 @@ extension ColimaModel {
 
     nonisolated static func hasDockerSocket(runtime: String) -> Bool {
         runtime.isEmpty || runtime == "docker"
-    }
-
-    /// Actions that change disk use. When one ends, df runs at once, so a
-    /// removed image or volume leaves its row and a second Remove can't fail.
-    nonisolated static func changesDisk(_ action: String) -> Bool {
-        ["ctr-rm", "img-rm", "img-pull", "vol-rm", "prune", "stop-all"].contains(action)
     }
 
     nonisolated static let projectConcurrency = 8

@@ -4,6 +4,7 @@ import Foundation
 /// the main thread. It keeps at most `cap` lines and `byteCap` bytes of text
 /// and drops the oldest, so a slow main thread or a hidden window cannot
 /// make memory grow without limit.
+/// `@unchecked Sendable`: `lock` guards every mutable property.
 final class LogBuffer: @unchecked Sendable {
     let cap: Int
     let byteCap: Int
@@ -14,7 +15,7 @@ final class LogBuffer: @unchecked Sendable {
     private var last: String?
     private var flushPending = false
 
-    init(cap: Int, byteCap: Int = LogStore.defaultMaxBytes) {
+    init(cap: Int, byteCap: Int = LogLimits.maxBytes) {
         self.cap = cap
         self.byteCap = byteCap
     }
@@ -33,7 +34,7 @@ final class LogBuffer: @unchecked Sendable {
         }
         if let lastTimestamp { last = lastTimestamp }
         // Trim in batches, so each push does not move every line.
-        if lines.count > cap + LogStore.trimSlack || bytes > byteCap + byteCap / LogStore.byteSlackDivisor { trim() }
+        if LogLimits.needsTrim(lines: lines.count, bytes: bytes, maxLines: cap, maxBytes: byteCap) { trim() }
         guard !flushPending, !lines.isEmpty else { return false }
         flushPending = true
         return true

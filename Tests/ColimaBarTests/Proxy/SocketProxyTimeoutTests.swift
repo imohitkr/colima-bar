@@ -10,13 +10,12 @@ import Testing
     let stable = TestSocketPath.unique()
 
     @Test func outOfFdsAnswers503WithoutWake() throws {
-        let p = SocketProxy(upstream: upstream, path: stable)
+        let p = SocketProxy(upstream: upstream, path: stable, connectUpstream: { _ in .failure(.socket(EMFILE)) })
         let woke = Counter()
         p.wake = {
             woke.add()
             return true
         }
-        p.connectUpstream = { _ in .failure(.socket(EMFILE)) }
         p.start()
         defer {
             p.stop()
@@ -53,8 +52,7 @@ import Testing
 
     @Test func idleClientIsClosedWhileVMIsDown() throws {
         unlink(upstream)
-        let p = SocketProxy(upstream: upstream, path: stable)
-        p.idleTimeout = 1
+        let p = SocketProxy(upstream: upstream, path: stable, idleTimeout: 1)
         p.start()
         defer {
             p.stop()
@@ -72,8 +70,7 @@ import Testing
 
     @Test func silentClientIsClosedWhileVMIsUp() throws {
         let up = try BusyUpstream(path: upstream)
-        let px = SocketProxy(upstream: upstream, path: stable)
-        px.idleTimeout = 1
+        let px = SocketProxy(upstream: upstream, path: stable, idleTimeout: 1)
         px.start()
         defer {
             px.stop()
@@ -93,8 +90,7 @@ import Testing
         // VM up: the first read has a timeout, and splice() must remove it.
         let daemon = SilentDaemon(path: upstream)
         try daemon.start(silence: 3)
-        let px = SocketProxy(upstream: upstream, path: stable)
-        px.idleTimeout = 1
+        let px = SocketProxy(upstream: upstream, path: stable, idleTimeout: 1)
         px.start()
         defer {
             px.stop()
@@ -111,8 +107,7 @@ import Testing
         // VM down: the client waits with a timeout, then the wake splices it.
         unlink(upstream)
         let daemon = SilentDaemon(path: upstream)
-        let px = SocketProxy(upstream: upstream, path: stable)
-        px.idleTimeout = 1
+        let px = SocketProxy(upstream: upstream, path: stable, idleTimeout: 1)
         px.wake = { (try? daemon.start(silence: 3)) != nil }
         px.start()
         defer {

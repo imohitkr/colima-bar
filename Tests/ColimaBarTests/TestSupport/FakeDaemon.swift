@@ -5,6 +5,7 @@ import Foundation
 
 /// A one-request-per-connection HTTP server on a unix socket, standing in for
 /// the Docker daemon.
+/// `@unchecked Sendable`: `lock` guards `requests`; only the test thread touches `fd`.
 final class FakeDaemon: @unchecked Sendable {
     let path: String
     private var fd: Int32 = -1

@@ -11,7 +11,7 @@ struct ContainersTab: View {
         // Lazy: opening the dashboard builds only the rows on screen.
         LazyVStack(alignment: .leading, spacing: 6) {
             if groups.isEmpty {
-                Empty(text: model.containers.isEmpty ? "No containers" : "No matches")
+                EmptyStateText(text: model.containers.isEmpty ? "No containers" : "No matches")
             }
             ForEach(groups, id: \.key) { g in
                 let isCollapsed = Binding(
@@ -21,11 +21,11 @@ struct ContainersTab: View {
                     title: g.title, collapsed: isCollapsed, hint: g.project == nil ? Help.standalone : Help.projectGroup
                 ) {
                     if let project = g.project {
-                        IconButton("play.fill", "Start all in \(project)") { model.project(project, "start") }
-                        IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, "restart") }
-                        IconButton("stop.fill", "Stop all in \(project)") { model.project(project, "stop") }
+                        IconButton("play.fill", "Start all in \(project)") { model.project(project, .start) }
+                        IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, .restart) }
+                        IconButton("stop.fill", "Stop all in \(project)") { model.project(project, .stop) }
                     } else if g.key == "~standalone", model.running.count > 1 {
-                        Button("Stop all") { model.ctl("stop-all") }.buttonStyle(.borderless).font(.caption)
+                        Button("Stop all") { model.run(.stopAll) }.buttonStyle(.borderless).font(.caption)
                             .hint(Help.stopAll)
                     }
                 }
@@ -63,9 +63,10 @@ struct ContainersTab: View {
             a.isRunning != b.isRunning ? a.isRunning : a.name.localizedStandardCompare(b.name) == .orderedAscending
         }
         var out: [Group] = []
-        let byProject = Dictionary(grouping: list.filter { $0.project != nil }, by: { $0.project! })
-        for p in byProject.keys.sorted() {
-            let items = byProject[p]!.sorted(by: order)
+        let members = list.compactMap { c in c.project.map { (project: $0, container: c) } }
+        let byProject = Dictionary(grouping: members, by: \.project)
+        for (p, group) in byProject.sorted(by: { $0.key < $1.key }) {
+            let items = group.map(\.container).sorted(by: order)
             let up = items.filter(\.isRunning).count
             out.append(Group(key: "p:\(p)", title: "\(p)  ·  \(up)/\(items.count) running", project: p, items: items))
         }

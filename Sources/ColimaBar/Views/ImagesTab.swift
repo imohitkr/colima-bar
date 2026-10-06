@@ -13,12 +13,12 @@ struct ImagesTab: View {
         // Lazy: a long list builds only the rows on screen.
         LazyVStack(alignment: .leading, spacing: 6) {
             SectionHeader(title: "\(model.images.count) images · \(unused.count) unused") {
-                Button("Remove dangling") { model.ctl("prune", "dangling") }.buttonStyle(.borderless).font(.caption)
+                Button("Remove dangling") { model.run(.prune, "dangling") }.buttonStyle(.borderless).font(.caption)
                     .hint(Help.removeDangling)
-                Button("Remove unused") { model.ctl("prune", "images") }.buttonStyle(.borderless).font(.caption)
+                Button("Remove unused") { model.run(.prune, "images") }.buttonStyle(.borderless).font(.caption)
                     .hint(Help.removeUnusedImages)
             }
-            if list.isEmpty { Empty(text: model.images.isEmpty ? "No images" : "No matches") }
+            if list.isEmpty { EmptyStateText(text: model.images.isEmpty ? "No images" : "No matches") }
             ForEach(list) { i in
                 HStack(spacing: 8) {
                     Image(systemName: i.dangling ? "square.dashed" : "square.stack.3d.up")
@@ -37,14 +37,14 @@ struct ImagesTab: View {
                             .background(.green.opacity(0.15), in: Capsule()).foregroundStyle(.green)
                             .hint(Help.inUse)
                     }
-                    Text(Fmt.bytes(i.size)).font(.system(size: 11).monospacedDigit())
+                    Text(ByteFormat.bytes(i.size)).font(.system(size: 11).monospacedDigit())
                         .frame(width: 60, alignment: .trailing)
                         .hint(Help.imageSize)
                     Menu {
-                        Button("Copy reference") { copy(i.ref) }
-                        if !i.dangling { Button("Pull latest of this tag") { model.ctl("img-pull", i.ref) } }
+                        Button("Copy reference") { Pasteboard.copy(i.ref) }
+                        if !i.dangling { Button("Pull latest of this tag") { model.run(.imagePull, i.ref) } }
                         Divider()
-                        Button("Remove…") { model.ctl("img-rm", i.ref) }
+                        Button("Remove…") { model.run(.imageRemove, i.ref) }
                     } label: {
                         Image(systemName: "ellipsis")
                     }

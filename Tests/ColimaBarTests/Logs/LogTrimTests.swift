@@ -8,7 +8,7 @@ import Testing
         (0..<n).map { i in
             LogLine(
                 id: 0, time: "", text: String(format: "%05d", i) + String(repeating: "x", count: size - 5),
-                stderr: false)
+                isStderr: false)
         }
     }
 

@@ -29,28 +29,12 @@ extension ColimaModel {
     /// True while a `colima start` for this profile runs (e.g. from a terminal,
     /// which leaves no busy marker).
     nonisolated static func colimaStartRunning(_ profile: String) -> Bool {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
-        p.arguments = pgrepArguments(uid: getuid())
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return false }
-        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return false }
+        let pgrep = Shell.runSync("/usr/bin/pgrep", pgrepArguments(uid: getuid()))
+        guard pgrep.ok else { return false }
         // pgrep prints pids only; check each command line for the profile.
-        for pid in out.split(separator: "\n") {
-            let ps = Process()
-            ps.executableURL = URL(fileURLWithPath: "/bin/ps")
-            ps.arguments = ["-o", "command=", "-p", String(pid)]
-            let pp = Pipe()
-            ps.standardOutput = pp
-            ps.standardError = FileHandle.nullDevice
-            guard (try? ps.run()) != nil else { continue }
-            let cmd = String(decoding: pp.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        for pid in pgrep.out.split(separator: "\n") {
+            let cmd = Shell.runSync("/bin/ps", ["-o", "command=", "-p", String(pid)]).out
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            ps.waitUntilExit()
             if isStartInProgress(command: cmd, profile: profile) { return true }
         }
         return false

@@ -19,7 +19,7 @@ struct StoppedView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Button {
-                    model.ctl("start")
+                    model.run(.start)
                 } label: {
                     Label("Start Colima", systemImage: "play.fill").frame(width: 160)
                 }

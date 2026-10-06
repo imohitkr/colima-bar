@@ -4,9 +4,8 @@ import Testing
 @testable import ColimaBar
 
 @Suite @MainActor struct SystemTabTests {
-    private let cpu = [2, 4, 6, 8, 10, 12]
-
-    private let mem = [4, 8, 12, 16, 24, 32]
+    private let cpu = SystemTab.cpuOpts
+    private let mem = SystemTab.memOpts
 
     @Test func keepsTheVMValueAfterAnotherIsPicked() {
         // Colima's default VM has 2 GB. After you pick 8 GB, 2 GB stays.

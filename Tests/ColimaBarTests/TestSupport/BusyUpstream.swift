@@ -6,6 +6,7 @@ import Foundation
 /// An upstream daemon that accepts one connection, reads forever and never
 /// answers: a daemon at work. It counts the bytes it receives, so a test can
 /// wait until the proxy has forwarded a chunk.
+/// `@unchecked Sendable`: `lock` guards `bytes`; the other properties are `let`.
 final class BusyUpstream: @unchecked Sendable {
     let path: String
     private let fd: Int32

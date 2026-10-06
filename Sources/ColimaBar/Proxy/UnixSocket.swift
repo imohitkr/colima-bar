@@ -3,6 +3,9 @@ import Foundation
 
 /// Small POSIX helpers shared by the API client and the proxy.
 enum UnixSocket {
+    /// A socket call failed with this errno.
+    enum Error: Swift.Error { case socket(Int32) }
+
     static func connect(_ path: String, timeout: Int = 0) -> Int32? {
         try? tryConnect(path, timeout: timeout).get()
     }
@@ -10,7 +13,7 @@ enum UnixSocket {
     /// Like connect, but a failure carries the errno, so the caller can tell
     /// "nothing listens there" (ENOENT, ECONNREFUSED) from "out of fds"
     /// (EMFILE, ENFILE).
-    static func tryConnect(_ path: String, timeout: Int = 0) -> Result<Int32, ProxyError> {
+    static func tryConnect(_ path: String, timeout: Int = 0) -> Result<Int32, Error> {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .failure(.socket(errno)) }
         guard var addr = address(path) else {
@@ -43,10 +46,10 @@ enum UnixSocket {
         let tmp = path + ".tmp"
         unlink(tmp)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0 else { throw ProxyError.socket(errno) }
+        guard fd >= 0 else { throw Error.socket(errno) }
         guard var addr = address(tmp) else {
             close(fd)
-            throw ProxyError.socket(ENAMETOOLONG)
+            throw Error.socket(ENAMETOOLONG)
         }
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -57,7 +60,7 @@ enum UnixSocket {
             let err = errno
             close(fd)
             unlink(tmp)
-            throw ProxyError.socket(err)
+            throw Error.socket(err)
         }
         return fd
     }
@@ -110,5 +113,3 @@ enum UnixSocket {
         return addr
     }
 }
-
-enum ProxyError: Error { case socket(Int32) }

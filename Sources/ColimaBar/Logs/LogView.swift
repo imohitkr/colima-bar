@@ -21,10 +21,7 @@ struct LogView: View {
                 Toggle("Wrap", isOn: $store.wrap).hint("Wrap long lines instead of scrolling sideways.")
                 Toggle("stderr", isOn: $store.stderrOnly).hint("Show only lines the container wrote to stderr.")
                 Spacer()
-                IconButton("doc.on.doc", "Copy all lines that pass the filters.") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(store.allText, forType: .string)
-                }
+                IconButton("doc.on.doc", "Copy all lines that pass the filters.") { Pasteboard.copy(store.allText) }
                 IconButton("trash", "Clear the window. New lines keep arriving.") { store.clear() }
                 IconButton("terminal", "Follow these logs in iTerm instead.") { openInTerminal() }
             }
@@ -84,7 +81,7 @@ private struct LogRow: View {
                 Text(line.time).foregroundStyle(.tertiary)
             }
             Text(line.text)
-                .foregroundStyle(line.stderr ? Color.red.opacity(0.9) : .primary)
+                .foregroundStyle(line.isStderr ? Color.red.opacity(0.9) : .primary)
                 .fixedSize(horizontal: !wrap, vertical: true)
                 .textSelection(.enabled)
         }
@@ -117,8 +114,8 @@ private struct LogFooter: View {
 
     var body: some View {
         HStack {
-            Circle().fill(store.status == "Live" ? Color.green : .orange).frame(width: 6, height: 6)
-            Text(store.status)
+            Circle().fill(store.status == .live ? Color.green : .orange).frame(width: 6, height: 6)
+            Text(store.status.text)
             Spacer()
             Text("\(store.visible.count) of \(store.lines.count) lines").monospacedDigit()
         }

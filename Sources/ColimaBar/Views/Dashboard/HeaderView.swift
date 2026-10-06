@@ -26,10 +26,10 @@ struct HeaderView: View {
             }
             Spacer()
             if model.state == .running {
-                IconButton("arrow.clockwise", Help.restart) { model.ctl("restart") }
-                IconButton("stop.fill", Help.stopVM) { model.ctl("stop") }
+                IconButton("arrow.clockwise", Help.restart) { model.run(.restart) }
+                IconButton("stop.fill", Help.stopVM) { model.run(.stop) }
             } else if model.state == .stopped {
-                IconButton("play.fill", Help.startVM) { model.ctl("start") }
+                IconButton("play.fill", Help.startVM) { model.run(.start) }
             }
         }
         .disabled(model.busy != nil)
@@ -59,8 +59,8 @@ struct HeaderView: View {
         let v = model.vm
         var parts = ["\(v.cpus) CPU", "\(v.memGB) GB", "\(v.diskGB) GB disk", v.arch]
         if !v.mountType.isEmpty { parts.append(v.mountType) }
-        if model.rosetta { parts.append("rosetta") }
-        if model.k8s { parts.append("k3s") }
+        if model.isRosettaEnabled { parts.append("rosetta") }
+        if model.isKubernetesEnabled { parts.append("k3s") }
         return parts.joined(separator: " · ")
     }
 }
@@ -75,7 +75,7 @@ struct ProfileMenu: View {
                 Button {
                     model.profile = p.name
                 } label: {
-                    Text("\(p.name == model.profile ? "✓ " : "")\(p.name)  ·  \(p.running ? "running" : "stopped")")
+                    Text("\(p.name == model.profile ? "✓ " : "")\(p.name)  ·  \(p.isRunning ? "running" : "stopped")")
                 }
             }
             if model.profiles.isEmpty { Text("No profiles yet") }

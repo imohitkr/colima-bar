@@ -20,7 +20,7 @@ struct AlertsStrip: View {
             }
             if !model.alerts.isEmpty {
                 SectionHeader(title: "Recent alerts") {
-                    Button("Clear") { model.alerts.removeAll() }.buttonStyle(.borderless).font(.caption)
+                    Button("Clear") { model.clearAlerts() }.buttonStyle(.borderless).font(.caption)
                         .hint("Dismiss these alerts.")
                 }
                 ForEach(model.alerts.prefix(5)) { a in
@@ -38,7 +38,7 @@ struct AlertsStrip: View {
                         Spacer()
                         if let ctr {
                             IconButton("text.alignleft", Help.logs) { model.openLogs(id: ctr.id, name: ctr.name) }
-                            IconButton("arrow.clockwise", Help.ctrRestart) { model.container(ctr.id, "restart") }
+                            IconButton("arrow.clockwise", Help.ctrRestart) { model.container(ctr.id, .restart) }
                         }
                     }
                     .padding(.vertical, 3).padding(.horizontal, 6)

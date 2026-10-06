@@ -8,7 +8,7 @@ final class SystemForm {
     var mem = 0
     var loginEnabled = LoginItem.isEnabled
     var loginNeedsApproval = false  // filled in off the main thread (runs launchctl)
-    var linking = false
-    var customIdle = false  // "Custom" picked in the auto-stop picker
+    var isLinking = false
+    var isCustomIdle = false  // "Custom" picked in the auto-stop picker
     var customMinutes = ""
 }

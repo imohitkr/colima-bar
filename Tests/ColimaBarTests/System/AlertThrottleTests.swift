@@ -5,6 +5,7 @@ import Testing
 
 @Suite struct AlertThrottleTests {
     /// A clock that the test moves forward by hand.
+    /// `@unchecked Sendable`: each test uses its clock from one thread only.
     final class FakeClock: @unchecked Sendable {
         var now = Date(timeIntervalSince1970: 1_000_000)
     }

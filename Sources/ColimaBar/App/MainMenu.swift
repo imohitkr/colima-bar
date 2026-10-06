@@ -1,9 +1,9 @@
 import AppKit
 
-extension AppDelegate {
+enum MainMenu {
     /// Accessory apps show no menu bar, but key equivalents still route
     /// through the main menu: without it ⌘C/⌘V/⌘A/⌘W do nothing.
-    func installMainMenu() {
+    @MainActor static func make() -> NSMenu {
         let main = NSMenu()
         func submenu(_ title: String, _ items: [NSMenuItem]) {
             let m = NSMenu(title: title)
@@ -33,6 +33,6 @@ extension AppDelegate {
             [
                 NSMenuItem(title: "Close", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
             ])
-        NSApp.mainMenu = main
+        return main
     }
 }

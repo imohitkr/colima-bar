@@ -1,6 +1,7 @@
 import Foundation
 
 /// Thread-safe stdout accumulator for Shell.run.
+/// `@unchecked Sendable`: `lock` guards `data`.
 final class OutputBuffer: @unchecked Sendable {
     private let lock = NSLock()
     private var data = Data()
@@ -87,6 +88,23 @@ enum Shell {
                 cont.resume(returning: Result(status: p.terminationStatus, out: out.string))
             }
         }
+    }
+
+    /// Runs `executable` on the calling thread and waits for it to exit.
+    /// It inherits the app's environment. Stderr is dropped, or read with
+    /// stdout when `includeStderr` is true. The status is -1 if it can't start.
+    /// Call it off the main thread only.
+    static func runSync(_ executable: String, _ args: [String], includeStderr: Bool = false) -> Result {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: executable)
+        p.arguments = args
+        let pipe = Pipe()
+        p.standardOutput = pipe
+        p.standardError = includeStderr ? pipe : FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return Result(status: -1, out: "") }
+        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        p.waitUntilExit()
+        return Result(status: p.terminationStatus, out: out)
     }
 
     /// Append handle for Paths.ctlLog; the log is cut back once it passes 1 MB.

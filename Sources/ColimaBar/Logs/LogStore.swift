@@ -21,7 +21,23 @@ final class LogStore {
     var showTime = true
     var wrap = true
     var stderrOnly = false { didSet { if stderrOnly != oldValue { refilter() } } }
-    var status = "Connecting…"
+    var status = Status.connecting
+
+    /// The state that the window's footer shows.
+    enum Status: Equatable {
+        case connecting
+        case live
+        /// The stream is down: why, and what happens next.
+        case down(String)
+
+        var text: String {
+            switch self {
+            case .connecting: "Connecting…"
+            case .live: "Live"
+            case .down(let message): message
+            }
+        }
+    }
 
     @ObservationIgnored private let api: DockerAPI
     @ObservationIgnored private var handle: StreamHandle?
@@ -35,19 +51,10 @@ final class LogStore {
     @ObservationIgnored private var textBytes = 0
     let maxLines: Int
     let maxBytes: Int
-    /// `lines` may grow this far past `maxLines` before a trim. Trimming in
-    /// batches keeps the cost of `removeFirst` low per line.
-    nonisolated static let trimSlack = 2000
-    /// The text of all lines may grow by maxBytes / this before a trim.
-    nonisolated static let byteSlackDivisor = 16
-    /// A window keeps at most this much text, also when its lines are long.
-    nonisolated static let defaultMaxBytes = 32 << 20
-    /// How long new lines wait, so that they are published as one batch.
-    nonisolated static let flushDelay = Duration.milliseconds(250)
 
     init(
-        api: DockerAPI, containerID: String, name: String, maxLines: Int = 20_000,
-        maxBytes: Int = LogStore.defaultMaxBytes
+        api: DockerAPI, containerID: String, name: String, maxLines: Int = LogLimits.maxLines,
+        maxBytes: Int = LogLimits.maxBytes
     ) {
         self.api = api
         self.containerID = containerID
@@ -60,7 +67,7 @@ final class LogStore {
     private func filtered(_ batch: [LogLine]) -> [LogLine] {
         var m = LogFilter.Matcher(query: search)
         let errOnly = stderrOnly
-        return batch.filter { (!errOnly || $0.stderr) && m.matches($0.text) }
+        return batch.filter { (!errOnly || $0.isStderr) && m.matches($0.text) }
     }
 
     private func refilter() {
@@ -88,7 +95,7 @@ final class LogStore {
 
     func start() {
         closed = false
-        Task { await connect(tail: 1000) }
+        Task { await connect(tail: LogLimits.initialTail) }
     }
 
     func stop() {
@@ -120,7 +127,7 @@ final class LogStore {
             return
         }
         if r.status == 404 {
-            status = "This container has been removed, so its logs are gone."
+            status = .down("This container has been removed, so its logs are gone.")
             return
         }
         guard r.ok, let j = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],
@@ -136,7 +143,7 @@ final class LogStore {
         // Prefer the daemon's clock: the VM clock can drift from the Mac's,
         // for example after sleep. The header has whole seconds only.
         lastStart = r.headers["date"].flatMap(Self.httpDate)?.addingTimeInterval(-1) ?? asked
-        status = "Live"
+        status = .live
         let box = DemuxBox(LogDemuxer(tty: tty))
         let buffer = self.buffer
         handle = api.streamRaw(
@@ -144,15 +151,16 @@ final class LogStore {
             onData: { [weak self] data in
                 // Parse here, off the main thread. Only the first push after a
                 // flush hops to the main actor.
-                let (lines, ts) = box.feed(data)
-                guard !lines.isEmpty, buffer.push(lines, lastTimestamp: ts) else { return }
+                let batch = box.feed(data)
+                guard !batch.lines.isEmpty, buffer.push(batch.lines, lastTimestamp: batch.lastTimestamp)
+                else { return }
                 Task { @MainActor in await self?.flush() }
             },
             onEnd: { [weak self] h in
                 Task { @MainActor in
                     guard let self, self.handle === h else { return }
                     if let s = h.status, !(200..<300).contains(s) {
-                        self.status = "Docker refused the log request (HTTP \(s))."
+                        self.status = .down("Docker refused the log request (HTTP \(s)).")
                         return
                     }
                     self.ended()
@@ -181,14 +189,8 @@ final class LogStore {
     /// A date as UNIX "seconds.nanoseconds" for `since`.
     nonisolated static func sinceParam(date: Date) -> String {
         let t = date.timeIntervalSince1970
-        var secs = Int64(t.rounded(.down))
-        var nanos = Int64(((t - Double(secs)) * 1e9).rounded())
-        if nanos >= 1_000_000_000 {
-            nanos -= 1_000_000_000
-            secs += 1
-        }
-        let n = String(nanos)
-        return "\(secs)." + String(repeating: "0", count: 9 - n.count) + n
+        let secs = Int64(t.rounded(.down))
+        return formatSince(secs: secs, nanos: Int64(((t - Double(secs)) * 1e9).rounded()))
     }
 
     /// Parses an HTTP "Date" header, for example "Tue, 06 Oct 2026 10:00:00 GMT".
@@ -205,8 +207,14 @@ final class LogStore {
     /// to skip the line we already have.
     nonisolated static func sinceParam(_ ts: String) -> String? {
         guard let t = LogTime.parse(ts[...]) else { return nil }
-        var secs = t.secs
-        var nanos = t.nanos + 1
+        return formatSince(secs: t.secs, nanos: t.nanos + 1)
+    }
+
+    /// "seconds.nanoseconds" with nine digits after the point. `nanos` may
+    /// be one full second; it then carries into `secs`.
+    nonisolated private static func formatSince(secs: Int64, nanos: Int64) -> String {
+        var secs = secs
+        var nanos = nanos
         if nanos >= 1_000_000_000 {
             nanos -= 1_000_000_000
             secs += 1
@@ -215,11 +223,11 @@ final class LogStore {
         return "\(secs)." + String(repeating: "0", count: 9 - n.count) + n
     }
 
-    /// Waits so that lines arriving in the next 250 ms join this batch, then
+    /// Waits so that lines arriving in the next `LogLimits.flushDelay` join this batch, then
     /// publishes the batch. While the window is hidden, it publishes nothing:
     /// the buffer then asks for no more flushes until `setOnScreen(true)`.
     private func flush() async {
-        try? await Task.sleep(for: Self.flushDelay)
+        try? await Task.sleep(for: LogLimits.flushDelay)
         guard onScreen else { return }
         ingest(buffer.drain())
     }
@@ -231,7 +239,7 @@ final class LogStore {
         textBytes += batch.reduce(0) { $0 + LogTrim.size($1) }
         visible.append(contentsOf: filtered(batch))
         var start = tailStart
-        if lines.count > maxLines + Self.trimSlack || textBytes > maxBytes + maxBytes / Self.byteSlackDivisor {
+        if LogLimits.needsTrim(lines: lines.count, bytes: textBytes, maxLines: maxLines, maxBytes: maxBytes) {
             let d = LogTrim.dropCount(lines, bytes: textBytes, maxLines: maxLines, maxBytes: maxBytes)
             lines.removeFirst(d.count)
             textBytes -= d.bytes
@@ -257,36 +265,37 @@ final class LogStore {
         reconnect(tail: 0, status: "Container stopped. Waiting for it to start…")
     }
 
-    /// Shows `status` and tries again after 2 s. A closed window stops the loop.
+    /// Shows `status` and tries again after `LogLimits.reconnectDelay`. A
+    /// closed window stops the loop.
     private func reconnect(tail: Int, status: String) {
         guard !closed else { return }
-        self.status = status
+        self.status = .down(status)
         Task {
-            try? await Task.sleep(for: .seconds(2))
+            try? await Task.sleep(for: LogLimits.reconnectDelay)
             await connect(tail: tail)
         }
     }
+}
 
-    /// HH:mm:ss.SSS in local time, or "" if `ts` is not a valid timestamp.
-    nonisolated static func clock(_ ts: String) -> String {
-        guard let t = LogTime.parse(ts[...]) else { return "" }
-        return LogTime.clock(secs: t.secs, nanos: t.nanos)
-    }
+/// Parsed lines from one read, and the newest timestamp among them.
+private struct ParsedBatch {
+    let lines: [LogLine]
+    let lastTimestamp: String?
 }
 
 /// Thread-confined demuxer state for the background reader.
+/// `@unchecked Sendable`: only the one stream reader thread calls feed(_:).
 private final class DemuxBox: @unchecked Sendable {
     private var demux: LogDemuxer
     init(_ d: LogDemuxer) { demux = d }
 
-    /// Returns parsed lines and the newest timestamp among them.
-    func feed(_ data: Data) -> ([LogLine], String?) {
+    func feed(_ data: Data) -> ParsedBatch {
         var last: Substring?
-        let lines = demux.feed(data).map { raw, isErr in
-            let p = LogLine.parse(raw, stderr: isErr)
+        let lines = demux.feed(data).map { piece in
+            let p = LogLine.parse(piece.text, isStderr: piece.isStderr)
             if let ts = p.timestamp { last = ts }
             return p.line
         }
-        return (lines, last.map(String.init))
+        return ParsedBatch(lines: lines, lastTimestamp: last.map(String.init))
     }
 }

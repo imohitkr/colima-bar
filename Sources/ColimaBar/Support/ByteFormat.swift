@@ -1,6 +1,9 @@
 import Foundation
 
-enum Fmt {
+enum ByteFormat {
+    /// Bytes in one GiB. Colima and the UI say "GB" for this unit.
+    static let bytesPerGiB: Int64 = 1 << 30
+
     static func bytes(_ b: Double) -> String {
         if b <= 0 { return "0 B" }
         let units = ["B", "KB", "MB", "GB", "TB"]

@@ -1,5 +1,4 @@
 import Foundation
-import ServiceManagement
 import os
 
 /// Points every way a docker client finds its daemon at ColimaBar's stable
@@ -10,7 +9,7 @@ import os
 /// isn't running, the stable path is a symlink to Colima's socket.
 @MainActor
 enum Routing {
-    private static let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "routing")
+    private static let log = Logger(category: "routing")
     static let contextName = "colimabar"
     static var stableHost: String { "unix://\(Paths.proxySocket)" }
 

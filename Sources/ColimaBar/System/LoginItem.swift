@@ -18,7 +18,7 @@ enum LoginItem {
     nonisolated static let legacyLabel = "com.imohitkr.ColimaBar.agent"
     nonisolated static var plistPath: String { "\(Paths.home)/Library/LaunchAgents/\(label).plist" }
     nonisolated private static var domain: String { "gui/\(getuid())" }
-    nonisolated private static let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "login")
+    nonisolated private static let log = Logger(category: "login")
     /// Runs launchctl off the main thread, one call after another, so
     /// quick on/off toggles reach launchd in order.
     nonisolated private static let queue = DispatchQueue(label: "com.imohitkr.ColimaBar.login")
@@ -136,8 +136,8 @@ enum LoginItem {
     /// Runs once: if unregistering fails, it must not re-enable launch at
     /// login on every start after the user turned it off.
     static func migrate() {
-        guard !UserDefaults.standard.bool(forKey: "didMigrateLoginItem") else { return }
-        UserDefaults.standard.set(true, forKey: "didMigrateLoginItem")
+        guard !Defaults.flag(.didMigrateLoginItem) else { return }
+        Defaults.set(true, .didMigrateLoginItem)
         let old = SMAppService.agent(plistName: "\(legacyLabel).plist")
         let hadOld =
             old.status == .enabled || old.status == .requiresApproval
@@ -181,15 +181,6 @@ enum LoginItem {
 
     @discardableResult
     nonisolated private static func launchctl(_ args: [String]) -> Shell.Result {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/launchctl")
-        p.arguments = args
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardError = pipe
-        guard (try? p.run()) != nil else { return Shell.Result(status: -1, out: "") }
-        let out = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        p.waitUntilExit()
-        return Shell.Result(status: p.terminationStatus, out: out)
+        Shell.runSync("/bin/launchctl", args, includeStderr: true)
     }
 }

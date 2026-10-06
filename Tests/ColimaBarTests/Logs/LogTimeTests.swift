@@ -66,10 +66,11 @@ import Testing
         }
     }
 
-    @Test @MainActor func clockTrimsNanoseconds() {
-        let t = LogStore.clock("2026-10-02T14:03:11.123456789Z")
+    @Test func clockTrimsNanoseconds() throws {
+        let p = try #require(LogTime.parse("2026-10-02T14:03:11.123456789Z"))
+        let t = LogTime.clock(secs: p.secs, nanos: p.nanos)
         #expect(t.count == 12)  // HH:mm:ss.SSS in local time
         #expect(t.hasSuffix("11.123"))
-        #expect(LogStore.clock("garbage") == "")
+        #expect(LogTime.parse("garbage") == nil)
     }
 }

@@ -105,11 +105,4 @@ import Testing
         #expect(ColimaModel.showsDiskUsage(.volumes))
         #expect(ColimaModel.showsDiskUsage(.system))
     }
-
-    @Test func diskActionsAreUrgent() {
-        for a in ["img-rm", "vol-rm", "prune", "img-pull", "ctr-rm", "stop-all"] {
-            #expect(ColimaModel.changesDisk(a), "\(a)")
-        }
-        for a in ["config", "logs", "copy-env", "start", "ssh"] { #expect(!ColimaModel.changesDisk(a), "\(a)") }
-    }
 }

@@ -16,29 +16,36 @@ import os
 ///
 /// When ColimaBar quits or the feature is off, the path becomes a symlink to
 /// Colima's socket, so clients keep working, just without auto-start.
+/// `@unchecked Sendable`: `lock` guards every mutable property; the others are `let`.
 final class SocketProxy: @unchecked Sendable {
-    private let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "proxy")
+    private let log = Logger(category: "proxy")
     private let lock = NSLock()
     private var listenFD: Int32 = -1
     private var _upstream: String
     private var _apiVersion: String?
-    private var waking = false
+    private var _wake: @Sendable () async -> Bool = { false }
+    private var isWaking = false
     private var waiters: [DispatchSemaphore] = []
-    private var wakeOK = false
-    private var conns: [Int: (opened: Date, lastIO: Date, work: Bool)] = [:]
+    private var lastWakeSucceeded = false
+    private var conns: [Int: Connection] = [:]
     private var nextConn = 0
 
-    /// Starts Colima and returns once Docker is ready (or false on failure).
-    var wake: @Sendable () async -> Bool = { false }
+    /// One open client connection. `isWork` is true while its latest
+    /// request does real work (see isWork(_:)).
+    private struct Connection {
+        let opened: Date
+        var lastIO: Date
+        var isWork: Bool
+    }
 
     /// Opens a connection to Colima's socket (injectable for tests).
-    var connectUpstream: @Sendable (String) -> Result<Int32, ProxyError> = { UnixSocket.tryConnect($0) }
+    let connectUpstream: @Sendable (String) -> Result<Int32, UnixSocket.Error>
 
     /// While the VM is down, or before its first request, a client that
     /// sends nothing for this many seconds is closed. Otherwise each idle
     /// client holds a thread and an fd forever. Spliced connections have no timeout:
     /// attach, logs and events streams can be silent for a long time.
-    var idleTimeout = 5 * 60
+    let idleTimeout: Int
 
     /// The largest request head (request line and headers) the VM-down path
     /// reads. A larger head gets 431 and the connection closes, so a client
@@ -58,9 +65,23 @@ final class SocketProxy: @unchecked Sendable {
     /// Where the stable socket lives (injectable for tests).
     let path: String
 
-    init(upstream: String, path: String = Paths.proxySocket) {
+    init(
+        upstream: String, path: String = Paths.proxySocket, idleTimeout: Int = 5 * 60,
+        connectUpstream: @escaping @Sendable (String) -> Result<Int32, UnixSocket.Error> = {
+            UnixSocket.tryConnect($0)
+        }
+    ) {
         _upstream = upstream
         self.path = path
+        self.idleTimeout = idleTimeout
+        self.connectUpstream = connectUpstream
+    }
+
+    /// Starts Colima and returns once Docker is ready (or false on failure).
+    /// The model sets it after init, because the closure captures the model.
+    var wake: @Sendable () async -> Bool {
+        get { lock.withLock { _wake } }
+        set { lock.withLock { _wake = newValue } }
     }
 
     var upstream: String {
@@ -153,7 +174,7 @@ final class SocketProxy: @unchecked Sendable {
     /// before dockerd and containerd are stable, so requests must wait for
     /// the readiness check in wake() like the one that triggered it.
     private func connectIfAwake() -> Upstream {
-        if lock.withLock({ waking }) { return .down }
+        if lock.withLock({ isWaking }) { return .down }
         switch connectUpstream(upstream) {
         case .success(let fd): return .up(fd)
         case .failure(.socket(let err)): return Self.meansVMDown(err) ? .down : .failed(err)
@@ -250,8 +271,7 @@ final class SocketProxy: @unchecked Sendable {
             }
             log.notice("waking Colima for: \(Self.logTarget(requestLine), privacy: .public)")
             guard waitForWake() else {
-                reply503(
-                    client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
+                reply503(client, Self.couldNotStart)
                 return
             }
             switch connectUpstream(upstream) {
@@ -260,8 +280,7 @@ final class SocketProxy: @unchecked Sendable {
             case .failure(.socket(let err)) where !Self.meansVMDown(err):
                 refuse(client, err)
             case .failure:
-                reply503(
-                    client, "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.")
+                reply503(client, Self.couldNotStart)
             }
             return
         }
@@ -276,6 +295,10 @@ final class SocketProxy: @unchecked Sendable {
             client, "ColimaBar could not connect to the Colima socket: \(reason) (errno \(err)). Try again in a moment."
         )
     }
+
+    /// The 503 message when a wake fails.
+    private static let couldNotStart =
+        "ColimaBar could not start Colima. Check the Colima log or start it from the menu bar."
 
     private func reply503(_ client: Int32, _ message: String) {
         reply(client, status: "503 Service Unavailable", message)
@@ -299,7 +322,7 @@ final class SocketProxy: @unchecked Sendable {
     /// count. Auto-stop treats any of these as "not idle".
     func activeTransfers(now: Date = Date(), stall: TimeInterval = 30 * 60) -> Int {
         lock.withLock {
-            conns.values.filter { $0.work && now.timeIntervalSince($0.lastIO) <= stall }.count
+            conns.values.filter { $0.isWork && now.timeIntervalSince($0.lastIO) <= stall }.count
         }
     }
 
@@ -307,7 +330,7 @@ final class SocketProxy: @unchecked Sendable {
     func addConnection(work: Bool, lastIO: Date) {
         lock.withLock {
             nextConn += 1
-            conns[nextConn] = (lastIO, lastIO, work)
+            conns[nextConn] = Connection(opened: lastIO, lastIO: lastIO, isWork: work)
         }
     }
 
@@ -338,8 +361,8 @@ final class SocketProxy: @unchecked Sendable {
         let sem = DispatchSemaphore(value: 0)
         let first = lock.withLock { () -> Bool in
             waiters.append(sem)
-            defer { waking = true }
-            return !waking
+            defer { isWaking = true }
+            return !isWaking
         }
         if first {
             let wake = self.wake
@@ -348,8 +371,8 @@ final class SocketProxy: @unchecked Sendable {
                 let ws = self.lock.withLock { () -> [DispatchSemaphore] in
                     let ws = self.waiters
                     self.waiters = []
-                    self.waking = false
-                    self.wakeOK = ok
+                    self.isWaking = false
+                    self.lastWakeSucceeded = ok
                     return ws
                 }
                 for w in ws { w.signal() }
@@ -358,7 +381,7 @@ final class SocketProxy: @unchecked Sendable {
         // Longer than wake()'s own budget (start + readiness), so a slow start
         // is reported by wake() instead of a 503 while the VM still boots.
         guard sem.wait(timeout: .now() + Self.waitBudget) == .success else { return false }
-        return lock.withLock { wakeOK }
+        return lock.withLock { lastWakeSucceeded }
     }
 
     /// Copies bytes both ways until each side closes, half-closing as it goes
@@ -374,7 +397,8 @@ final class SocketProxy: @unchecked Sendable {
         }
         let id = lock.withLock { () -> Int in
             nextConn += 1
-            conns[nextConn] = (Date(), Date(), work)
+            let now = Date()
+            conns[nextConn] = Connection(opened: now, lastIO: now, isWork: work)
             return nextConn
         }
         defer { lock.withLock { conns[id] = nil } }
@@ -416,7 +440,7 @@ final class SocketProxy: @unchecked Sendable {
                     let line = Self.lastRequestLine(UnsafeRawBufferPointer(rebasing: buf[0..<n]))
                     if !line.isEmpty {
                         let work = Self.isWork(line)
-                        lock.withLock { conns[conn]?.work = work }
+                        lock.withLock { conns[conn]?.isWork = work }
                     }
                 }
                 let now = Date()

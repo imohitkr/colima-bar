@@ -6,9 +6,20 @@ struct SystemTab: View {
     @Bindable var form: SystemForm
     @FocusState private var minutesFocused: Bool
 
-    private let presets = [("Light", 2, 4), ("Standard", 4, 8), ("Heavy", 8, 16)]
-    private let cpuOpts = [2, 4, 6, 8, 10, 12]
-    private let memOpts = [4, 8, 12, 16, 24, 32]
+    /// A one-click VM size.
+    private struct ResourcePreset {
+        let name: String
+        let cpus: Int
+        let memGB: Int
+    }
+
+    private let presets = [
+        ResourcePreset(name: "Light", cpus: 2, memGB: 4),
+        ResourcePreset(name: "Standard", cpus: 4, memGB: 8),
+        ResourcePreset(name: "Heavy", cpus: 8, memGB: 16),
+    ]
+    static let cpuOpts = [2, 4, 6, 8, 10, 12]
+    static let memOpts = [4, 8, 12, 16, 24, 32]
 
     /// The fixed choices, plus the VM's value and the picked value when they
     /// are not among them (Colima's default VM has 2 GB). The VM's value stays
@@ -24,14 +35,14 @@ struct SystemTab: View {
         VStack(alignment: .leading, spacing: 10) {
             SectionHeader(title: "VM resources")
             HStack(spacing: 6) {
-                ForEach(presets, id: \.0) { p in
-                    let active = p.1 == model.vm.cpus && p.2 == model.vm.memGB
+                ForEach(presets, id: \.name) { p in
+                    let active = p.cpus == model.vm.cpus && p.memGB == model.vm.memGB
                     Button {
-                        model.ctl("resources", "\(p.1)", "\(p.2)")
+                        model.run(.resources, "\(p.cpus)", "\(p.memGB)")
                     } label: {
                         VStack(spacing: 1) {
-                            Text(p.0).font(.system(size: 11, weight: .semibold))
-                            Text("\(p.1) CPU · \(p.2) GB").font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text(p.name).font(.system(size: 11, weight: .semibold))
+                            Text("\(p.cpus) CPU · \(p.memGB) GB").font(.system(size: 10)).foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
                         .background(
@@ -48,7 +59,9 @@ struct SystemTab: View {
                 GridRow {
                     Text("CPU").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: $form.cpu) {
-                        ForEach(Self.options(cpuOpts, model.vm.cpus, form.cpu), id: \.self) { Text("\($0)").tag($0) }
+                        ForEach(Self.options(Self.cpuOpts, model.vm.cpus, form.cpu), id: \.self) {
+                            Text("\($0)").tag($0)
+                        }
                     }
                     .pickerStyle(.segmented).labelsHidden()
                     .hint(Help.cpu)
@@ -56,7 +69,7 @@ struct SystemTab: View {
                 GridRow {
                     Text("Memory").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: $form.mem) {
-                        ForEach(Self.options(memOpts, model.vm.memGB, form.mem), id: \.self) {
+                        ForEach(Self.options(Self.memOpts, model.vm.memGB, form.mem), id: \.self) {
                             Text("\($0) GB").tag($0)
                         }
                     }
@@ -68,18 +81,18 @@ struct SystemTab: View {
                 Text("Applying restarts the VM; running containers stop.")
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
-                Button("Apply") { model.ctl("resources", "\(form.cpu)", "\(form.mem)") }
+                Button("Apply") { model.run(.resources, "\(form.cpu)", "\(form.mem)") }
                     .disabled(form.cpu == model.vm.cpus && form.mem == model.vm.memGB)
                     .hint(Help.apply)
             }
 
             Divider()
             SectionHeader(title: "Features")
-            Toggle(isOn: Binding(get: { model.rosetta }, set: { model.ctl("rosetta", $0 ? "on" : "off") })) {
+            Toggle(isOn: Binding(get: { model.isRosettaEnabled }, set: { model.run(.rosetta, $0 ? "on" : "off") })) {
                 Label("Rosetta (amd64 emulation)", systemImage: "cpu")
             }
             .hint(Help.rosetta)
-            Toggle(isOn: Binding(get: { model.k8s }, set: { model.ctl("k8s", $0 ? "on" : "off") })) {
+            Toggle(isOn: Binding(get: { model.isKubernetesEnabled }, set: { model.run(.k8s, $0 ? "on" : "off") })) {
                 Label("Kubernetes (k3s) · context: \(model.kubeContext)", systemImage: "circle.hexagongrid")
             }
             .hint(Help.k8s)
@@ -87,7 +100,7 @@ struct SystemTab: View {
                 Label("Disk: \(model.vm.diskGB) GB", systemImage: "internaldrive")
                 Spacer()
                 ForEach([150, 200, 300].filter { $0 > model.vm.diskGB }, id: \.self) { d in
-                    Button("\(d) GB") { model.ctl("disk", "\(d)") }.controlSize(.small)
+                    Button("\(d) GB") { model.run(.disk, "\(d)") }.controlSize(.small)
                 }
             }
             .hint(Help.disk)
@@ -107,8 +120,8 @@ struct SystemTab: View {
                     GridRow {
                         Text(r.type)
                         Text("\(r.count)").gridColumnAlignment(.trailing)
-                        Text(Fmt.bytes(r.size)).gridColumnAlignment(.trailing)
-                        Text(Fmt.bytes(r.reclaimable)).gridColumnAlignment(.trailing)
+                        Text(ByteFormat.bytes(r.size)).gridColumnAlignment(.trailing)
+                        Text(ByteFormat.bytes(r.reclaimable)).gridColumnAlignment(.trailing)
                             .foregroundStyle(r.reclaimable > 0 ? .orange : .secondary)
                     }
                     .font(.system(size: 11).monospacedDigit())
@@ -116,10 +129,10 @@ struct SystemTab: View {
                 }
             }
             HStack(spacing: 6) {
-                Button("Dangling + build cache") { model.ctl("prune", "dangling") }.hint(Help.pruneDangling)
-                Button("Unused images") { model.ctl("prune", "images") }.hint(Help.pruneImages)
-                Button("Unused volumes") { model.ctl("prune", "volumes") }.hint(Help.pruneVolumes)
-                Button("Full cleanup") { model.ctl("prune", "all") }.hint(Help.pruneAll)
+                Button("Dangling + build cache") { model.run(.prune, "dangling") }.hint(Help.pruneDangling)
+                Button("Unused images") { model.run(.prune, "images") }.hint(Help.pruneImages)
+                Button("Unused volumes") { model.run(.prune, "volumes") }.hint(Help.pruneVolumes)
+                Button("Full cleanup") { model.run(.prune, "all") }.hint(Help.pruneAll)
             }
             .controlSize(.small)
 
@@ -141,15 +154,15 @@ struct SystemTab: View {
                 HStack {
                     RouteRow(ok: model.routing.varRun, text: "/var/run/docker.sock", help: Help.routeVarRun)
                     if !model.routing.varRun {
-                        Button(form.linking ? "Linking…" : "Link (admin)") {
-                            form.linking = true
+                        Button(form.isLinking ? "Linking…" : "Link (admin)") {
+                            form.isLinking = true
                             Task {
                                 if !(await Routing.linkVarRun()) { model.notify("Couldn't link /var/run/docker.sock") }
                                 await model.refreshRouting()
-                                form.linking = false
+                                form.isLinking = false
                             }
                         }
-                        .controlSize(.mini).disabled(form.linking)
+                        .controlSize(.mini).disabled(form.isLinking)
                         .hint(Help.linkVarRun)
                     }
                 }
@@ -210,7 +223,7 @@ struct SystemTab: View {
                 SectionHeader(title: "Profiles", hint: Help.profiles) { EmptyView() }
                 ForEach(model.profiles) { p in
                     HStack(spacing: 8) {
-                        Circle().fill(p.running ? Color.green : .secondary.opacity(0.5)).frame(width: 7, height: 7)
+                        Circle().fill(p.isRunning ? Color.green : .secondary.opacity(0.5)).frame(width: 7, height: 7)
                         Text(p.name).font(.system(size: 12, weight: p.name == model.profile ? .semibold : .regular))
                         Text("\(p.cpus) CPU · \(p.memGB) GB").font(.caption).foregroundStyle(.secondary)
                         Spacer()
@@ -286,7 +299,7 @@ struct SystemTab: View {
     /// Only on appear: a VM change must not replace minutes you are typing.
     private func syncIdle() {
         if !IdleMinutes.presets.contains(model.autoStopMinutes) {
-            form.customIdle = true
+            form.isCustomIdle = true
             form.customMinutes = "\(model.autoStopMinutes)"
         }
     }
@@ -295,15 +308,15 @@ struct SystemTab: View {
     private var idleSelection: Binding<Int> {
         Binding(
             get: {
-                form.customIdle || !IdleMinutes.presets.contains(model.autoStopMinutes)
+                form.isCustomIdle || !IdleMinutes.presets.contains(model.autoStopMinutes)
                     ? IdleMinutes.custom : model.autoStopMinutes
             },
             set: { v in
                 if v == IdleMinutes.custom {
-                    form.customIdle = true
+                    form.isCustomIdle = true
                     form.customMinutes = "\(model.autoStopMinutes)"
                 } else {
-                    form.customIdle = false
+                    form.isCustomIdle = false
                     model.autoStopMinutes = v
                 }
             })
@@ -312,7 +325,7 @@ struct SystemTab: View {
     /// Applies the custom field. A preset picked after "Custom" wins: the
     /// field's focus loss and disappearance must not undo it.
     private func applyCustomIdle() {
-        guard form.customIdle, let n = IdleMinutes.commit(form.customMinutes, current: model.autoStopMinutes) else {
+        guard form.isCustomIdle, let n = IdleMinutes.commit(form.customMinutes, current: model.autoStopMinutes) else {
             return
         }
         model.autoStopMinutes = n

@@ -52,7 +52,7 @@ struct AlertItem: Identifiable, Equatable {
 struct ProfileRow: Identifiable, Equatable {
     var id: String { name }
     let name: String
-    let running: Bool
+    let isRunning: Bool
     let cpus: Int
     let memGB: Int
 }
@@ -89,5 +89,5 @@ struct VolumeRow: Identifiable, Equatable {
     let size: Double
     let links: Int
     let project: String?
-    let anonymous: Bool
+    let isAnonymous: Bool
 }

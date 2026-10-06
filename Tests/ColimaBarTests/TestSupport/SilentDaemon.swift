@@ -6,6 +6,7 @@ import Foundation
 /// Accepts one connection and reads the request head. Then it stays silent
 /// for `silence` seconds and watches for EOF: a proxy that drops the client
 /// half-closes its side, and the read gives 0. Then it answers and closes.
+/// `@unchecked Sendable`: `lock` guards the mutable state that the server thread shares.
 final class SilentDaemon: @unchecked Sendable {
     let path: String
     private let lock = NSLock()

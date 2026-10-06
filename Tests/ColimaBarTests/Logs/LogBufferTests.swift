@@ -5,14 +5,14 @@ import Testing
 
 @Suite struct LogBufferTests {
     private func lines(_ n: Int) -> [LogLine] {
-        (0..<n).map { LogLine(id: 0, time: "", text: "line \($0)", stderr: false) }
+        (0..<n).map { LogLine(id: 0, time: "", text: "line \($0)", isStderr: false) }
     }
 
     private func lines(_ n: Int, size: Int) -> [LogLine] {
         (0..<n).map { i in
             LogLine(
                 id: 0, time: "", text: String(format: "%05d", i) + String(repeating: "x", count: size - 5),
-                stderr: false)
+                isStderr: false)
         }
     }
 
@@ -48,7 +48,8 @@ import Testing
 
     @Test func bufferCountsMultibyteText() {
         let b = LogBuffer(cap: 10_000, byteCap: 1000)
-        let wide = (0..<20).map { _ in LogLine(id: 0, time: "", text: String(repeating: "é", count: 50), stderr: false)
+        let wide = (0..<20).map { _ in
+            LogLine(id: 0, time: "", text: String(repeating: "é", count: 50), isStderr: false)
         }
         _ = b.push(wide, lastTimestamp: nil)  // 100 bytes each
         #expect(b.drain().count == 10)

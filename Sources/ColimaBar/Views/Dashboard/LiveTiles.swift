@@ -23,7 +23,7 @@ struct LiveTiles: View {
     private var cpuText: String {
         model.cpuHistory.last.map { String(format: "%.1f%%", $0) } ?? "–"
     }
-    private var memText: String { model.stats.isEmpty ? "–" : Fmt.bytes(totalMem) }
+    private var memText: String { model.stats.isEmpty ? "–" : ByteFormat.bytes(totalMem) }
 }
 
 /// Container counts. A separate view, so the 1 s stats tick that redraws

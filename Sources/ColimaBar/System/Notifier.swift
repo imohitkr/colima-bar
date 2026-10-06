@@ -2,6 +2,24 @@ import AppKit
 import UserNotifications
 import os
 
+/// The container an alert is about.
+struct ContainerRef: Equatable, Sendable {
+    let id: String
+    let name: String
+}
+
+/// A button on a container alert. The raw value is the action identifier
+/// that macOS sends back.
+enum NotificationAction: String, Sendable {
+    case viewLogs = "VIEW_LOGS"
+    case restart = "RESTART"
+
+    /// Clicking the banner itself (or any other identifier) opens the logs.
+    init(identifier: String) {
+        self = identifier == Self.restart.rawValue ? .restart : .viewLogs
+    }
+}
+
 /// Native notifications (ColimaBar's own name and icon). Container alerts get
 /// "View logs" and "Restart" buttons. Permission is requested the first time
 /// something is worth notifying about. Every alert is also handed to
@@ -12,16 +30,14 @@ import os
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
 
-    private let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "notify")
+    private let log = Logger(category: "notify")
     private let center = UNUserNotificationCenter.current()
     private static let containerCategory = "CONTAINER"
-    private static let viewLogs = "VIEW_LOGS"
-    private static let restart = "RESTART"
 
-    /// Called with (action, containerID, containerName, profile) when a button is used.
-    var onContainerAction: ((String, String, String, String?) -> Void)?
-    /// Called for every alert, delivered or not.
-    var onAlert: ((String, String, (id: String, name: String)?) -> Void)?
+    /// Called with (action, container, profile) when a button is used.
+    var onContainerAction: ((NotificationAction, ContainerRef, String?) -> Void)?
+    /// Called with (title, body, container) for every alert, delivered or not.
+    var onAlert: ((String, String, ContainerRef?) -> Void)?
     /// Called with whether macOS currently allows ColimaBar's notifications.
     var onPermission: ((Bool) -> Void)?
 
@@ -33,8 +49,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// the app isn't lost.
     func install() {
         center.delegate = self
-        let logs = UNNotificationAction(identifier: Self.viewLogs, title: "View logs", options: [.foreground])
-        let restart = UNNotificationAction(identifier: Self.restart, title: "Restart", options: [])
+        let logs = UNNotificationAction(
+            identifier: NotificationAction.viewLogs.rawValue, title: "View logs", options: [.foreground])
+        let restart = UNNotificationAction(
+            identifier: NotificationAction.restart.rawValue, title: "Restart", options: [])
         center.setNotificationCategories([
             UNNotificationCategory(
                 identifier: Self.containerCategory, actions: [logs, restart],
@@ -46,7 +64,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// which don't belong in the dashboard's list of container alerts.
     /// `url` makes a click on the banner open that page.
     func post(
-        _ body: String, title: String = "Colima", container: (id: String, name: String)? = nil,
+        _ body: String, title: String = "Colima", container: ContainerRef? = nil,
         profile: String? = nil, record: Bool = true, url: URL? = nil
     ) {
         if record { onAlert?(title, body, container) }
@@ -144,13 +162,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             if let link { NSWorkspace.shared.open(link) }
             if !id.isEmpty {
                 // Clicking the banner itself also opens the logs.
-                let a = action == UNNotificationDefaultActionIdentifier ? Self.viewLogs : action
-                self.onContainerAction?(a, id, name, profile)
+                self.onContainerAction?(
+                    NotificationAction(identifier: action), ContainerRef(id: id, name: name), profile)
             }
             done()
         }
     }
-
-    static func isViewLogs(_ a: String) -> Bool { a == viewLogs }
-    static func isRestart(_ a: String) -> Bool { a == restart }
 }

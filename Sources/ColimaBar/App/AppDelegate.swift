@@ -1,7 +1,6 @@
 import AppKit
 import OSLog
 import Observation
-import ServiceManagement
 import SwiftUI
 
 /// Plain NSStatusItem + NSPopover rather than SwiftUI's MenuBarExtra: it tells
@@ -32,13 +31,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private let model = ColimaModel()
     private let ui = ViewState()
+    // Implicitly unwrapped: the status bar exists only after launch, so
+    // applicationDidFinishLaunching sets it, and nothing reads it before.
     private var item: NSStatusItem!
     private let popover = NSPopover()
     private var window: NSWindow?
     private var windowCounted = false  // dashboard window counted in model.visibleCount
     private var appliedHidden: Bool?  // last icon visibility we set
     private var sigterm: DispatchSourceSignal?
-    private let log = Logger(subsystem: "com.imohitkr.ColimaBar", category: "app")
+    private let log = Logger(category: "app")
 
     /// launchd sets XPC_SERVICE_NAME to the job label for the login agent.
     static let isLaunchAgent = ProcessInfo.processInfo.environment["XPC_SERVICE_NAME"] == LoginItem.label
@@ -57,14 +58,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         Notifier.shared.onPermission = { [weak self] ok in
             if self?.model.notificationsAllowed != ok { self?.model.notificationsAllowed = ok }
         }
-        Notifier.shared.onContainerAction = { [weak self] action, id, name, profile in
+        Notifier.shared.onContainerAction = { [weak self] action, ctr, profile in
             guard let self else { return }
             // The alert may come from another profile than the one shown now.
             let p = profile ?? self.model.profile
-            if Notifier.isRestart(action) {
-                self.model.container(id, "restart", profile: p)
-            } else {
-                self.model.openLogs(id: id, name: name, profile: p)
+            switch action {
+            case .restart: self.model.container(ctr.id, .restart, profile: p)
+            case .viewLogs: self.model.openLogs(id: ctr.id, name: ctr.name, profile: p)
             }
         }
     }
@@ -84,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
 
         if !Self.isDebugRun { ensureSingleSupervisedInstance() }
-        installMainMenu()
+        NSApp.mainMenu = MainMenu.make()
         handleSIGTERM()
 
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -140,7 +140,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // a few seconds after launch (no Screen Recording permission needed).
         let args = CommandLine.arguments
         if let i = args.firstIndex(of: "--snapshot"), i + 1 < args.count {
-            if i + 2 < args.count, let tab = Tab(rawValue: args[i + 2]) { ui.tab = tab }
+            if i + 2 < args.count, let tab = DashboardTab(rawValue: args[i + 2]) { ui.tab = tab }
             if let h = ProcessInfo.processInfo.environment["COLIMABAR_HINT"] { Hint.shared.text = h }
             if let name = ProcessInfo.processInfo.environment["COLIMABAR_LOGS"] {
                 // Snapshot the log viewer for a container instead.
@@ -357,17 +357,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// Turns launch-at-login on the first time the app runs; after that the
     /// user's choice (System tab / right-click menu) is left alone.
     private func registerLoginItemOnce() {
-        let key = "didOfferLoginItem"
-        guard !UserDefaults.standard.bool(forKey: key),
+        guard !Defaults.flag(.didOfferLoginItem),
             Bundle.main.bundlePath.contains("/Applications/")
         else { return }
-        UserDefaults.standard.set(true, forKey: key)
+        Defaults.set(true, .didOfferLoginItem)
         try? LoginItem.set(true)
     }
 
-    @objc private func startVM() { model.ctl("start") }
-    @objc private func stopVM() { model.ctl("stop") }
-    @objc private func restartVM() { model.ctl("restart") }
+    @objc private func startVM() { model.run(.start) }
+    @objc private func stopVM() { model.run(.stop) }
+    @objc private func restartVM() { model.run(.restart) }
     @objc private func openWindowAction() { showWindow() }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func toggleAutoStart() { model.autoStart.toggle() }
@@ -394,8 +393,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     /// Reads and removes the reveal request.
     private static func takeRevealRequest() -> Bool {
-        let at = UserDefaults.standard.object(forKey: revealKey) as? Double
-        if at != nil { UserDefaults.standard.removeObject(forKey: revealKey) }
+        let at = Defaults.double(.revealOnLaunch)
+        if at != nil { Defaults.remove(.revealOnLaunch) }
         return revealRequestIsFresh(at, now: Date().timeIntervalSince1970)
     }
 
@@ -421,7 +420,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         )
         // Also for a copy started by hand: if the agent takes over from the
         // new instance, the agent reads it.
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.revealKey)
+        Defaults.set(Date().timeIntervalSince1970, .revealOnLaunch)
         if restart == .agent {
             NSApp.terminate(nil)
             return true
@@ -436,7 +435,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     // Keep this copy running, so the proxy stays up.
                     self.log.error("couldn't start the new version: \(error.localizedDescription, privacy: .public)")
                     self.relaunching = false
-                    UserDefaults.standard.removeObject(forKey: Self.revealKey)
+                    Defaults.remove(.revealOnLaunch)
                     if self.model.iconHidden { self.model.revealIcon = true }
                     self.reveal()
                     return

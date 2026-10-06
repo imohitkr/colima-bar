@@ -13,35 +13,35 @@ struct VolumesTab: View {
         // Lazy: a long list builds only the rows on screen.
         LazyVStack(alignment: .leading, spacing: 6) {
             SectionHeader(title: "\(model.volumes.count) volumes · \(unused.count) unused") {
-                Button("Remove unused") { model.ctl("prune", "volumes") }.buttonStyle(.borderless).font(.caption)
+                Button("Remove unused") { model.run(.prune, "volumes") }.buttonStyle(.borderless).font(.caption)
                     .hint(Help.removeUnusedVolumes)
             }
-            if list.isEmpty { Empty(text: model.volumes.isEmpty ? "No volumes" : "No matches") }
+            if list.isEmpty { EmptyStateText(text: model.volumes.isEmpty ? "No volumes" : "No matches") }
             ForEach(list) { v in
                 HStack(spacing: 8) {
                     Image(systemName: "externaldrive").foregroundStyle(.secondary).frame(width: 16)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(v.anonymous ? String(v.name.prefix(12)) + "…" : v.name)
+                        Text(v.isAnonymous ? String(v.name.prefix(12)) + "…" : v.name)
                             .font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
                         Text(
                             [
-                                v.project.map { "compose: \($0)" }, v.anonymous ? "anonymous" : nil,
+                                v.project.map { "compose: \($0)" }, v.isAnonymous ? "anonymous" : nil,
                                 v.links > 0 ? "used by \(v.links)" : "unused",
                             ].compactMap { $0 }.joined(separator: " · ")
                         )
                         .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                     }
                     .hint(
-                        v.anonymous
+                        v.isAnonymous
                             ? Help.anonymous
                             : v.links == 0 ? Help.unusedVolume : "Volume \(v.name), used by \(v.links) container(s).")
                     Spacer(minLength: 4)
-                    Text(Fmt.bytes(v.size)).font(.system(size: 11).monospacedDigit())
+                    Text(ByteFormat.bytes(v.size)).font(.system(size: 11).monospacedDigit())
                         .frame(width: 60, alignment: .trailing)
                     Menu {
-                        Button("Copy name") { copy(v.name) }
+                        Button("Copy name") { Pasteboard.copy(v.name) }
                         Divider()
-                        Button("Remove…") { model.ctl("vol-rm", v.name) }.disabled(v.links > 0)
+                        Button("Remove…") { model.run(.volumeRemove, v.name) }.disabled(v.links > 0)
                     } label: {
                         Image(systemName: "ellipsis")
                     }

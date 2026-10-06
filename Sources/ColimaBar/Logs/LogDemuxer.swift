@@ -17,9 +17,12 @@ struct LogDemuxer {
 
     init(tty: Bool) { self.tty = tty }
 
-    /// Returns complete lines as (text, isStderr).
-    mutating func feed(_ data: Data) -> [(String, Bool)] {
-        var out: [(String, Bool)] = []
+    /// One complete line and the stream it came from.
+    typealias Piece = (text: String, isStderr: Bool)
+
+    /// Returns the complete lines.
+    mutating func feed(_ data: Data) -> [Piece] {
+        var out: [Piece] = []
         if tty {
             split(data, stderr: false, into: &out)
             return out
@@ -42,7 +45,7 @@ struct LogDemuxer {
     }
 
     /// Splits on "\n" at the byte level and decodes only whole lines.
-    private mutating func split(_ bytes: Data, stderr: Bool, into out: inout [(String, Bool)]) {
+    private mutating func split(_ bytes: Data, stderr: Bool, into out: inout [Piece]) {
         var pending = partial[stderr] ?? Data()
         partial[stderr] = nil  // so the append below does not copy
         pending.append(bytes)
@@ -62,7 +65,7 @@ struct LogDemuxer {
     /// returns where the rest starts. Never cuts inside a UTF-8 character.
     private static func cutLong(
         _ d: Data, from: Int, to end: Int, stderr: Bool,
-        into out: inout [(String, Bool)]
+        into out: inout [Piece]
     ) -> Int {
         var start = from
         while end - start > maxLineBytes {

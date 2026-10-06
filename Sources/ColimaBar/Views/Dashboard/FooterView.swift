@@ -7,13 +7,13 @@ struct FooterView: View {
 
     var body: some View {
         HStack(spacing: 2) {
-            IconButton("terminal", Help.ssh) { model.terminal("ssh") }
+            IconButton("terminal", Help.ssh) { model.terminal(.ssh) }
             IconButton("doc.on.clipboard", Help.copyEnv) {
-                model.ctl("copy-env")
+                model.run(.copyEnv)
                 Hint.shared.text = "Copied the DOCKER_HOST export to the clipboard."
             }
-            IconButton("doc.text", Help.config) { model.ctl("config") }
-            IconButton("list.bullet.rectangle", Help.log) { model.ctl("logs") }
+            IconButton("doc.text", Help.config) { model.run(.config) }
+            IconButton("list.bullet.rectangle", Help.log) { model.run(.logs) }
             Spacer()
             Button {
                 Task { await Updater.shared.check(manual: true) }

@@ -15,7 +15,7 @@ struct DashboardView: View {
             if model.state == .running {
                 LiveTiles(model: model).padding(.horizontal, 12).padding(.vertical, 10)
                 Picker("", selection: $ui.tab) {
-                    ForEach(Tab.allCases) { Text($0.rawValue).tag($0) }
+                    ForEach(DashboardTab.allCases) { Text($0.rawValue).tag($0) }
                 }
                 .pickerStyle(.segmented).labelsHidden()
                 .hint(Help.tabs)

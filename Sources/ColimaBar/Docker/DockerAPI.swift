@@ -5,7 +5,7 @@ import Foundation
 /// transport Portainer and the docker CLI use. Requests are HTTP/1.0 so the
 /// daemon replies unchunked and closes the connection at the end of the body,
 /// which keeps both one-shot and streaming reads trivial.
-final class DockerAPI: @unchecked Sendable {
+final class DockerAPI: Sendable {
     let socketPath: String
 
     /// The size of each read buffer. Each stats stream and log window holds
@@ -172,12 +172,13 @@ final class DockerAPI: @unchecked Sendable {
     }
 
     /// Percent-encodes a query value (filters JSON etc.).
-    static func q(_ s: String) -> String {
+    static func percentEncoded(_ s: String) -> String {
         s.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? s
     }
 }
 
 /// Cancels a stream by shutting its socket down, which unblocks the reader.
+/// `@unchecked Sendable`: `lock` guards every mutable property.
 final class StreamHandle: @unchecked Sendable {
     private let lock = NSLock()
     private var fd: Int32 = -1
@@ -191,32 +192,33 @@ final class StreamHandle: @unchecked Sendable {
     fileprivate func setStatus(_ s: Int) { lock.withLock { _status = s } }
 
     fileprivate func attach(_ fd: Int32) -> Bool {
-        lock.lock()
-        defer { lock.unlock() }
-        if _cancelled { return false }
-        self.fd = fd
-        return true
+        lock.withLock {
+            if _cancelled { return false }
+            self.fd = fd
+            return true
+        }
     }
 
     fileprivate func finish() {
-        lock.lock()
-        defer { lock.unlock() }
-        if fd >= 0 {
-            close(fd)
-            fd = -1
+        lock.withLock {
+            if fd >= 0 {
+                close(fd)
+                fd = -1
+            }
         }
     }
 
     func cancel() {
-        lock.lock()
-        defer { lock.unlock() }
-        _cancelled = true
-        if fd >= 0 { shutdown(fd, SHUT_RDWR) }
+        lock.withLock {
+            _cancelled = true
+            if fd >= 0 { shutdown(fd, SHUT_RDWR) }
+        }
     }
 }
 
 /// Splits a byte stream into newline-delimited lines. Used from one reader
 /// thread only.
+/// `@unchecked Sendable`: only the one reader thread touches `pending`.
 final class LineSplitter: @unchecked Sendable {
     private var pending = Data()
     private let onLine: @Sendable (Data) -> Void
