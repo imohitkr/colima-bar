@@ -1,4 +1,5 @@
 import AppKit
+import OSLog
 import Observation
 import ServiceManagement
 import SwiftUI
@@ -187,6 +188,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             item.button?.setAccessibilityValue(model.busy ?? (model.state == .running
                 ? "\(model.running.count) containers running" : "stopped"))
             item.button?.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+            if item.isVisible == model.iconHidden {
+                item.isVisible = !model.iconHidden
+                Logger(subsystem: "com.imohitkr.ColimaBar", category: "app")
+                    .notice("menu bar icon \(self.item.isVisible ? "shown" : "hidden", privacy: .public)")
+            }
         } onChange: {
             // The app delegate lives for the whole process.
             Task { @MainActor in self.updateIcon() }
@@ -268,7 +274,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     }
 
     func applicationWillTerminate(_ note: Notification) {
+        // macOS persists isVisible per status item; don't start hidden next time.
+        item?.isVisible = true
         if !Self.isDebugRun { model.shutdown() }
+    }
+
+    /// Opening the app again (Spotlight, Finder, `open -a ColimaBar`) brings a
+    /// hidden icon back and opens the dashboard so Colima can be started.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        let wasHidden = model.iconHidden
+        model.revealIcon = true
+        if wasHidden || !popover.isShown {
+            // Let the status item lay out before anchoring the popover to it.
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.popover.isShown else { return }
+                self.togglePopover()
+            }
+        }
+        return false
     }
 
     // MARK: - Visibility drives live stats

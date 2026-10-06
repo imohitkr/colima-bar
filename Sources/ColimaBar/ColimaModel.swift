@@ -56,6 +56,27 @@ final class ColimaModel {
     var autoStopMinutes = Defaults.int("autoStopMinutes") ?? 30 {
         didSet { Defaults.set(autoStopMinutes, "autoStopMinutes"); idleSince = nil }
     }
+    var hideIconWhenStopped = Defaults.bool("hideIconWhenStopped") ?? false {
+        didSet { Defaults.set(hideIconWhenStopped, "hideIconWhenStopped") }
+    }
+    /// Set when the app is reopened from Spotlight/Finder while its icon is
+    /// hidden. Cleared when the VM next starts, so the icon hides again after
+    /// the following stop.
+    var revealIcon = false
+
+    /// Only the menu bar icon hides; the process, the auto-start proxy and the
+    /// light heartbeat keep running so `docker` still wakes the VM.
+    var iconHidden: Bool {
+        Self.hidesIcon(enabled: hideIconWhenStopped, revealed: revealIcon, state: state,
+                       busy: busy != nil, dashboardOpen: visibleCount > 0)
+    }
+
+    /// The icon hides only when the VM is known to be stopped and nothing is
+    /// in progress. Unknown and not-installed states keep it visible.
+    nonisolated static func hidesIcon(enabled: Bool, revealed: Bool, state: VMState,
+                                      busy: Bool, dashboardOpen: Bool) -> Bool {
+        enabled && !revealed && state == .stopped && !busy && !dashboardOpen
+    }
 
     /// Number of dashboard surfaces (popover, window) currently on screen.
     /// Live stats only stream while this is > 0.
@@ -215,6 +236,7 @@ final class ColimaModel {
         if newState == .running {
             if events == nil { startEvents() }
             if !wasRunning {
+                revealIcon = false
                 await refreshContainers()
                 // `colima start` switches the docker context back to colima.
                 if !isDebug { Task {

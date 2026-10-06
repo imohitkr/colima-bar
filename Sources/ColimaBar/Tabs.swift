@@ -479,6 +479,11 @@ struct SystemTab: View {
                 Text("Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(since.addingTimeInterval(Double(model.autoStopMinutes * 60)).formatted(date: .omitted, time: .shortened)).")
                     .font(.caption2).foregroundStyle(.secondary)
             }
+            Toggle(isOn: $model.hideIconWhenStopped) {
+                Label("Hide menu bar icon while Colima is stopped", systemImage: "eye.slash")
+            }
+            .toggleStyle(.checkbox)
+            .hint(Help.hideIcon)
 
             if model.profiles.count > 1 {
             Divider()
