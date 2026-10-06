@@ -58,7 +58,7 @@ struct ContainerRow: View {
                 IconButton("trash", Help.ctrRemove) { model.run(.containerRemove, c.name) }
             }
             Menu {
-                Button("Logs in iTerm") { model.terminal(.containerLogs, c.name) }
+                Button("Logs in Terminal") { model.terminal(.containerLogs, c.name) }
                 Divider()
                 Button("Copy name") { Pasteboard.copy(c.name) }
                 Button("Copy ID") { Pasteboard.copy(String(c.id.prefix(12))) }

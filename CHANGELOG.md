@@ -6,14 +6,22 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-07
+
 ### Added
 
-- **Uninstall ColimaBar…** in the right-click menu. After you confirm, it runs the uninstall script of the app in iTerm or Terminal.
-- User guides in `docs/`, and `ARCHITECTURE.md`, `CHANGELOG.md` and `SUPPORT.md`.
+- **Uninstall ColimaBar…** in the right-click menu. After you confirm, it runs the uninstall script of the app in iTerm, or in Terminal when iTerm is not installed.
+- A Question issue form.
 
 ### Changed
 
-- The README is short. The details moved to the user guides in `docs/`.
+- The docs have a new structure. The README is short. The user guides are in `docs/`. `ARCHITECTURE.md` describes the design, and `SUPPORT.md` tells you how to get help.
+
+### Fixed
+
+- The installer no longer stops when `gh` 2.49 to 2.67 is installed. It needs `gh` 2.68 or later to verify the download. With an older `gh`, it prints a notice and continues.
+- ColimaBar now finds iTerm in `~/Applications`. Before, it used Terminal.
+- Test builds with the Command Line Tools no longer fail now and then with "plugin for module 'TestingMacros' not found".
 
 ## [0.4.0] - 2026-10-06
 
@@ -34,7 +42,6 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Lower memory use. An open dashboard uses about 23 MB instead of 164 MB. A log window renders only the newest 2,000 lines.
 - Faster log viewer: parsing runs off the main thread, and filtering is faster.
 - ColimaBar raises its open file limit to 8192.
-- ColimaBar uses Swift 6.4 in the Swift 6 language mode.
 
 ### Fixed
 
@@ -100,7 +107,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/imohitkr/colima-bar/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/imohitkr/colima-bar/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/imohitkr/colima-bar/compare/v0.2.0...v0.3.0

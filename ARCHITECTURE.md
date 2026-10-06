@@ -7,7 +7,7 @@ This document describes the high-level design of ColimaBar. Read it before you m
 ColimaBar is a menu bar app for [Colima](https://github.com/abiosoft/colima). It does three jobs:
 
 1. **The dashboard.** It shows the VM and its containers, and runs actions on them.
-2. **Auto-start.** It runs a proxy on a stable unix socket. All docker clients use that socket. While the VM is down, the first real docker request starts Colima.
+2. **Auto-start.** It runs a proxy on a unix socket, the proxy socket. All docker clients use that socket. While the VM is down, the first real docker request starts Colima.
 3. **Auto-stop.** It can stop the VM after an idle time.
 
 ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
@@ -64,15 +64,15 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 ### `Logs/`
 
-The log windows. `LogStore` holds the live state for one container. `LogDemuxer` splits the stdout and stderr frames of Docker. `LogFilter`, `LogBuffer`, `LogTrim` and `LogTail` filter and limit the lines. `LogView` and `LogWindows` show them.
+The log windows. `LogStore` holds the live state for one container. `LogDemuxer` splits the stdout and stderr frames of Docker. `LogLine` is one line with its time, text and stream. `LogTime` parses the Docker timestamps fast, off the main thread. `LogFilter`, `LogBuffer`, `LogTrim` and `LogTail` filter and limit the lines. `LogLimits` holds the limits and timings of a log window. `LogView` and `LogWindows` show the lines.
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. `Containers/` and `System/` hold those tabs. `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`) and small shared views.
 
 ### `Support/`
 
-Small helpers with no app state: `Parse` (for example `colima.yaml` lookup), byte formatting and bounded concurrency.
+Small helpers with no app state: `Parse` (for example `colima.yaml` lookup), byte formatting and bounded concurrency. `Logger+ColimaBar` creates loggers in the unified log subsystem `com.imohitkr.ColimaBar`.
 
 ### Other files
 
@@ -95,20 +95,20 @@ Small helpers with no app state: `Parse` (for example `colima.yaml` lookup), byt
 
 ### Auto-start proxy
 
-All docker clients use one stable path: `~/.cache/colima-bar/docker.sock` (`Paths.proxySocket`). `Routing` points each client at it:
+All docker clients use the proxy socket (`~/.cache/colima-bar/docker.sock`, `Paths.proxySocket`). The user guides call it "the ColimaBar socket". `Routing` points each client at it:
 
 <p align="center">
-  <img src="docs/assets/docker-routes.svg" width="900" alt="Each docker client reaches the stable socket through its own route. While ColimaBar runs, the socket is the proxy. When ColimaBar quits, it is a symlink to the Colima socket.">
+  <img src="docs/assets/docker-routes.svg" width="900" alt="Each docker client reaches the ColimaBar socket through its own route. While ColimaBar runs, the socket is the proxy. When ColimaBar quits, it is a symlink to the Colima socket.">
 </p>
 
 | Client | Route |
 |---|---|
 | docker CLI and tools that read contexts | The docker context `colimabar`. ColimaBar switches to it only from `default` or a `colima*` context. |
-| Apps opened from the Dock or Finder | `launchctl setenv DOCKER_HOST`. ColimaBar also sets `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` for Ryuk. |
+| IDEs and Dock apps | `launchctl setenv DOCKER_HOST`. ColimaBar also sets `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` for Ryuk. Both apply to all apps that launchd starts in the session. |
 | testcontainers | `docker.host` in `~/.testcontainers.properties`. The write follows a symlink and keeps the file mode. |
 | Tools that only try `/var/run/docker.sock` | An optional symlink that needs an admin password (`Routing.linkVarRun()`). |
 
-`Routing` never changes a route that points to a different daemon.
+`Routing.apply()` runs when the app starts and each time the VM starts, because `colima start` switches the docker context back to `colima`. `Routing` never changes a route that points to a different daemon.
 
 The proxy upstream is the socket of the selected profile. While the VM is up, the proxy splices bytes in both directions. While the VM is down, it does this:
 
@@ -116,11 +116,11 @@ The proxy upstream is the socket of the selected profile. While the VM is up, th
   <img src="docs/assets/auto-start-sequence.svg" width="900" alt="Sequence: the proxy answers a ping itself. A real request calls wakeForProxy, which runs colima start and readiness probes. Then the proxy splices the waiting request on the same connection.">
 </p>
 
-
-- It answers `GET` and `HEAD /_ping` itself, so idle pollers do not start the VM.
+- It answers `GET` and `HEAD /_ping` itself, so idle pollers do not start the VM. It needs the daemon API version for this answer. `ColimaModel` stores the version from the last real ping in `UserDefaults`. Until the first one, a ping counts as a real request.
 - For the first real request, it calls `wakeForProxy()`. Requests that arrive during a wake wait for the same wake.
-- `wakeForProxy()` waits for `colima start` to exit. Then it waits for several successful `/images/json` probes in a row. An open socket does not mean that Docker is ready.
-- After the wake, the request continues on the same connection.
+- `wakeForProxy()` waits for `colima start` to exit. Then it waits for several successful `/images/json` probes in a row. An open socket does not mean that the Docker daemon is ready.
+- After the wake, the request continues on the same connection. If the wake fails, the proxy answers HTTP 503 with a JSON `message`.
+- `wakeForProxy()` does not start a deleted non-default profile, or a profile with a runtime other than docker.
 
 On quit, or when auto-start is off, `SocketProxy.stop()` replaces the path with a symlink to the Colima socket. It creates the link before it closes the listener, so a client never sees a missing socket.
 
@@ -153,7 +153,7 @@ ColimaBar does not use `SMAppService`. launchd ties an `SMAppService` agent to t
 
 ### Notifications
 
-Notifications go out only for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Containers with the label `org.testcontainers=true` do not send alerts. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
+Notifications go out for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Exit codes 0, 130, 137 and 143 are a normal stop (`ColimaModel.ignoredExitCodes`). Containers with the label `org.testcontainers=true` do not send alerts. Two other notifications go out once: one for each new version, and one the first time the icon hides. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
 
 ### Update check
 
@@ -181,13 +181,16 @@ Live stats stream only while a dashboard is on screen. `/system/df` runs only fo
 
 ## Invariants
 
-[AGENTS.md](AGENTS.md#invariants) has the full list. The most important rules are these:
+Do not break these rules.
 
-- The popover has a fixed size. `ColimaModel` assigns a property only when its value changes.
-- The proxy socket path does not change. The socket has mode `0600`, and its folder has mode `0700`.
-- Docker clients must keep working without ColimaBar. On quit, the socket path becomes a symlink to the Colima socket.
-- No request goes to the daemon before the readiness gate after a wake passes.
-- A debug run never changes the proxy socket, the docker routes or the login item.
+- **Fixed popover size.** The popover is 480 x 640 points (`AppDelegate.popoverSize`). In `ColimaModel`, assign a property only when its value changes. Otherwise the popover jitters and SwiftUI redraws too much.
+- **Proxy socket.** The path is `~/.cache/colima-bar/docker.sock` (`Paths.proxySocket`). The socket has mode `0600`. Its folder has mode `0700`. Do not change the path or relax the modes.
+- **Quit behavior.** On quit, or when auto-start is off, the socket path becomes a symlink to the Colima socket (`SocketProxy.stop()`). Docker clients must keep working without ColimaBar.
+- **`colima-ctl.sh`.** The app bundle contains it in `Contents/Resources`. Exit code 0 means done. Exit code 1 means failed (the script already notified the user). Exit code 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
+- **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
+- **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
+- **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
+- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy socket, the docker routes or the login item.
 
 ## Testing
 

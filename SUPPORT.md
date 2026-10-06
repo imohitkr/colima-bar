@@ -8,12 +8,14 @@ ColimaBar is an independent project. It is not part of Colima, so do not report 
 - For common problems and the location of the logs, read [Troubleshooting](docs/troubleshooting.md).
 - Search the [open and closed issues](https://github.com/imohitkr/colima-bar/issues?q=is%3Aissue).
 
-## Ask for help or report a bug
+## Ask for help
 
-Open an issue with one of the [issue forms](https://github.com/imohitkr/colima-bar/issues/new/choose):
+If the docs do not answer your question, open a [question](https://github.com/imohitkr/colima-bar/issues/new?template=question.yml). Tell us what you tried, what you expected and your ColimaBar version.
 
-- **Bug report**: something does not work as the docs describe.
-- **Feature request**: an idea for a new feature. Read the [roadmap](docs/roadmap.md) first.
+## Report a bug or suggest a feature
+
+- **Bug report**: something does not work as the docs describe. Open a [bug report](https://github.com/imohitkr/colima-bar/issues/new?template=bug_report.yml).
+- **Feature request**: an idea for a new feature. Read the [roadmap](docs/roadmap.md) first, then open a [feature request](https://github.com/imohitkr/colima-bar/issues/new?template=feature_request.yml).
 
 This is a volunteer project. There is no fixed response time.
 

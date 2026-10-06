@@ -4,9 +4,11 @@
 
 Auto-stop is off by default. When it is on, ColimaBar stops the VM after it is idle for the time that you select. This frees the CPU and memory that the VM uses.
 
+Auto-stop stops the VM of the selected [profile](usage.md#profiles) only.
+
 ## Turn on auto-stop
 
-1. Open the dashboard and click the System tab.
+1. Open the dashboard and click the System tab. The System tab shows only while Colima runs.
 2. Select **Stop Colima when idle**.
 3. Select the idle time: 5, 15, 30 or 60 minutes. The default is 30 minutes.
 

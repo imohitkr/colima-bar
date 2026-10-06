@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1040" height="470" viewBox="0 0 1040 470" role="img" aria-labelledby="t d">
 <title id="t">Docker routes to the ColimaBar socket</title>
-<desc id="d">Each kind of docker client reaches one stable socket through its own route. While ColimaBar runs, the socket is the auto-start proxy. When ColimaBar quits, the socket is a symlink to the Colima socket.</desc>
+<desc id="d">Each kind of docker client reaches the ColimaBar socket through its own route. ColimaBar sets the routes when it starts and each time the VM starts. While ColimaBar runs, the socket is the auto-start proxy. When ColimaBar quits, the socket is a symlink to the Colima socket.</desc>
 
 <style>
   :root {
@@ -24,7 +24,7 @@
   .h { font-size: 12px; font-weight: 600; letter-spacing: .06em; fill: var(--muted); }
   .b { font-size: 14px; font-weight: 600; }
   .s { font-size: 12px; fill: var(--muted); }
-  .xs { font-size: 11px; fill: var(--muted); }
+  .xs { font-size: 12px; fill: var(--muted); }
   .card { fill: var(--bg); stroke: var(--edge); }
   .panel { fill: var(--panel); stroke: var(--stroke); }
   .box { fill: var(--box); stroke: var(--stroke); }
@@ -42,7 +42,7 @@
   .life { stroke: var(--stroke); stroke-width: 1.5; stroke-dasharray: 4 5; }
   .gate { fill: var(--amber-bg); stroke: var(--amber); stroke-dasharray: 5 4; }
   .num { fill: var(--accent); }
-  .numt { fill: #ffffff; font-size: 11px; font-weight: 700; }
+  .numt { fill: #ffffff; font-size: 12px; font-weight: 700; }
 </style>
 <defs>
   <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -55,7 +55,7 @@
 
 <rect class="card" x="0.5" y="0.5" width="1039" height="469" rx="14"/>
 <text class="title" x="32" y="46" text-anchor="start">Docker routes</text>
-<text class="sub" x="32" y="68" text-anchor="start">Every client reaches one stable socket. ColimaBar sets each route when it starts.</text>
+<text class="sub" x="32" y="68" text-anchor="start">Every client reaches the ColimaBar socket. ColimaBar sets the routes when it starts and each time the VM starts.</text>
 <text class="h" x="32" y="112" text-anchor="start">CLIENT</text>
 <text class="h" x="262" y="112" text-anchor="start">ROUTE</text>
 <rect class="box" x="32" y="126" width="196" height="44" rx="10"/>
@@ -91,7 +91,7 @@
 <text class="xs" x="380" y="367" text-anchor="middle">you add it (optional)</text>
 <text class="xs" x="380" y="429" text-anchor="middle">optional, needs admin</text>
 <rect class="key" x="564" y="220" width="176" height="100" rx="10"/>
-<text class="b" x="652.0" y="259.0" text-anchor="middle">Stable socket</text>
+<text class="b" x="652.0" y="259.0" text-anchor="middle">ColimaBar socket</text>
 <text class="xs mono" x="652.0" y="275.0" text-anchor="middle">~/.cache/colima-bar/</text>
 <text class="xs mono" x="652.0" y="291.0" text-anchor="middle">docker.sock</text>
 <rect class="vm" x="870" y="220" width="138" height="100" rx="10"/>

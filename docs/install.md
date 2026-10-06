@@ -2,6 +2,8 @@
 
 [Docs index](README.md)
 
+This page tells you how to install, verify, build and update ColimaBar.
+
 ## Requirements
 
 - A Mac with Apple silicon
@@ -20,25 +22,12 @@ The installer does these steps:
 
 1. It checks that the Mac has Apple silicon and macOS 14 or later.
 2. It downloads `ColimaBar.zip` from the latest release.
-3. It verifies the download, if it can (see below).
+3. It verifies the download, if it can. See [Verify a download](#verify-a-download).
 4. It quits a running ColimaBar.
 5. It installs ColimaBar in `/Applications`. If it cannot write to `/Applications`, it uses `~/Applications`. If ColimaBar is already installed, it replaces that copy in the same folder and removes a copy in the other folder.
 6. It opens ColimaBar.
 
 macOS does not show the "Apple could not verify" prompt for this download. If Colima is not installed, the installer tells you how to install it.
-
-### Download verification
-
-If the [GitHub CLI](https://cli.github.com) (`gh`) 2.49 or later is installed and logged in to github.com, the installer verifies the download before it installs it. The check makes sure that the release workflow of this repository built the file from the release tag.
-
-- If the check fails, the installer stops.
-- If `gh` cannot do the check, the installer tells you that it did not verify the download. Then it continues.
-
-To stop in that second case too, set `COLIMABAR_REQUIRE_VERIFY=1`:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_REQUIRE_VERIFY=1 bash
-```
 
 ### Install a specific release
 
@@ -58,7 +47,7 @@ Apple does not notarize ColimaBar. Thus the first launch shows "Apple could not 
 
 1. Click **Done**.
 2. Open **System Settings > Privacy & Security**.
-3. Next to "ColimaBar was blocked", click **Open Anyway**.
+3. Scroll down. Next to "ColimaBar was blocked", click **Open Anyway**.
 4. Enter your password, then click **Open Anyway** again.
 
 As an alternative, remove the quarantine flag in Terminal, then open ColimaBar:
@@ -67,13 +56,26 @@ As an alternative, remove the quarantine flag in Terminal, then open ColimaBar:
 xattr -dr com.apple.quarantine /Applications/ColimaBar.app
 ```
 
-The release also contains [ColimaBar.zip](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.zip). The installer uses this file.
-
 ## Verify a download
 
-GitHub Actions builds each release. It signs a build provenance attestation for `ColimaBar.dmg` and `ColimaBar.zip`.
+GitHub Actions builds each release. It signs a build provenance attestation for `ColimaBar.dmg` and `ColimaBar.zip`. The installer uses [ColimaBar.zip](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.zip).
 
 The app has an ad-hoc code signature. This signature only shows that the app is not damaged. It does not show who built it.
+
+### What the installer checks
+
+If the [GitHub CLI](https://cli.github.com) (`gh`) 2.68 or later is installed and logged in to github.com, the installer verifies the download before it installs it. The check makes sure that the release workflow of this repository built the file from the release tag.
+
+- If the check fails, the installer stops.
+- If `gh` cannot do the check, the installer tells you that it did not verify the download. Then it continues. This occurs when `gh` is missing, older than 2.68 or not logged in.
+
+To stop in that second case too, set `COLIMABAR_REQUIRE_VERIFY=1`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_REQUIRE_VERIFY=1 bash
+```
+
+### Check a file yourself
 
 To check that a file comes from the release workflow of this repository, run this command in the folder of the file:
 
@@ -81,7 +83,7 @@ To check that a file comes from the release workflow of this repository, run thi
 gh attestation verify ColimaBar.dmg --repo imohitkr/colima-bar
 ```
 
-For the zip file, use `ColimaBar.zip` in place of `ColimaBar.dmg`. You cannot verify releases from before v0.4.0 this way, because they have no attestation.
+For the zip file, use `ColimaBar.zip` in place of `ColimaBar.dmg`. You cannot verify releases from before v0.4.0 this way, because they have no attestation. If a release file fails this check, report it as described in [SECURITY.md](../SECURITY.md).
 
 ## Build from source
 
@@ -97,7 +99,7 @@ To list all targets, run `make` with no target. The Make targets call `./build.s
 
 ## After you install
 
-The first time you open ColimaBar from an Applications folder, it turns on the login item. ColimaBar then starts when you log in.
+ColimaBar turns on its login item the first time you open it from an Applications folder. See [The login item](usage.md#the-login-item).
 
 The docker CLI needs no setup. If your `~/.zshrc` sets `DOCKER_HOST`, replace that line with the [shell snippet](auto-start.md#shell-setup).
 

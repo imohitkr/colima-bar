@@ -1,6 +1,9 @@
 ColimaBar
 =========
 
+Requirements: a Mac with Apple silicon, macOS 14 or later, and Colima.
+To install Colima, run: brew install colima docker
+
 1. Drag ColimaBar into the Applications folder.
 2. Open ColimaBar from Applications.
 
@@ -23,8 +26,6 @@ command in Terminal:
 
     curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | bash
 
-Requirements: a Mac with Apple silicon, macOS 14 or later, and Colima.
-To install Colima, run: brew install colima docker
 More information: https://github.com/imohitkr/colima-bar
 
 ColimaBar is an independent project. It is not part of Colima, and the

@@ -24,7 +24,7 @@
   .h { font-size: 12px; font-weight: 600; letter-spacing: .06em; fill: var(--muted); }
   .b { font-size: 14px; font-weight: 600; }
   .s { font-size: 12px; fill: var(--muted); }
-  .xs { font-size: 11px; fill: var(--muted); }
+  .xs { font-size: 12px; fill: var(--muted); }
   .card { fill: var(--bg); stroke: var(--edge); }
   .panel { fill: var(--panel); stroke: var(--stroke); }
   .box { fill: var(--box); stroke: var(--stroke); }
@@ -42,7 +42,7 @@
   .life { stroke: var(--stroke); stroke-width: 1.5; stroke-dasharray: 4 5; }
   .gate { fill: var(--amber-bg); stroke: var(--amber); stroke-dasharray: 5 4; }
   .num { fill: var(--accent); }
-  .numt { fill: #ffffff; font-size: 11px; font-weight: 700; }
+  .numt { fill: #ffffff; font-size: 12px; font-weight: 700; }
 </style>
 <defs>
   <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">

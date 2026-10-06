@@ -86,16 +86,7 @@ Each source file holds one type, or one type and its small private helpers. The 
 
 ## Report a bug
 
-Open a [bug report](https://github.com/imohitkr/colima-bar/issues/new/choose). Include this information:
-
-- The macOS version.
-- The ColimaBar version. The dashboard footer and the right-click menu show it.
-- The output of `colima version`.
-- The runtime and the profile, if it is not `default`.
-- The steps that cause the problem, what you expected and what happened.
-- The relevant lines from `~/.cache/colima-bar/ctl.log`. This file contains the output of VM actions.
-
-Remove secrets, tokens and private host names from logs before you post them.
+Open a [bug report](https://github.com/imohitkr/colima-bar/issues/new?template=bug_report.yml). [Troubleshooting](docs/troubleshooting.md#report-a-bug) lists the information to include.
 
 ## Pull requests
 

@@ -24,7 +24,7 @@
   .h { font-size: 12px; font-weight: 600; letter-spacing: .06em; fill: var(--muted); }
   .b { font-size: 14px; font-weight: 600; }
   .s { font-size: 12px; fill: var(--muted); }
-  .xs { font-size: 11px; fill: var(--muted); }
+  .xs { font-size: 12px; fill: var(--muted); }
   .card { fill: var(--bg); stroke: var(--edge); }
   .panel { fill: var(--panel); stroke: var(--stroke); }
   .box { fill: var(--box); stroke: var(--stroke); }
@@ -42,7 +42,7 @@
   .life { stroke: var(--stroke); stroke-width: 1.5; stroke-dasharray: 4 5; }
   .gate { fill: var(--amber-bg); stroke: var(--amber); stroke-dasharray: 5 4; }
   .num { fill: var(--accent); }
-  .numt { fill: #ffffff; font-size: 11px; font-weight: 700; }
+  .numt { fill: #ffffff; font-size: 12px; font-weight: 700; }
 </style>
 <defs>
   <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -102,8 +102,8 @@
 <path class="ctl" d="M560,392 L598,392" marker-end="url(#ac)"/>
 <rect class="tool" x="830" y="356" width="178" height="72" rx="10"/>
 <text class="b" x="919.0" y="381.0" text-anchor="middle">colima CLI</text>
-<text class="xs" x="919.0" y="397.0" text-anchor="middle">list · status · start</text>
-<text class="xs" x="919.0" y="413.0" text-anchor="middle">colima-ctl.sh actions</text>
+<text class="xs" x="919.0" y="397.0" text-anchor="middle">list · status</text>
+<text class="xs" x="919.0" y="413.0" text-anchor="middle">actions via colima-ctl.sh</text>
 <path class="ctl" d="M766,392 L828,392" marker-end="url(#ac)"/>
 <rect class="box" x="600" y="446" width="166" height="72" rx="10"/>
 <text class="b" x="683.0" y="479.0" text-anchor="middle">Routing</text>

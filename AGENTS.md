@@ -5,7 +5,7 @@ This file guides AI coding agents that work on this repository. Human contributo
 ## Overview
 
 ColimaBar is a native macOS menu bar app for [Colima](https://github.com/abiosoft/colima). It shows the VM and its containers in a dashboard.
-Its proxy socket starts the VM when the first real docker request arrives (auto-start). It can stop an idle VM (auto-stop).
+Its proxy socket (`~/.cache/colima-bar/docker.sock`) starts the VM when the first real docker request arrives (auto-start). It can stop an idle VM (auto-stop).
 It uses Swift 6.4 and SwiftPM, in the Swift 6 language mode, with Command Line Tools only. It runs on Apple silicon with macOS 14 or later. It has no third-party dependencies.
 
 ## Commands
@@ -35,16 +35,7 @@ User guides live in `docs/`. `README.md` is a short summary for users.
 
 ## Invariants
 
-Do not break these rules.
-
-- **Fixed popover size.** The popover is 480 x 640 points (`AppDelegate.popoverSize`). In `ColimaModel`, assign a property only when its value changes. Otherwise the popover jitters and SwiftUI redraws too much.
-- **Proxy socket.** The path is `~/.cache/colima-bar/docker.sock` (`Paths.proxySocket`). The socket has mode `0600`. The directory has mode `0700`. Do not change the path or relax the modes.
-- **Quit behavior.** On quit, or when auto-start is off, the socket path becomes a symlink to the Colima socket (`SocketProxy.stop()`). Docker clients must keep working without ColimaBar.
-- **`colima-ctl.sh`.** The app bundle contains it in `Contents/Resources`. Exit code 0 means done. Exit code 1 means failed (the script already notified the user). Exit code 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
-- **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
-- **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
-- **Readiness gate after a wake.** An open socket does not mean Docker is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
-- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy socket, the docker routes or the login item.
+Do not break the rules in [ARCHITECTURE.md](ARCHITECTURE.md#invariants). In short: a fixed popover size, a fixed proxy socket path and modes, working clients after quit, fixed `colima-ctl.sh` exit codes, a plain LaunchAgent login item, the log `since` format, the readiness gate after a wake, and debug runs that change nothing.
 
 ## Tests
 

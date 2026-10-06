@@ -2,47 +2,13 @@
 
 [Docs index](README.md)
 
-Auto-start is on by default. While Colima is stopped, the first real docker request starts the VM. The request then continues. A cold `docker run` takes about 15 seconds.
+Auto-start is on by default. All docker clients use the ColimaBar socket (`~/.cache/colima-bar/docker.sock`). While Colima is stopped, the first real docker request to this socket starts the VM. The request then continues. A cold `docker run` takes about 15 seconds.
 
-To turn auto-start off or on, use **Start Colima when something uses docker** on the System tab, or **Auto-start Colima on Demand** in the right-click menu.
+Auto-start starts the VM of the selected [profile](usage.md#profiles) only.
 
-## How docker clients reach Colima
+A ping (`/_ping`) does not start the VM. ColimaBar answers it, so idle pollers do not start the VM. ColimaBar can answer a ping only after it reached the Docker daemon one time. Thus on a fresh install, the first ping can start the VM. To learn how the socket works, read [ARCHITECTURE.md](../ARCHITECTURE.md#auto-start-proxy).
 
-All docker clients use one stable socket path: `~/.cache/colima-bar/docker.sock`. When ColimaBar starts, it sets these routes to that path:
-
-<p align="center">
-  <img src="assets/docker-routes.svg" width="900" alt="Each docker client reaches the stable socket through its own route. While ColimaBar runs, the socket is the proxy. When ColimaBar quits, it is a symlink to the Colima socket.">
-</p>
-
-| Client | Route |
-|---|---|
-| Terminal `docker` | The docker context `colimabar`. The docker CLI uses it when `DOCKER_HOST` is not set. |
-| Other tools that read docker contexts, and most GUIs | The docker context `colimabar`. |
-| IDE test runners and apps that you open from the Dock or Finder | `DOCKER_HOST`, set with `launchctl setenv`. |
-| testcontainers (Java, Go) | `docker.host` in `~/.testcontainers.properties`. |
-| Scripts and shells that read only `DOCKER_HOST` | The [shell snippet](#shell-setup) in your `~/.zshrc`. |
-| Tools that only try `/var/run/docker.sock` | An optional symlink. To create it, click **Link (admin)** on the System tab. |
-
-The System tab shows a check mark next to each route that is set.
-
-ColimaBar does not change a route that points to a different daemon, for example a remote docker context or a custom testcontainers `docker.host`.
-
-The stable socket reaches the selected [profile](usage.md#profiles). Auto-start starts the VM of that profile.
-
-## What the socket does
-
-While ColimaBar runs, the stable socket is a proxy:
-
-- If the VM is up, the proxy copies all bytes to and from the Colima socket. Thus attach, exec, builds and log streams work.
-- If the VM is down, the proxy answers the docker `/_ping` check itself. Thus idle pollers do not start the VM. The first real request starts Colima. When Docker is ready, the request continues on the same connection.
-
-## When ColimaBar quits
-
-When ColimaBar quits, the stable socket becomes a symlink to the Colima socket. All clients continue to work, but auto-start stops. Colima and your containers continue to run.
-
-You do not need to change the routes back. When ColimaBar starts again, auto-start starts again.
-
-If you turn off auto-start, the stable socket also becomes a symlink to the Colima socket.
+To turn auto-start off or on, use **Start Colima when something uses docker** on the System tab, or **Auto-start Colima on Demand** in the right-click menu. The System tab shows only while Colima runs. While Colima is stopped, use the right-click menu.
 
 ## Shell setup
 
@@ -59,7 +25,7 @@ else
 fi
 ```
 
-The snippet uses the Colima socket if the stable path is missing. For a single `export DOCKER_HOST=…` line, click the copy button in the dashboard footer.
+The snippet uses the Colima socket if the ColimaBar socket is missing. For a single `export DOCKER_HOST=…` line, click the copy button in the dashboard footer.
 
 ## IDEs
 
@@ -67,6 +33,45 @@ Restart any IDE that was open when ColimaBar ran for the first time. The IDE rea
 
 ## The /var/run/docker.sock link
 
-Some tools only look at `/var/run/docker.sock`, for example the Python docker SDK without `DOCKER_HOST`. For these tools, click **Link (admin)** on the System tab. ColimaBar asks for your admin password one time. Then it creates `/var/run/docker.sock` as a symlink to the stable socket.
+Some tools only look at `/var/run/docker.sock`, for example the Python docker SDK without `DOCKER_HOST`. For these tools, click **Link (admin)** on the System tab. ColimaBar asks for your admin password one time. Then it creates `/var/run/docker.sock` as a symlink to the ColimaBar socket.
 
 ColimaBar does not replace a real socket at that path, for example the socket of Docker Desktop.
+
+## When ColimaBar quits
+
+When ColimaBar quits, the ColimaBar socket becomes a symlink to the Colima socket. All clients continue to work, but auto-start stops. Colima and your containers continue to run.
+
+You do not need to change the routes back. When ColimaBar starts again, auto-start starts again.
+
+If you turn off auto-start, the ColimaBar socket also becomes a symlink to the Colima socket.
+
+## When auto-start does not start the VM
+
+Auto-start does not start the VM in these cases:
+
+- The selected profile uses the containerd runtime. This runtime has no Docker daemon.
+- The selected profile is not `default`, and you deleted it. ColimaBar sends the notification "Profile NAME doesn't exist, so it wasn't started."
+
+If the start fails, the docker client gets an error. See [Auto-start fails](troubleshooting.md#auto-start-fails).
+
+## How docker clients reach Colima
+
+ColimaBar sets a route for each kind of docker client:
+
+<p align="center">
+  <img src="assets/docker-routes.svg" width="900" alt="Each docker client reaches the ColimaBar socket through its own route. While ColimaBar runs, the socket is the proxy. When ColimaBar quits, it is a symlink to the Colima socket.">
+</p>
+
+| Client | Route |
+|---|---|
+| docker CLI | The docker context `colimabar`. The docker CLI uses it when `DOCKER_HOST` is not set. Most GUIs and other tools that read docker contexts also use it. |
+| IDEs and Dock apps | `DOCKER_HOST`, set with `launchctl setenv`. Apps that you open from the Dock or Finder get it, for example IDE test runners. |
+| testcontainers | `docker.host` in `~/.testcontainers.properties`. |
+| Scripts and shells | The [shell snippet](#shell-setup) in your `~/.zshrc`, for tools that read only `DOCKER_HOST`. |
+| Tools that use /var/run | An optional symlink. See [The /var/run/docker.sock link](#the-varrundockersock-link). |
+
+ColimaBar sets these routes when it starts. It sets them again each time the VM starts, because `colima start` switches the docker context back to `colima`. The System tab shows a check mark next to each route that is set.
+
+With the launchd `DOCKER_HOST`, ColimaBar also sets `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` with `launchctl setenv`. testcontainers mounts this path into its Ryuk container, and the path exists inside the VM. This setting applies to all apps that you open from the Dock or Finder.
+
+ColimaBar does not change a route that points to a different daemon, for example a remote docker context or a custom testcontainers `docker.host`.
