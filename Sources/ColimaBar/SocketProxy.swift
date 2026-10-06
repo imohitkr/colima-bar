@@ -24,18 +24,35 @@ enum UnixSocket {
         return true
     }
 
+    /// Binds at `path.tmp`, then renames it over `path`. The rename is atomic,
+    /// so clients never see a moment with no socket (or a dead one) at `path`.
     static func listen(_ path: String) throws -> Int32 {
-        unlink(path)
+        let tmp = path + ".tmp"
+        unlink(tmp)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
-        guard fd >= 0, var addr = address(path) else { throw ProxyError.socket(errno) }
+        guard fd >= 0, var addr = address(tmp) else { throw ProxyError.socket(errno) }
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) == 0
             }
         }
-        guard bound, Darwin.listen(fd, 64) == 0 else { close(fd); throw ProxyError.socket(errno) }
-        chmod(path, 0o600)
+        guard bound, chmod(tmp, 0o600) == 0, Darwin.listen(fd, 128) == 0, rename(tmp, path) == 0 else {
+            let err = errno
+            close(fd)
+            unlink(tmp)
+            throw ProxyError.socket(err)
+        }
         return fd
+    }
+
+    /// Creates the socket's directory. ColimaBar's own cache directory is
+    /// also made private to this user (0700); any other directory (tests) is
+    /// left as it is.
+    static func makePrivateDir(_ dir: String) {
+        let own = (dir as NSString).standardizingPath == (Paths.cacheDir as NSString).standardizingPath
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true,
+                                                 attributes: own ? [.posixPermissions: 0o700] : nil)
+        if own { chmod(dir, 0o700) }
     }
 
     static func configure(_ fd: Int32, timeout: Int) {
@@ -98,9 +115,14 @@ final class SocketProxy: @unchecked Sendable {
     private var waking = false
     private var waiters: [DispatchSemaphore] = []
     private var wakeOK = false
+    private var conns: [Int: (opened: Date, lastIO: Date)] = [:]
+    private var nextConn = 0
 
-    /// Starts Colima and returns once its socket answers (or false on failure).
+    /// Starts Colima and returns once Docker is ready (or false on failure).
     var wake: @Sendable () async -> Bool = { false }
+
+    /// How long a request waits for a wake. wake() must finish well inside it.
+    static let waitBudget: TimeInterval = 15 * 60
 
     /// Where the stable socket lives (injectable for tests).
     let path: String
@@ -129,8 +151,7 @@ final class SocketProxy: @unchecked Sendable {
 
     func start() {
         guard !isRunning else { return }
-        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
-                                                 withIntermediateDirectories: true)
+        UnixSocket.makePrivateDir((path as NSString).deletingLastPathComponent)
         do {
             let fd = try UnixSocket.listen(path)
             lock.withLock { listenFD = fd }
@@ -153,11 +174,16 @@ final class SocketProxy: @unchecked Sendable {
         linkStable(to: upstream)
     }
 
+    /// Atomically replaces `path` with a symlink to `target` (symlink at a
+    /// temporary name, then rename), so clients never hit ENOENT in between.
     func linkStable(to target: String) {
-        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent,
-                                                 withIntermediateDirectories: true)
-        unlink(path)
-        symlink(target, path)
+        UnixSocket.makePrivateDir((path as NSString).deletingLastPathComponent)
+        let tmp = path + ".lnk"
+        unlink(tmp)
+        if symlink(target, tmp) != 0 || rename(tmp, path) != 0 {
+            log.error("couldn't link \(self.path, privacy: .public): errno \(errno)")
+            unlink(tmp)
+        }
     }
 
     // MARK: - Connections
@@ -166,8 +192,15 @@ final class SocketProxy: @unchecked Sendable {
         while true {
             let client = accept(fd, nil, nil)
             if client < 0 {
-                if errno == EINTR { continue }
-                return   // listening socket closed by stop()
+                let err = errno
+                // stop() closed (or replaced) the listening socket: we're done.
+                if lock.withLock({ listenFD != fd }) { return }
+                if err == EINTR || err == ECONNABORTED { continue }
+                // Out of fds (EMFILE/ENFILE) or similar: back off and keep
+                // serving instead of leaving a socket nobody accepts on.
+                log.error("proxy accept failed: errno \(err)")
+                usleep(100_000)
+                continue
             }
             UnixSocket.configure(client, timeout: 0)
             Thread.detachNewThread { [weak self] in self?.serve(client) }
@@ -176,7 +209,10 @@ final class SocketProxy: @unchecked Sendable {
 
     private func serve(_ client: Int32) {
         // Fast path: VM up, splice straight through without parsing anything.
-        if let up = UnixSocket.connect(upstream) {
+        // Not while a wake runs: Lima's ssh tunnel accepts connections seconds
+        // before dockerd and containerd are stable, so requests must wait for
+        // the readiness check in wake() like the one that triggered it.
+        if !lock.withLock({ waking }), let up = UnixSocket.connect(upstream) {
             splice(client, up, initial: Data())
             return
         }
@@ -194,7 +230,10 @@ final class SocketProxy: @unchecked Sendable {
                 .components(separatedBy: "\r\n").first ?? ""
             if let reply = pingReply(requestLine) {
                 // VM may have come up meanwhile; prefer the real daemon.
-                if let up = UnixSocket.connect(upstream) { splice(client, up, initial: pending); return }
+                if !lock.withLock({ waking }), let up = UnixSocket.connect(upstream) {
+                    splice(client, up, initial: pending)
+                    return
+                }
                 guard UnixSocket.writeAll(client, reply) else { close(client); return }
                 pending.removeSubrange(..<head.upperBound)
                 continue
@@ -210,6 +249,21 @@ final class SocketProxy: @unchecked Sendable {
             }
             return
         }
+    }
+
+    /// Proxied connections that look like real work rather than polling:
+    /// open for at least `minAge` and moving bytes within `recent`. A
+    /// `docker build`, `pull` or `push` streams progress the whole time; a
+    /// poller's short requests and an idle `docker events` stream don't count.
+    /// Auto-stop treats any of these as "not idle".
+    func activeTransfers(now: Date = Date(), minAge: TimeInterval = 30, recent: TimeInterval = 120) -> Int {
+        lock.withLock {
+            conns.values.filter { now.timeIntervalSince($0.opened) >= minAge && now.timeIntervalSince($0.lastIO) <= recent }.count
+        }
+    }
+
+    private func touch(_ id: Int) {
+        lock.withLock { conns[id]?.lastIO = Date() }
     }
 
     /// A locally generated /_ping response, or nil if this request isn't a
@@ -248,7 +302,9 @@ final class SocketProxy: @unchecked Sendable {
                 ws.forEach { $0.signal() }
             }
         }
-        guard sem.wait(timeout: .now() + 300) == .success else { return false }
+        // Longer than wake()'s own budget (start + readiness), so a slow start
+        // is reported by wake() instead of a 503 while the VM still boots.
+        guard sem.wait(timeout: .now() + Self.waitBudget) == .success else { return false }
         return lock.withLock { wakeOK }
     }
 
@@ -258,22 +314,36 @@ final class SocketProxy: @unchecked Sendable {
         if !initial.isEmpty, !UnixSocket.writeAll(upstream, initial) {
             close(client); close(upstream); return
         }
+        let id = lock.withLock { () -> Int in
+            nextConn += 1
+            conns[nextConn] = (Date(), Date())
+            return nextConn
+        }
+        defer { lock.withLock { conns[id] = nil } }
         let done = DispatchSemaphore(value: 0)
-        Thread.detachNewThread {
-            Self.copy(from: upstream, to: client)
+        Thread.detachNewThread { [self] in
+            copy(from: upstream, to: client, conn: id)
+            // The daemon is done (response sent, container exited or daemon
+            // died): unblock the other thread's read(client), or an idle
+            // keep-alive client would hold 2 threads and 2 fds indefinitely.
+            shutdown(client, SHUT_RD)
             done.signal()
         }
-        Self.copy(from: client, to: upstream)
+        copy(from: client, to: upstream, conn: id)
         done.wait()
         close(client)
         close(upstream)
     }
 
-    private static func copy(from src: Int32, to dst: Int32) {
+    private func copy(from src: Int32, to dst: Int32, conn: Int) {
         var buf = [UInt8](repeating: 0, count: 65536)
+        var lastTouch = Date.distantPast
         while true {
             let n = read(src, &buf, buf.count)
+            if n < 0, errno == EINTR { continue }
             if n <= 0 { break }
+            let now = Date()
+            if now.timeIntervalSince(lastTouch) >= 1 { touch(conn); lastTouch = now }
             var off = 0
             while off < n {
                 let w = buf.withUnsafeBytes { write(dst, $0.baseAddress! + off, n - off) }

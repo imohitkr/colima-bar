@@ -174,6 +174,14 @@ struct FooterView: View {
             IconButton("doc.text", Help.config) { model.ctl("config") }
             IconButton("list.bullet.rectangle", Help.log) { model.ctl("logs") }
             Spacer()
+            if let r = Updater.shared.available {
+                Button { Updater.shared.openReleasePage() } label: {
+                    Label("Update \(r.version)", systemImage: "arrow.down.circle.fill")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.borderless).foregroundStyle(Color.accentColor)
+                .hint(Help.update(r.version))
+            }
             if !inWindow {
                 IconButton("macwindow", Help.window) { openWindow() }
             }
@@ -185,7 +193,7 @@ struct FooterView: View {
 }
 
 struct StoppedView: View {
-    let model: ColimaModel
+    @Bindable var model: ColimaModel
 
     var body: some View {
         VStack(spacing: 14) {
@@ -207,6 +215,11 @@ struct StoppedView: View {
                 }
                 .controlSize(.large).buttonStyle(.borderedProminent)
                 .disabled(model.busy != nil)
+                // Reachable while stopped: the System tab only shows while running.
+                Toggle("Hide menu bar icon while Colima is stopped", isOn: $model.hideIconWhenStopped)
+                    .toggleStyle(.checkbox).controlSize(.small)
+                    .hint(Help.hideIcon)
+                    .padding(.top, 6)
             }
             Spacer()
         }
@@ -266,9 +279,11 @@ struct LiveTiles: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Containers").font(.caption).foregroundStyle(.secondary)
                 Text("\(model.running.count)").font(.title2.weight(.semibold)).monospacedDigit()
-                Text("\(model.stopped.count) stopped").font(.caption2).foregroundStyle(.secondary)
+                // One line either way, so the tile never grows past its height.
                 if unhealthy > 0 {
-                    Text("\(unhealthy) unhealthy").font(.caption2).foregroundStyle(.red)
+                    Text("\(unhealthy) unhealthy").font(.caption2).foregroundStyle(.red).lineLimit(1)
+                } else {
+                    Text("\(model.stopped.count) stopped").font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                 }
             }
             .frame(width: 92, height: 72, alignment: .topLeading)

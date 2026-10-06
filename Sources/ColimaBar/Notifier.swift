@@ -18,8 +18,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private static let viewLogs = "VIEW_LOGS"
     private static let restart = "RESTART"
 
-    /// Called with (action, containerID, containerName) when a button is used.
-    var onContainerAction: ((String, String, String) -> Void)?
+    /// Called with (action, containerID, containerName, profile) when a button is used.
+    var onContainerAction: ((String, String, String, String?) -> Void)?
     /// Called for every alert, delivered or not.
     var onAlert: ((String, String, (id: String, name: String)?) -> Void)?
     /// Called with whether macOS currently allows ColimaBar's notifications.
@@ -37,7 +37,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         ])
     }
 
-    func post(_ body: String, title: String = "Colima", container: (id: String, name: String)? = nil) {
+    func post(_ body: String, title: String = "Colima", container: (id: String, name: String)? = nil,
+              profile: String? = nil) {
         onAlert?(title, body, container)
         Task {
             guard await authorized() else { return }
@@ -47,7 +48,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             content.sound = container == nil ? nil : .default
             if let container {
                 content.categoryIdentifier = Self.containerCategory
-                content.userInfo = ["id": container.id, "name": container.name]
+                content.userInfo = ["id": container.id, "name": container.name, "profile": profile ?? ""]
                 content.threadIdentifier = container.name
             }
             let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
@@ -116,11 +117,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let action = response.actionIdentifier
         let id = info["id"] as? String ?? ""
         let name = info["name"] as? String ?? ""
+        let profile = (info["profile"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         Task { @MainActor in
             if !id.isEmpty {
                 // Clicking the banner itself also opens the logs.
                 let a = action == UNNotificationDefaultActionIdentifier ? Self.viewLogs : action
-                self.onContainerAction?(a, id, name)
+                self.onContainerAction?(a, id, name, profile)
             }
             done()
         }

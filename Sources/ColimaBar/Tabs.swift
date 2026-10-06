@@ -10,9 +10,6 @@ struct ContainersTab: View {
     var body: some View {
         let groups = grouped
         VStack(alignment: .leading, spacing: 6) {
-            if !model.alerts.isEmpty || !model.notificationsAllowed {
-                AlertsStrip(model: model)
-            }
             if groups.isEmpty {
                 Empty(text: model.containers.isEmpty ? "No containers" : "No matches")
             }
@@ -35,6 +32,11 @@ struct ContainersTab: View {
                         ContainerRow(model: model, c: c, stat: model.stats[c.id])
                     }
                 }
+            }
+            // Below the list: a new alert must not push the rows you're
+            // reading down.
+            if !model.alerts.isEmpty || !model.notificationsAllowed {
+                AlertsStrip(model: model).padding(.top, 6)
             }
         }
     }
@@ -133,7 +135,8 @@ struct ContainerRow: View {
             Circle().fill(dot).frame(width: 7, height: 7)
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
-                    Text(c.name).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    // Middle truncation keeps suffixes like "-1" visible.
+                    Text(c.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
                     if let h = c.health {
                         Text(h == "health: starting" ? "starting" : h)
                             .font(.system(size: 9, weight: .medium))
@@ -147,7 +150,8 @@ struct ContainerRow: View {
                     .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            ForEach(c.ports.prefix(3), id: \.self) { p in
+            // One port inline leaves room for the name; all ports are in the ••• menu.
+            ForEach(c.ports.prefix(1), id: \.self) { p in
                 Button(String(p)) { model.open(port: p) }
                     .buttonStyle(.plain)
                     .font(.system(size: 10, weight: .medium).monospacedDigit())
@@ -331,7 +335,23 @@ final class SystemForm {
     var cpu = 0
     var mem = 0
     var loginEnabled = LoginItem.isEnabled
+    var loginNeedsApproval = LoginItem.needsApproval
     var linking = false
+    var customIdle = false        // "Custom" picked in the auto-stop picker
+    var customMinutes = ""
+}
+
+/// Auto-stop timeout choices. `custom` is the picker tag for "Custom".
+enum IdleMinutes {
+    static let presets = [5, 15, 30, 60]
+    static let custom = -1
+    static let range = 1...1440
+
+    /// Minutes typed in the custom field, or nil if not a whole number in range.
+    static func parse(_ s: String) -> Int? {
+        guard let n = Int(s.trimmingCharacters(in: .whitespaces)), range.contains(n) else { return nil }
+        return n
+    }
 }
 
 struct SystemTab: View {
@@ -460,21 +480,33 @@ struct SystemTab: View {
             }
             .padding(.leading, 4)
             .opacity(model.autoStart ? 1 : 0.5)
-            HStack {
-                Toggle(isOn: $model.autoStop) {
-                    Label("Stop Colima when idle", systemImage: "moon.zzz")
-                }
-                .hint(Help.autoStop)
-                Spacer()
-                Picker("", selection: $model.autoStopMinutes) {
-                    Text("15 min").tag(15)
-                    Text("30 min").tag(30)
-                    Text("60 min").tag(60)
-                }
-                .pickerStyle(.segmented).labelsHidden().frame(width: 190)
-                .disabled(!model.autoStop)
-                .hint(Help.autoStopMinutes)
+            Toggle(isOn: $model.autoStop) {
+                Label("Stop Colima when idle", systemImage: "moon.zzz")
             }
+            .hint(Help.autoStop)
+            HStack(spacing: 8) {
+                Picker("", selection: idleSelection) {
+                    ForEach(IdleMinutes.presets, id: \.self) { Text("\($0) min").tag($0) }
+                    Text("Custom").tag(IdleMinutes.custom)
+                }
+                .pickerStyle(.segmented).labelsHidden().frame(width: 300)
+                .hint(Help.autoStopMinutes)
+                if idleSelection.wrappedValue == IdleMinutes.custom {
+                    TextField("min", text: $form.customMinutes)
+                        .textFieldStyle(.roundedBorder).frame(width: 52)
+                        .multilineTextAlignment(.trailing)
+                        .onSubmit(applyCustomIdle)
+                        .hint(Help.autoStopCustom)
+                    Text("min").font(.caption).foregroundStyle(.secondary)
+                    Button("Set", action: applyCustomIdle)
+                        .controlSize(.small)
+                        .disabled(IdleMinutes.parse(form.customMinutes) == nil
+                                  || IdleMinutes.parse(form.customMinutes) == model.autoStopMinutes)
+                }
+                Spacer(minLength: 0)
+            }
+            .disabled(!model.autoStop)
+            .padding(.leading, 22)
             if model.autoStop, let since = model.idleSince {
                 Text("Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(since.addingTimeInterval(Double(model.autoStopMinutes * 60)).formatted(date: .omitted, time: .shortened)).")
                     .font(.caption2).foregroundStyle(.secondary)
@@ -504,17 +536,28 @@ struct SystemTab: View {
 
             Divider()
             SectionHeader(title: "App")
+            Toggle("Check for new versions daily", isOn: Binding(
+                get: { Updater.shared.enabled }, set: { Updater.shared.enabled = $0 }))
+                .hint(Help.checkUpdates)
             Toggle("Notify when a container crashes, OOMs or turns unhealthy", isOn: $model.notifyOnCrash)
                 .hint(Help.notify)
-            Toggle("Launch ColimaBar at login", isOn: Binding(get: { form.loginEnabled }, set: { on in
+            Toggle("Launch ColimaBar at login", isOn: Binding(get: { form.loginEnabled || form.loginNeedsApproval }, set: { on in
                 do {
                     try LoginItem.set(on)
                 } catch {
                     model.notify("Login item change failed: \(error.localizedDescription)")
                 }
                 form.loginEnabled = LoginItem.isEnabled
+                form.loginNeedsApproval = LoginItem.needsApproval
             }))
             .hint(Help.login)
+            if form.loginNeedsApproval {
+                HStack(spacing: 6) {
+                    Text("Waiting for your approval in System Settings > Login Items.")
+                        .font(.caption2).foregroundStyle(.orange)
+                    Button("Open") { SMAppService.openSystemSettingsLoginItems() }.controlSize(.mini)
+                }
+            }
         }
         .toggleStyle(.switch).controlSize(.small)
         .onAppear { syncPickers() }
@@ -534,6 +577,32 @@ struct SystemTab: View {
         form.cpu = model.vm.cpus
         form.mem = model.vm.memGB
         form.loginEnabled = LoginItem.isEnabled
+        form.loginNeedsApproval = LoginItem.needsApproval
+        if !IdleMinutes.presets.contains(model.autoStopMinutes) {
+            form.customIdle = true
+            form.customMinutes = "\(model.autoStopMinutes)"
+        }
+    }
+
+    /// A preset's minutes, or IdleMinutes.custom while the custom field shows.
+    private var idleSelection: Binding<Int> {
+        Binding(
+            get: { form.customIdle || !IdleMinutes.presets.contains(model.autoStopMinutes)
+                ? IdleMinutes.custom : model.autoStopMinutes },
+            set: { v in
+                if v == IdleMinutes.custom {
+                    form.customIdle = true
+                    if form.customMinutes.isEmpty { form.customMinutes = "\(model.autoStopMinutes)" }
+                } else {
+                    form.customIdle = false
+                    model.autoStopMinutes = v
+                }
+            })
+    }
+
+    private func applyCustomIdle() {
+        guard let n = IdleMinutes.parse(form.customMinutes) else { return }
+        model.autoStopMinutes = n
     }
 }
 

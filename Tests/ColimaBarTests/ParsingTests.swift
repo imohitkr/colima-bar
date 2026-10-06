@@ -120,3 +120,22 @@ import Testing
         #expect(LogStore.clock("garbage") == "")
     }
 }
+
+@Suite struct LogSinceTests {
+    @Test @MainActor func convertsRFC3339ToUnixNanosPlusOne() {
+        #expect(LogStore.sinceParam("1970-01-01T00:00:10.000000005Z") == "10.000000006")
+        #expect(LogStore.sinceParam("1970-01-01T00:00:10.5Z") == "10.500000001")
+    }
+
+    @Test @MainActor func carriesIntoSeconds() {
+        #expect(LogStore.sinceParam("1970-01-01T00:00:10.999999999Z") == "11.000000000")
+    }
+
+    @Test @MainActor func handlesMissingFraction() {
+        #expect(LogStore.sinceParam("1970-01-01T00:01:00Z") == "60.000000001")
+    }
+
+    @Test @MainActor func rejectsGarbage() {
+        #expect(LogStore.sinceParam("nope") == nil)
+    }
+}
