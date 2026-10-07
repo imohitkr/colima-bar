@@ -7,6 +7,8 @@ enum Defaults {
     enum Key: String, CaseIterable {
         case profile
         case notifyOnCrash
+        /// Keep the logs of removed containers that fail (`RemovedLogKeeper`).
+        case keepRemovedLogs
         case autoStart
         case autoStop
         case autoStopMinutes

@@ -6,6 +6,7 @@ extension ColimaModel {
         let rawValue: Int
         static let containers = EventReaction(rawValue: 1)  // reload the container list
         static let disk = EventReaction(rawValue: 2)  // df, images and volumes are stale
+        static let savedLogs = EventReaction(rawValue: 4)  // RemovedLogKeeper needs it
     }
 
     /// The events that `handle` reacts to, by type and action. The /events
@@ -14,9 +15,10 @@ extension ColimaModel {
     /// (several per second with many containers) never wake the app.
     nonisolated static let eventReactions: [String: [String: EventReaction]] = [
         "container": [
-            "create": [.containers, .disk], "destroy": [.containers, .disk], "prune": [.containers, .disk],
-            "start": .containers, "restart": .containers, "die": .containers, "kill": .containers,
-            "stop": .containers, "oom": .containers, "pause": .containers, "unpause": .containers,
+            "create": [.containers, .disk], "destroy": [.containers, .disk, .savedLogs],
+            "prune": [.containers, .disk], "start": [.containers, .savedLogs], "restart": .containers,
+            "die": [.containers, .savedLogs], "kill": .containers, "stop": .containers,
+            "oom": [.containers, .savedLogs], "pause": .containers, "unpause": .containers,
             "rename": .containers, "health_status": .containers,
             // An untagged `docker commit` sends only this event.
             "commit": .disk,

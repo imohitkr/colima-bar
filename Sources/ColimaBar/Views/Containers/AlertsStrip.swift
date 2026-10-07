@@ -2,7 +2,8 @@ import SwiftUI
 
 /// Recent alerts (crash, OOM, unhealthy, failed actions), so nothing is
 /// missed even with notifications off. Buttons work only while the container
-/// still exists.
+/// still exists. For a removed container, "View logs" shows the lines that
+/// `RemovedLogKeeper` saved, while it holds them.
 struct AlertsStrip: View {
     @Bindable var model: ColimaModel
 
@@ -25,6 +26,7 @@ struct AlertsStrip: View {
                 }
                 ForEach(model.alerts.prefix(5)) { a in
                     let ctr = a.containerID.flatMap { model.container(withID: $0) }
+                    let savedID = ctr == nil ? a.containerID.flatMap { model.savedLogIDs.contains($0) ? $0 : nil } : nil
                     HStack(spacing: 6) {
                         Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange).font(.caption)
                         VStack(alignment: .leading, spacing: 0) {
@@ -32,6 +34,7 @@ struct AlertsStrip: View {
                             Text(
                                 a.date.formatted(date: .omitted, time: .shortened)
                                     + (a.containerID != nil && ctr == nil ? " · container removed" : "")
+                                    + (savedID != nil ? ", logs saved" : "")
                             )
                             .font(.system(size: 10)).foregroundStyle(.secondary)
                         }
@@ -39,6 +42,9 @@ struct AlertsStrip: View {
                         if let ctr {
                             IconButton("text.alignleft", Help.logs) { model.openLogs(id: ctr.id, name: ctr.name) }
                             IconButton("arrow.clockwise", Help.ctrRestart) { model.container(ctr.id, .restart) }
+                        } else if let savedID {
+                            // The title of a container alert is the container name.
+                            IconButton("text.alignleft", Help.savedLogs) { model.openLogs(id: savedID, name: a.title) }
                         }
                     }
                     .padding(.vertical, 3).padding(.horizontal, 6)

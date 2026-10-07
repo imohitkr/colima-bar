@@ -134,6 +134,10 @@ enum Help {
     }
     static let notify =
         "Send an alert when a container exits with an error, runs out of memory or fails its healthcheck. ColimaBar ignores testcontainers containers. Failed actions always send an alert."
+    static let keepRemovedLogs =
+        "Docker deletes a container started with --rm and its logs when it exits. With this on, ColimaBar keeps the last 500 lines of such a container in memory. If the container fails, View logs on its alert shows them for 5 minutes. It works only while crash notifications are on."
+    static let savedLogs =
+        "Open the last lines that ColimaBar saved before Docker removed this container. ColimaBar keeps them for 5 minutes."
     static let login =
         "Start ColimaBar when you log in. If it crashes, start it again immediately. Thus the ColimaBar socket continues to work."
 

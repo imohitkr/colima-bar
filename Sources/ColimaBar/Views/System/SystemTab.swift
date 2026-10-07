@@ -245,6 +245,9 @@ struct SystemTab: View {
             .hint(Help.checkUpdates)
             Toggle("Notify when a container crashes, OOMs or turns unhealthy", isOn: $model.notifyOnCrash)
                 .hint(Help.notify)
+            Toggle("Keep logs of removed containers that fail", isOn: $model.keepRemovedLogs)
+                .disabled(!model.notifyOnCrash)
+                .hint(Help.keepRemovedLogs)
             Toggle(
                 "Launch ColimaBar at login",
                 isOn: Binding(

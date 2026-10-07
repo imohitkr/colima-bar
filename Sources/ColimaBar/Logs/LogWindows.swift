@@ -7,13 +7,18 @@ final class LogWindows: NSObject, NSWindowDelegate {
     static let shared = LogWindows()
     private var windows: [String: (NSWindow, LogStore)] = [:]
 
-    func open(api: DockerAPI, id: String, name: String, openInTerminal: @escaping () -> Void) {
+    /// `savedLines` gives the lines that `RemovedLogKeeper` saved. The window
+    /// shows them only if the container is gone.
+    func open(
+        api: DockerAPI, id: String, name: String, savedLines: (@MainActor () -> [LogLine]?)? = nil,
+        openInTerminal: @escaping () -> Void
+    ) {
         if let (w, _) = windows[id] {
             NSApp.activate()
             w.makeKeyAndOrderFront(nil)
             return
         }
-        let store = LogStore(api: api, containerID: id, name: name)
+        let store = LogStore(api: api, containerID: id, name: name, savedLines: savedLines)
         let w = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 560),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],

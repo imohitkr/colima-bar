@@ -44,6 +44,8 @@ The live tiles show the total CPU and memory of all containers as a share of the
 
 Each container gets a live log window. It has search, follow, timestamps, a stderr filter and copy. The window stays open when the container restarts.
 
+If Docker removed the container, the window shows the lines that ColimaBar saved, if any. See [Saved logs](#saved-logs).
+
 ### Images and Volumes tabs
 
 These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, and remove unused volumes. ColimaBar asks before it deletes volume data.
@@ -56,7 +58,7 @@ These tabs show sizes and the items that containers use. You can pull the latest
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
 - **Profiles**: shown only when you have more than one profile.
-- **App**: the daily update check, crash notifications and **Launch ColimaBar at login**.
+- **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail** and **Launch ColimaBar at login**.
 
 ### Footer
 
@@ -118,6 +120,28 @@ ColimaBar sends no notification for a normal start or stop. Exit codes 130, 137 
 The Containers tab also lists recent alerts. If notifications are off for ColimaBar, the alerts show only there. To turn them on, click **Enable…**, or open **System Settings > Notifications > ColimaBar** and turn on **Allow Notifications**.
 
 To stop the container alerts, clear **Notify when a container crashes, OOMs or turns unhealthy** on the System tab. Failed actions always send an alert.
+
+### Saved logs
+
+Docker removes a container that `docker run --rm` or `docker compose run --rm` started when it exits. Its logs go with it. Thus **View logs** on its crash alert finds nothing.
+
+To keep these logs, turn on **Keep logs of removed containers that fail** on the System tab. This option is off by default. It works only while the crash alerts are on.
+
+When the option is on, ColimaBar does this:
+
+- When a container starts with auto-remove, ColimaBar reads its log stream. It keeps the newest 500 lines in memory. It never writes them to disk.
+- If the container fails, ColimaBar keeps the lines for 5 minutes. A failure is the same as for the crash alert: an exit code other than 0, 130, 137 and 143, or an OOM kill.
+- If the container stops normally, ColimaBar drops the lines at once.
+- **View logs** on the alert, and the log button in the recent alerts list, open the saved lines. The log window shows **Saved from a removed container**. If the container still exists, the window shows its live logs.
+
+The option has these limits:
+
+- It applies only to containers that start after you turn it on.
+- It applies only to the selected profile. When you switch the profile, ColimaBar drops the saved lines.
+- It keeps lines for at most 50 containers and 25 MB of text. When the limit is reached, ColimaBar drops the oldest saved lines first. If no lines are saved, a new container gets no buffer.
+- It ignores testcontainers containers, because they send no alert.
+
+When you turn the option off, ColimaBar closes the log streams and drops all saved lines.
 
 ## Profiles
 

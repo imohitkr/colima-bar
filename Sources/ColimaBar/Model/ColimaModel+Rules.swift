@@ -47,4 +47,12 @@ extension ColimaModel {
     }
 
     nonisolated static let projectConcurrency = 8
+
+    /// True when the exit code of a `die` event is a failure. Then the crash
+    /// alert goes out, and `RemovedLogKeeper` keeps the logs. No code, 0 and
+    /// the codes in `ignoredExitCodes` are a normal stop.
+    nonisolated static func isCrashExit(_ code: String?) -> Bool {
+        guard let code else { return false }
+        return !ignoredExitCodes.contains(code)
+    }
 }

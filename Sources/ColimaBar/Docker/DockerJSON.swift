@@ -109,3 +109,16 @@ struct DockerEvent: Decodable {
     let Action: String?
     let Actor: Actor?
 }
+
+/// The part of `GET /containers/{id}/json` that `RemovedLogKeeper` reads.
+struct APIInspect: Decodable {
+    struct Host: Decodable {
+        /// True for `docker run --rm`: Docker removes the container when it exits.
+        let AutoRemove: Bool?
+    }
+    struct Cfg: Decodable {
+        let Tty: Bool?
+    }
+    let HostConfig: Host?
+    let Config: Cfg?
+}

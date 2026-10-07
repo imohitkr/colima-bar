@@ -105,4 +105,10 @@ import Testing
         #expect(ColimaModel.showsDiskUsage(.volumes))
         #expect(ColimaModel.showsDiskUsage(.system))
     }
+
+    @Test func crashExitMatchesTheAlertRule() {
+        for code in ["1", "2", "125", "139", "255"] { #expect(ColimaModel.isCrashExit(code), "\(code)") }
+        for code in ["0", "130", "137", "143"] { #expect(!ColimaModel.isCrashExit(code), "\(code)") }
+        #expect(!ColimaModel.isCrashExit(nil))
+    }
 }

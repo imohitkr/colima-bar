@@ -37,6 +37,29 @@ Set `COLIMABAR_VERSION` to the release tag. The installer supports v0.4.0 and la
 curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_VERSION=v0.4.0 bash
 ```
 
+## Homebrew
+
+Run this command in Terminal:
+
+```sh
+brew install --cask imohitkr/tap/colima-bar
+```
+
+The cask comes from the [imohitkr/homebrew-tap](https://github.com/imohitkr/homebrew-tap) repository. Homebrew installs ColimaBar in `/Applications`. A workflow in the tap verifies the attestation of each new release before it updates the cask. See [Verify a download](#verify-a-download).
+
+Apple does not notarize ColimaBar. Thus macOS blocks the first launch after you install or upgrade ColimaBar. To allow it, do the steps in [The disk image](#the-disk-image), or remove the quarantine flag:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/ColimaBar.app
+```
+
+To upgrade, run `brew upgrade --cask colima-bar`.
+
+`brew uninstall` cannot restore your docker settings. To uninstall, do these steps in this order:
+
+1. Choose **Uninstall ColimaBar…** in the right-click menu. If your version does not have this menu item, run `/Applications/ColimaBar.app/Contents/Resources/uninstall.sh`. See [Uninstall ColimaBar](uninstall.md).
+2. Run `brew uninstall --cask colima-bar`.
+
 ## The disk image
 
 1. Download [ColimaBar.dmg](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.dmg).
@@ -111,6 +134,8 @@ ColimaBar checks GitHub for a new release one time each day. When a new version 
 - It shows an **Update** button in the dashboard footer. The button opens the release page.
 
 To update, run [the installer](#the-installer-recommended) again. The installer quits ColimaBar, replaces the app in the same folder and opens it again.
+
+If you use Homebrew, run `brew upgrade --cask colima-bar`.
 
 If you use the disk image, download it again and replace the app in Applications.
 

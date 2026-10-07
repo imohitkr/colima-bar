@@ -1,5 +1,6 @@
 import AppKit
 import Observation
+import SwiftUI
 
 /// Live log state for one container. Bytes arrive on a background thread,
 /// are parsed there, and published to the UI four times a second at most.
@@ -29,12 +30,25 @@ final class LogStore {
         case live
         /// The stream is down: why, and what happens next.
         case down(String)
+        /// The container is gone. The window shows the lines that
+        /// `RemovedLogKeeper` saved, and it does not reconnect.
+        case saved
 
         var text: String {
             switch self {
             case .connecting: "Connecting…"
             case .live: "Live"
             case .down(let message): message
+            case .saved: "Saved from a removed container"
+            }
+        }
+
+        /// The color of the dot next to the text.
+        var color: Color {
+            switch self {
+            case .live: .green
+            case .saved: .blue
+            case .connecting, .down: .orange
             }
         }
     }
@@ -49,14 +63,18 @@ final class LogStore {
     @ObservationIgnored private var lastStart: Date?
     /// Bytes of text in `lines`.
     @ObservationIgnored private var textBytes = 0
+    /// The saved lines of a removed container, if any. Read only when the
+    /// daemon says that the container is gone.
+    @ObservationIgnored private let savedLines: (@MainActor () -> [LogLine]?)?
     let maxLines: Int
     let maxBytes: Int
 
     init(
         api: DockerAPI, containerID: String, name: String, maxLines: Int = LogLimits.maxLines,
-        maxBytes: Int = LogLimits.maxBytes
+        maxBytes: Int = LogLimits.maxBytes, savedLines: (@MainActor () -> [LogLine]?)? = nil
     ) {
         self.api = api
+        self.savedLines = savedLines
         self.containerID = containerID
         self.name = name
         self.maxLines = maxLines
@@ -127,7 +145,14 @@ final class LogStore {
             return
         }
         if r.status == 404 {
-            status = .down("This container has been removed, so its logs are gone.")
+            // Docker removed the container. Show the saved lines, but only in
+            // an empty window: a window with live lines already has them.
+            if lines.isEmpty, let saved = savedLines?() {
+                ingest(saved)
+                status = .saved
+            } else {
+                status = .down("This container has been removed, so its logs are gone.")
+            }
             return
         }
         guard r.ok, let j = try? JSONSerialization.jsonObject(with: r.body) as? [String: Any],

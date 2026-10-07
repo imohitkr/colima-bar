@@ -114,7 +114,7 @@ private struct LogFooter: View {
 
     var body: some View {
         HStack {
-            Circle().fill(store.status == .live ? Color.green : .orange).frame(width: 6, height: 6)
+            Circle().fill(store.status.color).frame(width: 6, height: 6)
             Text(store.status.text)
             Spacer()
             Text("\(store.visible.count) of \(store.lines.count) lines").monospacedDigit()

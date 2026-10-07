@@ -35,7 +35,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 `ColimaModel` is the `@Observable` single source of truth for the dashboard, auto-start and auto-stop. It runs the heartbeat, starts the VM for the proxy (`wakeForProxy()`) and checks for idle time (`checkIdle()`).
 
 - `ColimaModel+Rules`: static rules, for example when to hide the icon and how often the heartbeat runs.
-- `ColimaModel+Events`: which `/events` messages cause which refresh.
+- `ColimaModel+Events`: which `/events` messages cause which refresh, and which ones go to `RemovedLogKeeper`.
 - `ColimaModel+StartDetection`: finds a `colima start` that already runs, so ColimaBar does not start a second one.
 - `CtlAction`: the actions of `colima-ctl.sh`.
 - `DFGate`: allows one `/system/df` call at a time.
@@ -64,7 +64,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 ### `Logs/`
 
-The log windows. `LogStore` holds the live state for one container. `LogDemuxer` splits the stdout and stderr frames of Docker. `LogLine` is one line with its time, text and stream. `LogTime` parses the Docker timestamps fast, off the main thread. `LogFilter`, `LogBuffer`, `LogTrim` and `LogTail` filter and limit the lines. `LogLimits` holds the limits and timings of a log window. `LogView` and `LogWindows` show the lines.
+The log windows. `LogStore` holds the live state for one container. If the container is gone, it shows the lines that `RemovedLogKeeper` saved. `LogDemuxer` splits the stdout and stderr frames of Docker. `LogLine` is one line with its time, text and stream. `LogTime` parses the Docker timestamps fast, off the main thread. `LogFilter`, `LogBuffer`, `LogTrim` and `LogTail` filter and limit the lines. `LogLimits` holds the limits and timings of a log window. `LogView` and `LogWindows` show the lines. `RemovedLogKeeper` keeps the newest lines of auto-remove containers (`docker run --rm`) while the option is on, and keeps them for 5 minutes after a failure. `RemovedLogRing` is the buffer of one container: the stream thread parses the lines into it.
 
 ### `Views/`
 
@@ -154,6 +154,15 @@ ColimaBar does not use `SMAppService`. launchd ties an `SMAppService` agent to t
 
 Notifications go out for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Exit codes 0, 130, 137 and 143 are a normal stop (`ColimaModel.ignoredExitCodes`). Containers with the label `org.testcontainers=true` do not send alerts. Two other notifications go out once: one for each new version, and one the first time the icon hides. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
 
+**Saved logs.** Docker removes an auto-remove container (`docker run --rm`) and its logs right after it dies. While the option is on (`Defaults.Key.keepRemovedLogs`, off by default) and crash alerts are on, `RemovedLogKeeper` does this for the selected profile:
+
+1. On a `start` event, it inspects the container. If `HostConfig.AutoRemove` is true, it opens one log stream (`follow=1`, `tail=100`).
+2. The stream thread parses the lines into a `RemovedLogRing`. The main actor does no work for each line.
+3. On `die` with a crash exit code (`ColimaModel.isCrashExit`, the same rule as the alert) or after `oom`, it keeps the lines for 5 minutes. A clean exit, or a `destroy` without a failure, drops them. It closes the stream at most 2 seconds after `die`.
+4. "View logs" calls `ColimaModel.openLogs`. `LogStore` inspects the container. If the daemon answers 404, the window shows the saved lines with the status "Saved from a removed container" and does not reconnect. Otherwise it shows live logs.
+
+The buffers are not observed. The model publishes only `savedLogIDs`, the set of kept containers, for the alerts list. A profile switch, or turning the option off, drops all buffers.
+
 ### Update check
 
 `Updater` asks the GitHub releases API one time each day. It builds the release link from the tag and accepts only release pages of this repository.
@@ -167,12 +176,13 @@ When the dashboard is closed, the app idles at about 0% CPU. These limits keep m
 | Open file limit | 8192 (launchd starts apps with 256) | `FileLimit`, login item plist |
 | Lines in a log window | 20,000 lines and 32 MB of text | `LogLimits` |
 | Rendered log lines | the newest 2,000; copy and filter use all lines | `LogTail` |
+| Saved logs of removed containers | 500 lines and 512 KB for each container, 50 containers, 5 minutes after a failure | `RemovedLogKeeper` |
 | Proxy request head | 64 KB, then HTTP 431 | `SocketProxy.maxHead` |
 | Proxy copy buffer | 16 KB for each direction | `SocketProxy.bufferSize` |
 | Idle client while the VM is down | closed after 5 minutes | `SocketProxy.idleTimeout` |
 | `ctl.log` | starts again after 1 MB | `Shell` |
 
-Live stats stream only while a dashboard is on screen. `/system/df` runs only for the tabs that show it. Graphs use SwiftUI `Shape`, not Swift Charts, because Swift Charts uses a lot of graphics memory.
+Live stats stream only while a dashboard is on screen. Saved-log streams open only while the option is on, one for each running auto-remove container. `/system/df` runs only for the tabs that show it. Graphs use SwiftUI `Shape`, not Swift Charts, because Swift Charts uses a lot of graphics memory.
 
 ### Debug runs
 

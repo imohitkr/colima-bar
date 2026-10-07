@@ -55,8 +55,24 @@ final class ColimaModel {
         }
     }
     var notifyOnCrash = Defaults.bool(.notifyOnCrash) ?? true {
-        didSet { Defaults.set(notifyOnCrash, .notifyOnCrash) }
+        didSet {
+            guard notifyOnCrash != oldValue else { return }
+            Defaults.set(notifyOnCrash, .notifyOnCrash)
+            syncKeeper()
+        }
     }
+    /// Keep the logs of removed containers that fail. It works only while
+    /// crash alerts are on, because the alert opens the saved lines.
+    var keepRemovedLogs = Defaults.bool(.keepRemovedLogs) ?? false {
+        didSet {
+            guard keepRemovedLogs != oldValue else { return }
+            Defaults.set(keepRemovedLogs, .keepRemovedLogs)
+            syncKeeper()
+        }
+    }
+    /// The removed containers whose last lines `keeper` holds. The alerts
+    /// strip reads it. It changes only when a buffer is kept or dropped.
+    private(set) var savedLogIDs: Set<String> = []
     var autoStart = Defaults.bool(.autoStart) ?? true {
         didSet {
             guard autoStart != oldValue else { return }
@@ -157,6 +173,8 @@ final class ColimaModel {
     @ObservationIgnored private var statusOrder = LatestOnly()
     @ObservationIgnored private var isConfirmingAutoStop = false  // an auto-stop check runs a fresh list
     @ObservationIgnored private var localBusy: String?  // VM action launched here, marker not written yet
+    // Not observed: its buffers change with each log line.
+    @ObservationIgnored private let keeper: RemovedLogKeeper
     private let historyLen = 60
 
     /// The dashboard keeps at most this many alerts.
@@ -174,13 +192,22 @@ final class ColimaModel {
     static let readinessInterval: Duration = .milliseconds(500)
     /// Exit codes of a normal stop: no crash alert for them. 130 is SIGINT,
     /// 137 SIGKILL and 143 SIGTERM.
-    static let ignoredExitCodes: Set<String> = ["0", "130", "137", "143"]
+    nonisolated static let ignoredExitCodes: Set<String> = ["0", "130", "137", "143"]
 
     init() {
         let p = Defaults.string(.profile) ?? "default"
-        api = DockerAPI(socketPath: Paths.socket(p))
+        let client = DockerAPI(socketPath: Paths.socket(p))
+        api = client
+        keeper = RemovedLogKeeper(api: client)
         proxy = SocketProxy(upstream: Paths.socket(p))
         proxy.apiVersion = Defaults.string(.apiVersion)
+        keeper.onChange = { [weak self] ids in self?.set(\.savedLogIDs, ids) }
+        syncKeeper()
+    }
+
+    /// The keeper opens streams only while both settings are on.
+    private func syncKeeper() {
+        keeper.isEnabled = keepRemovedLogs && notifyOnCrash
     }
 
     func start(debug: Bool = false) {
@@ -417,6 +444,7 @@ final class ColimaModel {
         statStreams = [:]
         latest = [:]
         api = DockerAPI(socketPath: Paths.socket(profile))
+        keeper.reset(api: api)  // saved logs belong to the old profile
         proxy.upstream = Paths.socket(profile)
         vm = VMInfo()
         state = .unknown
@@ -763,13 +791,16 @@ final class ColimaModel {
             let ctr = ContainerRef(id: id, name: name)
             if action == "oom" {
                 Notifier.shared.post("Killed: out of memory", title: name, container: ctr, profile: profile)
-            } else if action == "die", let code = attrs["exitCode"], !Self.ignoredExitCodes.contains(code) {
+            } else if action == "die", let code = attrs["exitCode"], Self.isCrashExit(code) {
                 Notifier.shared.post("Exited with code \(code)", title: name, container: ctr, profile: profile)
             } else if action == "health_status: unhealthy" {
                 Notifier.shared.post("Healthcheck is failing", title: name, container: ctr, profile: profile)
             }
         }
         let reaction = Self.reaction(type: ev.Type ?? "", action: action)
+        if reaction.contains(.savedLogs), let id = ev.Actor?.ID {
+            keeper.event(action: action, id: id, attributes: attrs)
+        }
         if reaction.contains(.disk) { diskDirty = true }
         guard !reaction.isEmpty else { return }
         if reaction.contains(.containers) { reloadPending = true }
@@ -874,9 +905,14 @@ final class ColimaModel {
         }
     }
 
+    /// Opens the log window. If the container is gone and `keeper` saved
+    /// its last lines, the window shows them instead of live logs.
     func openLogs(id: String, name: String, profile p: String? = nil) {
         let target = p ?? profile
-        LogWindows.shared.open(api: api(for: target), id: id, name: name) { [weak self] in
+        let keeper = self.keeper
+        let saved: (@MainActor () -> [LogLine]?)? =
+            target == profile ? { @MainActor [weak keeper] in keeper?.saved(id) } : nil
+        LogWindows.shared.open(api: api(for: target), id: id, name: name, savedLines: saved) { [weak self] in
             self?.terminal(.containerLogs, name, profile: target)
         }
     }

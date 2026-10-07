@@ -125,6 +125,41 @@ import Testing
         #expect(store.visible.count == 3)
     }
 
+    /// A daemon that answers 404 to every request: the container is gone.
+    private func goneDaemon() throws -> FakeDaemon {
+        let d = FakeDaemon(path: TestSocketPath.unique()) { _ in (404, Data(#"{"message":"No such container"}"#.utf8)) }
+        try d.start()
+        return d
+    }
+
+    @Test func removedContainerShowsTheSavedLines() async throws {
+        let d = try goneDaemon()
+        defer { d.stop() }
+        let saved = [
+            LogLine(id: 0, time: "10:00:00.000", text: "starting", isStderr: false),
+            LogLine(id: 1, time: "10:00:01.000", text: "panic: boom", isStderr: true),
+        ]
+        let s = LogStore(api: DockerAPI(socketPath: d.path), containerID: "c", name: "n", savedLines: { saved })
+        s.start()
+        defer { s.stop() }
+        #expect(await waitUntil { s.status == .saved })
+        #expect(s.lines.map(\.text) == ["starting", "panic: boom"])
+        #expect(s.status.text == "Saved from a removed container")
+        // Only the inspect call: a saved window does not request logs.
+        #expect(d.seen.count == 1)
+    }
+
+    @Test func removedContainerWithoutSavedLinesSaysTheLogsAreGone() async throws {
+        let d = try goneDaemon()
+        defer { d.stop() }
+        let s = LogStore(api: DockerAPI(socketPath: d.path), containerID: "c", name: "n", savedLines: { nil })
+        s.start()
+        defer { s.stop() }
+        #expect(await waitUntil { s.status != .connecting })
+        #expect(s.status == .down("This container has been removed, so its logs are gone."))
+        #expect(s.lines.isEmpty)
+    }
+
     @Test @MainActor func trimsInBatches() {
         let store = LogStore(api: DockerAPI(socketPath: "/nonexistent"), containerID: "c", name: "n", maxLines: 100)
         let b = LogBuffer(cap: 10_000)

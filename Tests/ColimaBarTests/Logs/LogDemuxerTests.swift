@@ -4,12 +4,7 @@ import Testing
 @testable import ColimaBar
 
 @Suite struct LogDemuxerTests {
-    private func frame(_ stream: UInt8, _ s: String) -> Data {
-        let payload = Data(s.utf8)
-        let n = UInt32(payload.count)
-        return Data([stream, 0, 0, 0, UInt8(n >> 24), UInt8(n >> 16 & 0xff), UInt8(n >> 8 & 0xff), UInt8(n & 0xff)])
-            + payload
-    }
+    private func frame(_ stream: UInt8, _ s: String) -> Data { LogFrame.make(stream, s) }
 
     private let max = LogDemuxer.maxLineBytes
 
