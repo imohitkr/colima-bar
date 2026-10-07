@@ -17,10 +17,15 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 - The docs have a new structure. The README is short. The user guides are in `docs/`. `ARCHITECTURE.md` describes the design, and `SUPPORT.md` tells you how to get help.
 
+### Removed
+
+- The old SwiftBar plugin (`legacy/swiftbar`).
+
 ### Fixed
 
 - The installer no longer stops when `gh` 2.49 to 2.67 is installed. It needs `gh` 2.68 or later to verify the download. With an older `gh`, it prints a notice and continues.
 - ColimaBar now finds iTerm in `~/Applications`. Before, it used Terminal.
+- CI no longer fails on timing benchmarks. They run only with `make perf`.
 - Test builds with the Command Line Tools no longer fail now and then with "plugin for module 'TestingMacros' not found".
 
 ## [0.4.0] - 2026-10-06

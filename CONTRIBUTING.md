@@ -17,6 +17,7 @@ All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md). To repor
 |---|---|
 | `make build` | Builds `build/ColimaBar.app` with SwiftPM and signs it ad-hoc (`./build.sh`). |
 | `make test` | Runs the test suite (`swift test`). |
+| `make perf` | Runs the tests and the timing benchmarks (`PERF=1`). |
 | `make lint` | Checks the Swift format with `swift format lint --strict`, the shell scripts with ShellCheck and the workflows with actionlint. |
 | `make fmt` | Formats the Swift code in place with `swift format`. |
 | `make check` | Runs `make lint`, then `make test`. |
@@ -73,7 +74,7 @@ Each source file holds one type, or one type and its small private helpers. The 
 - Keep UI state in the `@Observable` `ColimaModel`. Assign a property only when its value changes. This keeps the popover still and the redraws small.
 - Write tests with [Swift Testing](https://developer.apple.com/documentation/testing) (`@Suite`, `@Test`, `#expect`). Do not use XCTest.
 - Keep logic in small static functions that tests can call without a VM.
-- Do not make tests depend on exact timing. If a test must measure time, use a generous bound.
+- Do not make tests depend on exact timing. Put wall-clock bounds in a benchmark test marked `@Test(.benchmark)`. CI does not run benchmarks; run them with `make perf`.
 - Name each test file `<TypeOrFeature>Tests.swift`, with one file and one suite for each unit. Give the suite the same name as the file.
 - Put shared fakes and helpers in `Tests/ColimaBarTests/TestSupport/`. Do not copy them into test files. Get each test socket path from `TestSocketPath.unique()`.
 - If a test must wait for a condition, poll it with `waitUntil`. Do not use a fixed sleep before a check.

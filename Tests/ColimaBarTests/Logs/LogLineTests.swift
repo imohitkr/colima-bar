@@ -19,7 +19,7 @@ import Testing
         #expect(p.line.time == "")
     }
 
-    @Test func twentyThousandLinesParseQuickly() {
+    @Test(.benchmark) func twentyThousandLinesParseQuickly() {
         let raw = (0..<20_000).map { "2026-10-02T14:03:11.\(String(format: "%09d", $0))Z Line \($0) with Some TEXT" }
         var last: Substring?
         let best = bestTime {

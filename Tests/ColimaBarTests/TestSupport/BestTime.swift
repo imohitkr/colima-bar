@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 
 /// Runs `body` `runs` times and returns the shortest duration.
 ///
@@ -12,4 +13,17 @@ func bestTime(runs: Int = 3, _ body: () -> Void) -> Duration {
         best = min(best, ContinuousClock.now - start)
     }
     return best
+}
+
+/// Timing benchmarks assert wall-clock bounds, which shared CI runners
+/// cannot keep. They run only with PERF=1 (`make perf`).
+enum Benchmark {
+    static let isEnabled = ProcessInfo.processInfo.environment["PERF"] != nil
+}
+
+extension Trait where Self == ConditionTrait {
+    /// Marks a timing benchmark; see `Benchmark`.
+    static var benchmark: Self {
+        .enabled(if: Benchmark.isEnabled, "Timing benchmark: run with PERF=1 (make perf)")
+    }
 }

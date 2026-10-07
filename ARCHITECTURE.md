@@ -89,7 +89,6 @@ Small helpers with no app state: `Parse` (for example `colima.yaml` lookup), byt
 | `Tests/ColimaBarTests/` | Swift Testing tests, in the same folders as the sources. `TestSupport/` has the shared fakes and helpers. |
 | `.github/workflows/ci.yml` | CI and the release job. |
 | `.github/actions/setup-swift/` | Installs the Swift.org toolchain with swiftly for the macOS CI jobs. |
-| `legacy/` | The old SwiftBar plugin. The app does not use it. |
 
 ## Cross-cutting concerns
 

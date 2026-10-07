@@ -22,7 +22,7 @@ define run-tool
 endef
 
 .DEFAULT_GOAL := help
-.PHONY: help build test lint fmt install dmg clean check
+.PHONY: help build test perf lint fmt install dmg clean check
 
 help: ## List the targets
 	@grep -E '^[a-z]+:.*## ' Makefile | sed 's/:.*## /	/' | awk -F '	' '{ printf "  %-8s %s\n", $$1, $$2 }'
@@ -32,6 +32,9 @@ build: ## Build build/ColimaBar.app
 
 test: ## Run the test suite
 	swift test
+
+perf: ## Run the tests, including the timing benchmarks
+	PERF=1 swift test
 
 lint: ## Check the Swift format, shell scripts and workflows
 	swift format lint --strict --recursive $(SWIFT_PATHS)
