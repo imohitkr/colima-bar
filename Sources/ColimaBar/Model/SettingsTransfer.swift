@@ -164,22 +164,12 @@ enum SettingsTransfer {
             guard let to = values[s], to != current[s] else { continue }
             if s == .profile, case .string(let name) = to, !profiles.contains(name) {
                 plan.skipped.append(
-                    "Profile: \(name) does not exist on this Mac. To create it, run `colima start --profile \(name)`.")
+                    "Profile: \(name) does not exist on this Mac. To create it, use New Profile… in the profile menu.")
                 continue
             }
             plan.changes.append(Change(setting: s, from: current[s], to: to))
         }
         return plan
-    }
-
-    /// The same rule as colima-ctl.sh: letters, digits, ".", "_" and "-",
-    /// and no "." at the start ("." and ".." point outside the profile folder).
-    static func isValidProfileName(_ s: String) -> Bool {
-        guard let first = s.first, first != "." else { return false }
-        return s.unicodeScalars.allSatisfy {
-            ("a"..."z").contains($0) || ("A"..."Z").contains($0) || ("0"..."9").contains($0)
-                || $0 == "." || $0 == "_" || $0 == "-"
-        }
     }
 
     /// The value if it has the right type and range for `s`, else nil.
@@ -191,7 +181,7 @@ enum SettingsTransfer {
             else { return nil }
             return .int(m)
         case .profile:
-            guard let name = raw as? String, isValidProfileName(name) else { return nil }
+            guard let name = raw as? String, ProfileName.isValid(name) else { return nil }
             return .string(name)
         default:
             guard let n = raw as? NSNumber, isBool(n) else { return nil }

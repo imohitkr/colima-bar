@@ -55,4 +55,28 @@ extension ColimaModel {
         guard let code else { return false }
         return !ignoredExitCodes.contains(code)
     }
+
+    /// Whether the selected profile counts as running, for Delete Profile.
+    /// `listed` is its state in the last `colima list`, nil if the list does
+    /// not show it. Right after a switch the state is unknown: then the list
+    /// decides, and no list entry counts as running.
+    nonisolated static func selectedIsRunning(state: VMState, listed: Bool?) -> Bool {
+        switch state {
+        case .running: true
+        case .unknown: listed ?? true
+        case .stopped, .notInstalled: false
+        }
+    }
+
+    /// After `ProfileContexts.apply` fails, the same wanted set runs again
+    /// only after this time. Each `colima list` would run the docker CLI again.
+    nonisolated static let contextsRetryInterval: TimeInterval = 30 * 60
+
+    /// True if the `colimabar-PROFILE` contexts can be applied for `wanted`
+    /// after the apply for `failed` failed at `failedAt`. A new set runs at once.
+    nonisolated static func contextsRetryDue(
+        wanted: [String: String], failed: [String: String], failedAt: Date, now: Date
+    ) -> Bool {
+        wanted != failed || now.timeIntervalSince(failedAt) >= contextsRetryInterval
+    }
 }

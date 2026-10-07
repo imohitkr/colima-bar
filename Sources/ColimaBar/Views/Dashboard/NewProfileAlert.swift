@@ -10,7 +10,7 @@ enum NewProfileAlert {
         let alert = NSAlert()
         alert.messageText = "New Colima profile"
         alert.informativeText =
-            "ColimaBar creates the profile with colima start and starts its VM. A docker profile gets its own ColimaBar socket and the docker context colimabar-NAME."
+            "ColimaBar creates the profile with colima start and starts its VM. A docker profile gets its own profile socket and the docker context colimabar-NAME."
         let create = alert.addButton(withTitle: "Create")
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
 

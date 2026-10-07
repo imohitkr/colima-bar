@@ -7,14 +7,14 @@ This document describes the high-level design of ColimaBar. Read it before you m
 ColimaBar is a menu bar app for [Colima](https://github.com/abiosoft/colima). It does three jobs:
 
 1. **The dashboard.** It shows the VM and its containers, and runs actions on them.
-2. **Auto-start.** It runs a proxy on a unix socket, the proxy socket. All docker clients use that socket. While the VM is down, the first real docker request starts Colima. Each docker profile also has its own proxy socket, which starts that profile.
+2. **Auto-start.** It runs a proxy on a unix socket, the stable socket. All docker clients use that socket. While the VM is down, the first real docker request starts Colima. Each docker profile also has its own proxy socket, the profile socket, which starts that profile.
 3. **Auto-stop.** It can stop the VM of each running profile after an idle time.
 
 ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
 
 ColimaBar gets its data from three sources:
 
-- **The Docker Engine API on the unix socket** of the selected profile. The docker CLI and Portainer use the same transport. `/events` streams changes. `/containers/{id}/stats?stream=1` streams samples for each container, but only while a dashboard is on screen. `docker stats --no-stream` blocks for about 2 seconds on each call, and the stream does not.
+- **The Docker Engine API on the unix socket** of the selected profile. For auto-stop and for starts, the model also calls the sockets of the other running profiles. The docker CLI and Portainer use the same transport. `/events` streams changes. `/containers/{id}/stats?stream=1` streams samples for each container, but only while a dashboard is on screen. `docker stats --no-stream` blocks for about 2 seconds on each call, and the stream does not.
 - **The `colima` CLI.** Colima has no API. Thus ColimaBar reads VM data from `colima list -j`, and the driver and mount type from `colima status -j`.
 - **`scripts/colima-ctl.sh`.** The app bundle contains this script. VM actions, actions that ask for confirmation and changes to `colima.yaml` go through it. Container start, stop and restart calls go directly to the API.
 
@@ -72,7 +72,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 ### `Logs/`
 
-The log windows. `LogStore` holds the live state for one container. If the container is gone, it shows the lines that `RemovedLogKeeper` saved. `LogDemuxer` splits the stdout and stderr frames of Docker. `LogLine` is one line with its time, text and stream. `LogTime` parses the Docker timestamps fast, off the main thread. `LogFilter`, `LogBuffer`, `LogTrim` and `LogTail` filter and limit the lines. `LogLimits` holds the limits and timings of a log window. `LogView` and `LogWindows` show the lines. `RemovedLogKeeper` keeps the newest lines of auto-remove containers (`docker run --rm`) while the option is on, and keeps them for 5 minutes after a failure. `RemovedLogRing` is the buffer of one container: the stream thread parses the lines into it.
+The log windows. `LogStore` holds the live state for one container. If the container is gone, it shows the lines that `RemovedLogKeeper` saved. `LogDemuxer` splits the stdout and stderr frames of Docker. `LogLine` is one line with its time, text and stream. `LogTime` parses the Docker timestamps fast, off the main thread. `LogFilter`, `LogBuffer`, `LogTrim` and `LogTail` filter and limit the lines. `LogLimits` holds the limits and timings of a log window. `LogView` and `LogWindows` show the lines. `RemovedLogKeeper` keeps the newest lines of auto-remove containers (`docker run --rm`) while the option is on, and keeps them for 5 minutes after a failure. `RemovedLogRing` is the buffer of one container: the stream thread stores the raw log bytes in it. ColimaBar parses them only when a log window opens.
 
 ### `Views/`
 
@@ -102,7 +102,7 @@ Small helpers with no app state: `Parse` (for example `colima.yaml` lookup), byt
 
 ### Auto-start proxy
 
-All docker clients use the proxy socket (`~/.cache/colima-bar/docker.sock`, `Paths.proxySocket`). The user guides call it "the ColimaBar socket". `Routing` points each client at it:
+All docker clients use the stable socket (`~/.cache/colima-bar/docker.sock`, `Paths.proxySocket`). Its path never changes, and it follows the selected profile. The user guides call it "the ColimaBar socket". This document calls it "the stable socket". "The proxy sockets" means the stable socket and all profile sockets. `Routing` points each client at the stable socket:
 
 <p align="center">
   <img src="docs/assets/docker-routes.svg" width="900" alt="Each docker client reaches the ColimaBar socket through its own route. While ColimaBar runs, the socket is the proxy. When ColimaBar quits, it is a symlink to the Colima socket.">
@@ -117,7 +117,7 @@ All docker clients use the proxy socket (`~/.cache/colima-bar/docker.sock`, `Pat
 
 `Routing.apply()` runs when the app starts and each time the VM starts, because `colima start` switches the docker context back to `colima`. `Routing` never changes a route that points to a different daemon.
 
-The proxy upstream is the socket of the selected profile. While the VM is up, the proxy splices bytes in both directions. While the VM is down, it does this:
+The upstream of the stable socket is the Colima socket of the selected profile. While the VM is up, the proxy splices bytes in both directions. While the VM is down, it does this:
 
 <p align="center">
   <img src="docs/assets/auto-start-sequence.svg" width="900" alt="Sequence: the proxy answers a ping itself. A real request calls wakeForProxy, which runs colima start and readiness probes. Then the proxy splices the waiting request on the same connection.">
@@ -157,13 +157,15 @@ ColimaBar runs `colima list -j` only in these cases:
 
 ### Actions and `colima-ctl.sh`
 
-ColimaBar sends the profile in `COLIMABAR_PROFILE`: the selected profile, or the profile of a profile menu action. The script takes a lock for each profile and writes a busy marker while a VM action runs. Its stderr goes to `~/.cache/colima-bar/ctl.log`. Each VM dialog of the script names the profile, for example "Grow the Colima disk of profile 'work' to 120 GB?".
+ColimaBar sends the profile in `COLIMABAR_PROFILE`: the selected profile, or the profile of a profile menu action. The script takes a lock for each profile and writes a busy marker while a VM action runs. Its stderr goes to `~/.cache/colima-bar/ctl.log`. Each VM dialog of the script names the profile, for example "Grow the Colima disk of profile 'work' to 150 GB?".
 
 `with_busy` runs the action in an extra subshell, `( "$@" ) &`. Without it, bash 3.2 (the `/bin/bash` of macOS) can run the first `command colima` of the action with `exec`. Then `restart_vm` ends after `colima status`, and the VM does not restart. A test with stub tools (`ColimaCtlScriptTests`) checks this.
 
-`profile-create CPU MEM DISK [RUNTIME]` runs `colima start` with these values for a new profile. It checks the name with the same rules as `ProfileName.problem`. `profile-delete` asks once more and runs `colima delete --data --force`. The app shows a typed confirmation before it.
+`profile-create CPU MEM DISK [RUNTIME]` runs `colima start` with these values for a new profile. It checks the name with the same rules as `ProfileName.problem`. `profile-delete` refuses the names `colima` and `colima-*`, because Colima maps them to the default profile. It also refuses a profile without a folder. Then it asks once more and runs `colima delete --data --force`. The app shows a typed confirmation before it.
 
-A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
+The script uses the Colima folder that Colima uses: `COLIMA_HOME` if that path exists, `~/.colima` if it exists, else `$XDG_CONFIG_HOME/colima`. The script pins `XDG_CONFIG_HOME` to `~/.config`. It sets `LC_ALL=C`, so its name checks match ASCII only in every locale.
+
+A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
 
 The exit codes are fixed. 0 means done. 1 means failed, and the script already notified the user. 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 
@@ -187,9 +189,9 @@ Notifications go out for failures: a container exits with an error, gets OOM-kil
 **Saved logs.** Docker removes an auto-remove container (`docker run --rm`) and its logs right after it dies. While the option is on (`Defaults.Key.keepRemovedLogs`, off by default) and crash alerts are on, `RemovedLogKeeper` does this for the selected profile:
 
 1. On a `start` event, it inspects the container. If `HostConfig.AutoRemove` is true, it opens one log stream (`follow=1`, `tail=100`).
-2. The stream thread parses the lines into a `RemovedLogRing`. The main actor does no work for each line.
+2. The stream thread stores the raw log bytes in a `RemovedLogRing`, at most 500 lines and 128 KB for each container. Nothing parses them yet. The main actor does no work for each line.
 3. On `die` with a crash exit code (`ColimaModel.isCrashExit`, the same rule as the alert) or after `oom`, it keeps the lines for 5 minutes. A clean exit, or a `destroy` without a failure, drops them. It closes the stream at most 2 seconds after `die`.
-4. "View logs" calls `ColimaModel.openLogs`. `LogStore` inspects the container. If the daemon answers 404, the window shows the saved lines with the status "Saved from a removed container" and does not reconnect. Otherwise it shows live logs.
+4. "View logs" calls `ColimaModel.openLogs`. `LogStore` inspects the container. If the daemon answers 404, ColimaBar parses the saved bytes, and the window shows the lines with the status "Saved from a removed container" and does not reconnect. Otherwise it shows live logs.
 
 The buffers are not observed. The model publishes only `savedLogIDs`, the set of kept containers, for the alerts list. A profile switch, or turning the option off, drops all buffers.
 
@@ -206,7 +208,7 @@ When the dashboard is closed, the app idles at about 0% CPU. These limits keep m
 | Open file limit | 8192 (launchd starts apps with 256) | `FileLimit`, login item plist |
 | Lines in a log window | 20,000 lines and 32 MB of text | `LogLimits` |
 | Rendered log lines | the newest 2,000; copy and filter use all lines | `LogTail` |
-| Saved logs of removed containers | 500 lines and 512 KB for each container, 50 containers, 5 minutes after a failure | `RemovedLogKeeper` |
+| Saved logs of removed containers | 500 lines and 128 KB of raw log data for each container, 50 containers (about 6.4 MB), 5 minutes after a failure | `RemovedLogKeeper` |
 | Proxy request head | 64 KB, then HTTP 431 | `SocketProxy.maxHead` |
 | Proxy copy buffer | 16 KB for each direction | `SocketProxy.bufferSize` |
 | Idle client while the VM is down | closed after 5 minutes | `SocketProxy.idleTimeout` |
@@ -216,20 +218,20 @@ Live stats stream only while a dashboard is on screen. Saved-log streams open on
 
 ### Debug runs
 
-`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy socket, the docker routes or the login item. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 
 Do not break these rules.
 
 - **Fixed popover size.** The popover is 480 x 640 points (`AppDelegate.popoverSize`). In `ColimaModel`, assign a property only when its value changes. Otherwise the popover jitters and SwiftUI redraws too much.
-- **Proxy socket.** The path is `~/.cache/colima-bar/docker.sock` (`Paths.proxySocket`). The profile sockets are `~/.cache/colima-bar/profiles/PROFILE.sock` (`Paths.profileSocket`). Each socket has mode `0600`. Their folders have mode `0700`. Do not change the paths or relax the modes.
+- **Proxy sockets.** The stable socket is `~/.cache/colima-bar/docker.sock` (`Paths.proxySocket`). The profile sockets are `~/.cache/colima-bar/profiles/PROFILE.sock` (`Paths.profileSocket`). Each socket has mode `0600`. Their folders have mode `0700`. Do not change the paths or relax the modes.
 - **Quit behavior.** On quit, or when auto-start is off, the stable socket path becomes a symlink to the Colima socket of the selected profile, and each profile socket path a symlink to the Colima socket of its profile (`SocketProxy.stop()`). Docker clients must keep working without ColimaBar.
 - **Docker contexts.** ColimaBar creates, updates and removes only the `colimabar` context and the `colimabar-PROFILE` contexts whose description starts with "ColimaBar". It never changes other contexts.
 - **`colima-ctl.sh`.** The app bundle contains it in `Contents/Resources`. Exit code 0 means done. Exit code 1 means failed (the script already notified the user). Exit code 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 - **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
-- **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
+- **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends. These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
 - **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item.
 
 ## Testing

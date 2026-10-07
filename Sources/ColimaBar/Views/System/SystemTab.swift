@@ -297,15 +297,18 @@ struct SystemTab: View {
     }
 
     /// The typed confirmation comes first. Only then does colima-ctl.sh run
-    /// (it asks one more time).
+    /// (it asks one more time). The action goes to the profile that the
+    /// confirmation named. If the selected profile changed meanwhile, it stops.
     private func shrinkDisk(to size: Int) {
+        let p = model.profile
         let from = model.vm.diskGB
         guard DiskShrink.isValid(size, current: from),
             ShrinkDiskAlert.confirm(
-                profile: model.profile, from: from, to: size, usage: model.df,
-                kubernetes: model.isKubernetesEnabled)
+                profile: p, from: from, to: size, usage: model.df,
+                kubernetes: model.isKubernetesEnabled),
+            p == model.profile
         else { return }
-        model.run(.diskShrink, "\(size)")
+        model.run(.diskShrink, "\(size)", profile: p)
     }
 
     private func dfHelp(_ type: String) -> String {

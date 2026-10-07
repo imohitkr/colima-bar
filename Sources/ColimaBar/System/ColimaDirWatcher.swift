@@ -1,14 +1,16 @@
 import Foundation
 
 /// Watches the directories that change when any Colima profile starts,
-/// stops, appears or goes away: ~/.config/colima, each profile directory,
-/// Lima's `_lima` directory and each Lima instance directory. Lima creates
+/// stops, appears or goes away: the Colima config folder (`Paths.colimaDir`),
+/// each profile directory, Lima's folder (`Paths.limaDir`) and each Lima
+/// instance directory. Lima creates
 /// and removes ha.sock and ha.pid in the instance directory. Changes that
 /// come close together call `onChange` once. It is called at most once per
 /// `minGap`, and a change is never dropped, only delayed.
 @MainActor
 final class ColimaDirWatcher {
     private let root: String
+    private let lima: String
     private let debounce: Duration
     private let minGap: Duration
     private let onChange: @MainActor () -> Void
@@ -16,12 +18,14 @@ final class ColimaDirWatcher {
     private var pending: Task<Void, Never>?
     private var lastFire: ContinuousClock.Instant?
 
-    /// XDG_CONFIG_HOME is pinned to ~/.config (see Shell), so Colima uses this root.
+    /// `root` is the Colima config folder, `lima` Lima's folder. `lima` is
+    /// nil for the `_lima` folder of `root`.
     init(
-        root: String = "\(Paths.home)/.config/colima", debounce: Duration = .seconds(2),
+        root: String, lima: String? = nil, debounce: Duration = .seconds(2),
         minGap: Duration = .seconds(10), onChange: @escaping @MainActor () -> Void
     ) {
         self.root = root
+        self.lima = lima ?? "\(root)/_lima"
         self.debounce = debounce
         self.minGap = minGap
         self.onChange = onChange
@@ -36,7 +40,8 @@ final class ColimaDirWatcher {
 
     /// The directories to watch that exist now. Names that start with "_"
     /// or "." are Colima's and Lima's own stores, not profiles or instances.
-    nonisolated static func watchPaths(root: String) -> Set<String> {
+    /// `lima` is nil for the `_lima` folder of `root`.
+    nonisolated static func watchPaths(root: String, lima: String? = nil) -> Set<String> {
         let fm = FileManager.default
         func isDir(_ p: String) -> Bool {
             var d: ObjCBool = false
@@ -48,10 +53,12 @@ final class ColimaDirWatcher {
                 .map { "\(dir)/\($0)" }
                 .filter(isDir)
         }
-        guard isDir(root) else { return [] }
-        var out: Set<String> = [root]
-        out.formUnion(children(root))
-        let lima = "\(root)/_lima"
+        var out: Set<String> = []
+        if isDir(root) {
+            out.insert(root)
+            out.formUnion(children(root))
+        }
+        let lima = lima ?? "\(root)/_lima"
         if isDir(lima) {
             out.insert(lima)
             out.formUnion(children(lima))
@@ -61,7 +68,7 @@ final class ColimaDirWatcher {
 
     /// Starts watching new directories and stops watching removed ones.
     func rearm() {
-        let want = Self.watchPaths(root: root)
+        let want = Self.watchPaths(root: root, lima: lima)
         for (path, s) in sources where !want.contains(path) {
             s.cancel()
             sources[path] = nil

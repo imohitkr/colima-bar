@@ -28,6 +28,7 @@ final class SocketProxy: @unchecked Sendable {
     private var _apiVersion: String?
     private var _wake: @Sendable () async -> Bool = { false }
     private var isWaking = false
+    private var isHeld = false
     private var waiters: [DispatchSemaphore] = []
     private var lastWakeSucceeded = false
     private var conns: [Int: Connection] = [:]
@@ -108,6 +109,14 @@ final class SocketProxy: @unchecked Sendable {
 
     var isRunning: Bool { lock.withLock { listenFD >= 0 } }
 
+    /// The model holds the proxy while a wake of its upstream profile runs,
+    /// also a wake that another proxy started. The stable socket and the
+    /// profile socket of the selected profile share one upstream. A held
+    /// proxy splices no request: each one waits for the shared wake.
+    func holdForWake(_ on: Bool) {
+        lock.withLock { isHeld = on }
+    }
+
     func start() {
         guard !isRunning else { return }
         UnixSocket.makePrivateDir((path as NSString).deletingLastPathComponent)
@@ -162,7 +171,9 @@ final class SocketProxy: @unchecked Sendable {
     // MARK: - Connections
 
     private func acceptLoop(_ fd: Int32) {
-        while true {
+        // Check before each accept: after stop(), another proxy can get the
+        // same fd number for its listener, and this loop must not take its clients.
+        while lock.withLock({ listenFD == fd }) {
             let client = accept(fd, nil, nil)
             if client < 0 {
                 let err = errno
@@ -191,9 +202,11 @@ final class SocketProxy: @unchecked Sendable {
 
     /// Not while a wake runs: Lima's ssh tunnel accepts connections seconds
     /// before dockerd and containerd are stable, so requests must wait for
-    /// the readiness check in wake() like the one that triggered it.
+    /// the readiness check in wake() like the one that triggered it. This
+    /// includes a wake of the same profile that another proxy started
+    /// (holdForWake).
     private func connectIfAwake() -> Upstream {
-        if lock.withLock({ isWaking }) { return .down }
+        if lock.withLock({ isWaking || isHeld }) { return .down }
         switch connectUpstream(upstream) {
         case .success(let fd): return .up(fd)
         case .failure(.socket(let err)): return Self.meansVMDown(err) ? .down : .failed(err)

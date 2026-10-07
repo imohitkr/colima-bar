@@ -55,7 +55,7 @@ final class ColimaModel {
         didSet {
             guard profile != oldValue else { return }
             Defaults.set(profile, .profile)
-            switchProfile()
+            switchProfile(from: oldValue)
         }
     }
     var notifyOnCrash = Defaults.bool(.notifyOnCrash) ?? true {
@@ -81,8 +81,10 @@ final class ColimaModel {
         didSet {
             guard autoStart != oldValue else { return }
             Defaults.set(autoStart, .autoStart)
+            // A debug run must not change the proxy sockets.
+            guard !isDebug else { return }
             autoStart ? proxy.start() : proxy.stop()
-            if !isDebug { profileProxies.setListening(autoStart) }
+            profileProxies.setListening(autoStart)
         }
     }
     var autoStop = Defaults.bool(.autoStop) ?? false {
@@ -192,6 +194,8 @@ final class ColimaModel {
     @ObservationIgnored private var appliedContexts: [String: String]?
     @ObservationIgnored private var wantedContexts: [String: String]?
     @ObservationIgnored private var isApplyingContexts = false
+    // The last set that ProfileContexts.apply failed for, and when.
+    @ObservationIgnored private var contextsFailure: (wanted: [String: String], at: Date)?
     // Not observed: its buffers change with each log line.
     @ObservationIgnored private let keeper: RemovedLogKeeper
     private let historyLen = 60
@@ -245,7 +249,7 @@ final class ColimaModel {
             }
             // Any profile starting, stopping, appearing or going away changes
             // these directories, so no frequent `colima list` is needed.
-            dirWatcher = ColimaDirWatcher { [weak self] in
+            dirWatcher = ColimaDirWatcher(root: Paths.colimaDir, lima: Paths.limaDir) { [weak self] in
                 Task { await self?.refreshStatus() }
             }
         }
@@ -483,9 +487,12 @@ final class ColimaModel {
         set(\.memHistory, [])
     }
 
-    private func switchProfile() {
+    private func switchProfile(from old: String) {
         generation += 1
-        localBusy = nil
+        // An action that this app runs keeps its label on its own profile, so
+        // the profile menu shows it until the action ends (see execute).
+        if let b = localBusy { profileActions[old] = b }
+        localBusy = profileActions.removeValue(forKey: profile)
         clearVMData()
         for h in statStreams.values { h.cancel() }
         statStreams = [:]
@@ -493,6 +500,7 @@ final class ColimaModel {
         api = DockerAPI(socketPath: Paths.socket(profile))
         keeper.reset(api: api)  // saved logs belong to the old profile
         proxy.upstream = Paths.socket(profile)
+        syncWakeHolds()
         vm = VMInfo()
         state = .unknown
         idleSince = nil
@@ -644,9 +652,22 @@ final class ColimaModel {
         let token = wakeToken
         let task = Task { await performWake(p) }
         wakes[p] = (token, task)
+        syncWakeHolds()
         let ok = await task.value
-        if wakes[p]?.token == token { wakes[p] = nil }
+        if wakes[p]?.token == token {
+            wakes[p] = nil
+            syncWakeHolds()
+        }
         return ok
+    }
+
+    /// Holds each proxy whose upstream profile has a wake that runs now: the
+    /// stable proxy for the selected profile, and the profile proxies. Their
+    /// requests then wait for that wake, whichever proxy started it.
+    private func syncWakeHolds() {
+        let waking = Set(wakes.keys)
+        proxy.holdForWake(waking.contains(profile))
+        profileProxies.holdForWake(waking)
     }
 
     /// The runtime of a profile: the live value for the selected profile,
@@ -699,16 +720,13 @@ final class ColimaModel {
         if !(await ready()) {
             if profileMissing() { return false }
             log.notice("auto-starting profile \(p, privacy: .public)")
-            let selected = p == profile
-            if selected { setBusyNow("Starting") } else { profileActions[p] = "Starting" }
+            if p == profile { setBusyNow("Starting") } else { profileActions[p] = "Starting" }
             let r = await Shell.run(
                 [Paths.ctl, CtlAction.start.rawValue], timeout: 600,
                 extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
-            if selected {
-                localBusy = nil
-            } else if profileActions[p] == "Starting" {
-                profileActions[p] = nil
-            }
+            // The selected profile can change during the start.
+            if p == profile, localBusy == "Starting" { localBusy = nil }
+            if profileActions[p] == "Starting" { profileActions[p] = nil }
             if !r.ok { log.error("auto-start: colima-ctl.sh start exited \(r.status) for \(p, privacy: .public)") }
         }
         var streak = 0
@@ -755,15 +773,25 @@ final class ColimaModel {
     }
 
     /// Applies the `colimabar-PROFILE` contexts in the background, one run at
-    /// a time. A run applies the newest wanted set.
+    /// a time. A run applies the newest wanted set. After a failure, the same
+    /// set runs again only after `contextsRetryInterval`.
     private func applyContexts(_ hosts: [String: String]) {
+        if let f = contextsFailure,
+            !Self.contextsRetryDue(wanted: hosts, failed: f.wanted, failedAt: f.at, now: Date())
+        {
+            return
+        }
         wantedContexts = hosts
         guard !isApplyingContexts else { return }
         isApplyingContexts = true
         Task {
             while let want = wantedContexts, want != appliedContexts {
                 wantedContexts = nil
-                guard await ProfileContexts.apply(wanted: want) else { break }
+                guard await ProfileContexts.apply(wanted: want) else {
+                    contextsFailure = (want, Date())
+                    break
+                }
+                contextsFailure = nil
                 appliedContexts = want
             }
             isApplyingContexts = false
@@ -1060,9 +1088,13 @@ final class ColimaModel {
         Task { await execute(.profileCreate, form.arguments, profile: form.name, label: label) }
     }
 
-    /// True while the VM of the profile runs.
+    /// True while the VM of the profile runs. Right after a switch, the
+    /// state of the selected profile is unknown: then the last `colima list`
+    /// decides, and a profile that it does not show counts as running.
     func isRunning(profile p: String) -> Bool {
-        p == profile ? state == .running : profiles.contains { $0.name == p && $0.isRunning }
+        let row = profiles.first { $0.name == p }
+        guard p == profile else { return row?.isRunning ?? false }
+        return Self.selectedIsRunning(state: state, listed: row?.isRunning)
     }
 
     /// Deletes a profile with its VM and data. A running selected profile
@@ -1070,6 +1102,12 @@ final class ColimaModel {
     /// `colimabar-PROFILE` context go away. If it was selected, the
     /// dashboard switches to `default`.
     func deleteProfile(_ p: String) {
+        // The menu hides the selected profile while its action runs. The
+        // action can start while the confirmation is open.
+        if p == profile, busy != nil {
+            Notifier.shared.post("Wait until the action of the profile \(p) ends, then delete it.")
+            return
+        }
         if let refusal = ProfileDelete.refusal(profile: p, selected: profile, isRunning: isRunning(profile: p)) {
             Notifier.shared.post(refusal)
             return

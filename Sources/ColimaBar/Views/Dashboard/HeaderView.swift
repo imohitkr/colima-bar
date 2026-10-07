@@ -108,7 +108,7 @@ struct ProfileMenu: View {
                 }
             }
             Menu("Delete Profile") {
-                ForEach(model.profiles.filter { model.profileActions[$0.name] == nil }) { p in
+                ForEach(deletable) { p in
                     let running = model.isRunning(profile: p.name)
                     let refusal = ProfileDelete.refusal(profile: p.name, selected: model.profile, isRunning: running)
                     Button(refusal == nil ? "\(p.name)…" : "\(p.name) (stop it first)") {
@@ -119,7 +119,7 @@ struct ProfileMenu: View {
                     .disabled(refusal != nil)
                 }
             }
-            .disabled(model.profiles.isEmpty)
+            .disabled(deletable.isEmpty)
         } label: {
             HStack(spacing: 2) {
                 Text(model.profile)
@@ -137,6 +137,14 @@ struct ProfileMenu: View {
     private func status(_ p: ProfileRow) -> String {
         if let action = model.profileActions[p.name] { return action.lowercased() + "…" }
         return p.isRunning ? "running" : "stopped"
+    }
+
+    /// Profiles with no action that runs now. An action of the selected
+    /// profile shows in `busy`, of the others in `profileActions`.
+    private var deletable: [ProfileRow] {
+        model.profiles.filter {
+            model.profileActions[$0.name] == nil && !($0.name == model.profile && model.busy != nil)
+        }
     }
 
     /// Profiles that New Profile creates now: `colima list` shows them

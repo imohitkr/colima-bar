@@ -37,7 +37,7 @@ The version comes from `git describe --tags`. Without a tag, the version is the 
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy socket, the docker routes or the login item. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|
@@ -137,6 +137,7 @@ The maintainer then makes the release:
 2. CI runs the tests and builds `ColimaBar.dmg` and `ColimaBar.zip`.
 3. CI signs a build provenance attestation for both files.
 4. CI publishes the GitHub release with generated notes.
+5. Within 6 hours, a workflow in imohitkr/homebrew-tap verifies the attestation of `ColimaBar.zip` and updates the cask.
 
 Before the tag, the maintainer moves the `[Unreleased]` entries in `CHANGELOG.md` to a new version section.
 

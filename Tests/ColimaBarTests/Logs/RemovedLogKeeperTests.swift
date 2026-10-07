@@ -64,7 +64,9 @@ import Testing
         var sets: [Set<String>] = []
     }
 
-    private func rig(maxContainers: Int = 50, maxLines: Int = 500, maxBytes: Int = 25 << 20) throws -> Rig {
+    private func rig(
+        maxContainers: Int = 50, maxLines: Int = 500, maxBytes: Int = RemovedLogKeeper.maxBytes
+    ) throws -> Rig {
         let path = TestSocketPath.unique()
         let daemon = FakeDaemon(path: path, reply: Self.reply)
         try daemon.start()
@@ -220,15 +222,19 @@ import Testing
         #expect(r.keeper.bufferedCount == 2)
     }
 
+    @Test func eachContainerGetsAnEqualShareOfTheBytes() {
+        #expect(RemovedLogKeeper.maxBytes / RemovedLogKeeper.maxContainers == 128 << 10)
+    }
+
     @Test func capsTheLinesAndBytesOfEachContainer() async throws {
-        // 2 containers share 60 bytes: 30 bytes each. A line is about 12 bytes.
-        let r = try rig(maxContainers: 2, maxBytes: 60)
+        // 2 containers share 240 bytes: 120 bytes each. A frame with its
+        // header and timestamp is about 52 bytes, so the 2 newest fit.
+        let r = try rig(maxContainers: 2, maxBytes: 240)
         defer { r.stop() }
         #expect(await r.startAndDrain("rm-1"))
         r.keeper.event(action: "die", id: "rm-1", attributes: ["exitCode": "1"])
         let saved = try #require(r.keeper.saved("rm-1"))
-        #expect(saved.reduce(0) { $0 + $1.text.utf8.count } <= 30)
-        #expect(saved.last?.text == "rm-1 line 10")
+        #expect(saved.map(\.text) == Array(Self.logText("rm-1").suffix(2)))
 
         let few = try rig(maxLines: 3)
         defer { few.stop() }

@@ -36,14 +36,30 @@ import Testing
         #expect(sb.calls.isEmpty)  // sourcing ran no tool
     }
 
-    @Test func contextsAreEveryColimabarProfileContext() throws {
+    @Test func contextsAreTheColimabarProfileContextsOfColimaBar() throws {
+        // The same rule as ProfileContexts.isOurs: the description starts with "ColimaBar".
         let sb = try ScriptSandbox()
+        let rows = [
+            "colimabar\tColimaBar auto-start proxy",
+            "colimabar-work\tColimaBar profile work",
+            "colimabar-a.b\tColimaBar",
+            "colimabar-mine\tmy own context",
+            "colimabar-empty\t",
+            "colimabar-lower\tcolimabar profile",
+            "default\tCurrent DOCKER_HOST based configuration",
+            "colima-work\tcolima [profile=work]",
+            "mycolimabar-x\tColimaBar",
+            "colimabar-\tColimaBar",
+        ]
         try sb.stub(
             "docker",
-            "printf 'colimabar\\ncolimabar-work\\ncolimabar-a.b\\ndefault\\ncolima-work\\nmycolimabar-x\\ncolimabar-\\n'"
-        )
+            """
+            printf 'docker %s\\n' "$*" >> "\(sb.log)"
+            printf '\(rows.joined(separator: "\\n"))\\n'
+            """)
         let r = try call(sb, "colimabar_contexts")
         #expect(r.out.split(separator: "\n") == ["colimabar-work", "colimabar-a.b"])
+        #expect(sb.calls == ["docker context ls --format {{.Name}}\\t{{.Description}}"])
         // No docker CLI: no contexts, no error.
         try FileManager.default.removeItem(atPath: sb.bin + "/docker")
         #expect(try call(sb, "colimabar_contexts").out.isEmpty)
@@ -72,8 +88,10 @@ import Testing
 
     @Test func theScriptUsesTheHelpers() throws {
         let text = try script()
-        #expect(text.contains("for ctx in $(colimabar_contexts); do"))
-        #expect(text.contains("colimabar|colimabar-*)"))
+        // It switches away from and removes only colimabar and the contexts of colimabar_contexts.
+        #expect(text.contains("OUR_CONTEXTS=(colimabar $(colimabar_contexts))"))
+        #expect(text.contains("for ctx in \"${OUR_CONTEXTS[@]}\"; do"))
+        #expect(!text.contains("colimabar-*)"))
         // The names are read before the cache folder goes away.
         let read = try #require(text.range(of: "PROFILE_NAMES=($(profile_socket_names))"))
         let rm = try #require(text.range(of: "rm -rf ~/Applications/ColimaBar.app"))

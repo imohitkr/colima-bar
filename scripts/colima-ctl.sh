@@ -1,8 +1,24 @@
 #!/bin/bash
-# Action backend for ColimaBar. Pins
-# XDG_CONFIG_HOME so it always targets the same VM as an interactive `colima`.
+# Action backend for ColimaBar. It pins XDG_CONFIG_HOME, so Colima uses
+# ~/.config/colima when neither COLIMA_HOME nor ~/.colima exists.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export XDG_CONFIG_HOME="$HOME/.config"
+# The C locale makes bracket ranges such as [a-z] plain ASCII byte ranges.
+# In other locales, bash 3.2 can match uppercase or non-ASCII letters there.
+export LC_ALL=C
+
+# The Colima config folder. Colima 0.10.3 (config/files.go) uses the first
+# that applies: COLIMA_HOME if that path exists, ~/.colima if it exists,
+# else $XDG_CONFIG_HOME/colima (pinned above).
+if [ -n "${COLIMA_HOME:-}" ] && [ -e "$COLIMA_HOME" ]; then
+  COLIMA_DIR="$COLIMA_HOME"
+elif [ -e "$HOME/.colima" ]; then
+  COLIMA_DIR="$HOME/.colima"
+else
+  COLIMA_DIR="$XDG_CONFIG_HOME/colima"
+fi
+# Lima keeps its instances in LIMA_HOME if it is set, else in COLIMA_DIR/_lima.
+LIMA_DIR="${LIMA_HOME:-$COLIMA_DIR/_lima}"
 
 # Profile to act on: ColimaBar passes the selected one in COLIMABAR_PROFILE.
 PROFILE="${COLIMABAR_PROFILE:-default}"
@@ -12,12 +28,13 @@ case "$PROFILE" in
 esac
 # Dialogs and notifications name the profile: "profile 'work'".
 NAMED="profile '$PROFILE'"
-CONFIG="$XDG_CONFIG_HOME/colima/$PROFILE/colima.yaml"
-SOCK="$XDG_CONFIG_HOME/colima/$PROFILE/docker.sock"
+PROFILE_DIR="$COLIMA_DIR/$PROFILE"
+CONFIG="$PROFILE_DIR/colima.yaml"
+SOCK="$PROFILE_DIR/docker.sock"
 export DOCKER_HOST="unix://$SOCK"
 # kubectl context Colima creates: "colima" for default, "colima-NAME" otherwise.
 KCTX=$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")
-LIMA_LOG="$XDG_CONFIG_HOME/colima/_lima/$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")/ha.stderr.log"
+LIMA_LOG="$LIMA_DIR/$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")/ha.stderr.log"
 
 # Every colima call targets the selected profile.
 colima() { command colima "$@" --profile "$PROFILE"; }
@@ -157,6 +174,19 @@ new_name_ok() {
     default|colima|colima-*|*[!a-z0-9-]*|-*|*-|*--*|"") return 1 ;;
   esac
   [ "${#1}" -le 30 ]
+}
+
+# profile_dir_exists -> true if COLIMA_DIR has a folder with the exact name
+# of PROFILE. The Mac file system ignores case, so a plain -d test also
+# finds the folder "default" for the name "Default".
+profile_dir_exists() {
+  local d
+  [ -d "$PROFILE_DIR" ] || return 1
+  for d in "$COLIMA_DIR"/*/; do
+    d=${d%/}
+    [ "${d##*/}" = "$PROFILE" ] && return 0
+  done
+  return 1
 }
 
 # is_num VALUE -> true for a whole number.
@@ -300,7 +330,7 @@ Then Colima starts the VM again with an empty $size GB disk and the same setting
     fi
     case "$rt" in docker|containerd) ;; *) notify "Invalid runtime: $rt"; exit 1 ;; esac
     # The Mac file system ignores case, so this also finds "Work" for "work".
-    if [ -e "$XDG_CONFIG_HOME/colima/$PROFILE" ]; then
+    if [ -e "$PROFILE_DIR" ]; then
       notify "Profile $PROFILE already exists."
       exit 1
     fi
@@ -312,6 +342,17 @@ Then Colima starts the VM again with an empty $size GB disk and the same setting
   # profile-delete: deletes the profile in COLIMABAR_PROFILE with its VM,
   # disk and folder. ColimaBar asked for the typed profile name before.
   profile-delete)
+    # Colima maps "colima" to the default profile and removes a "colima-"
+    # prefix. Thus `colima delete --profile colima` deletes default.
+    case "$PROFILE" in
+      colima|colima-*)
+        notify "Can't delete $NAMED. Colima uses this name for the default profile."
+        exit 1 ;;
+    esac
+    if ! profile_dir_exists; then
+      notify "Can't delete $NAMED. Its folder $PROFILE_DIR does not exist."
+      exit 1
+    fi
     lock_vm
     msg="Delete $NAMED? Colima deletes its VM and disk. All containers, images, volumes and build cache of this profile are lost for good."
     if colima status >/dev/null 2>&1; then

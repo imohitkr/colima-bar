@@ -8,22 +8,23 @@ import os
 ///
 /// While the setting is on, a `start` event makes the keeper inspect the
 /// container. If `HostConfig.AutoRemove` is true, it opens one log stream and
-/// keeps the newest lines in memory (`RemovedLogRing`). A `die` with a crash
+/// keeps the newest raw log bytes in memory (`RemovedLogRing`). A `die` with a crash
 /// exit code (the same rule as the crash alert) keeps the lines for
 /// `keepWindow`. A clean exit, or a `destroy` without a failure, drops them.
 ///
-/// The stream threads parse and store the lines. The main actor works only
-/// on events, so many log lines cause no main-thread work. The model is not
-/// observed here: only `onChange` reports the set of kept containers.
+/// The stream threads only copy the bytes. The main actor works only on
+/// events, so many log lines cause no main-thread work. The lines are parsed
+/// only when a log window opens (`saved(_:)`). The model is not observed
+/// here: only `onChange` reports the set of kept containers.
 @MainActor
 final class RemovedLogKeeper {
-    /// The newest lines kept for each container.
+    /// `saved(_:)` returns at most this many of the newest lines.
     nonisolated static let maxLines = 500
     /// At most this many containers have a buffer at the same time.
     nonisolated static let maxContainers = 50
-    /// All buffers together keep at most this much text. Each container gets
-    /// an equal share (`maxBytes / maxContainers`, 512 KB).
-    nonisolated static let maxBytes = 25 << 20
+    /// All buffers together keep at most this many raw log bytes (6.4 MB).
+    /// Each container gets an equal share (`maxBytes / maxContainers`, 128 KB).
+    nonisolated static let maxBytes = maxContainers * (128 << 10)
     /// How long the lines of a failed container stay after it dies.
     nonisolated static let keepWindow: TimeInterval = 5 * 60
     /// The first log request asks for this many of the newest lines.
@@ -98,11 +99,12 @@ final class RemovedLogKeeper {
         }
     }
 
-    /// The kept lines of a failed container, oldest first, or nil.
+    /// The kept lines of a failed container, oldest first, or nil. It
+    /// parses the kept bytes now, when a log window opens.
     func saved(_ id: String) -> [LogLine]? {
         purgeExpired()
         guard let e = entries[id], e.keptUntil != nil else { return nil }
-        return e.ring.snapshot
+        return e.ring.lines()
     }
 
     /// Drops the kept buffers whose window has passed.

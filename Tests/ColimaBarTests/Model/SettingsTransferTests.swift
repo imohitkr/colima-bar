@@ -134,9 +134,7 @@ import Testing
             #expect(values[.profile] == nil, "\(bad)")
             #expect(skipped.count == 1, "\(bad)")
         }
-        for good in ["default", "work-2", "a.b_c", "X9"] {
-            #expect(T.isValidProfileName(good), "\(good)")
-        }
+        #expect(try T.decode(file(#"{"profile": "work-2"}"#)).values[.profile] == .string("work-2"))
     }
 
     @Test func skipsNonBoolSwitches() throws {
@@ -179,7 +177,7 @@ import Testing
         let plan = try T.plan(file(#"{"profile": "other"}"#), current: sample, profiles: ["default", "work"])
         #expect(plan.changes.isEmpty)
         #expect(plan.skipped.count == 1)
-        #expect(plan.skipped[0].contains("colima start --profile other"))
+        #expect(plan.skipped[0].contains("New Profile…"))
 
         let ok = try T.plan(file(#"{"profile": "default"}"#), current: sample, profiles: ["default", "work"])
         #expect(ok.changes == [T.Change(setting: .profile, from: .string("work"), to: .string("default"))])

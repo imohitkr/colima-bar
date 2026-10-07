@@ -4,8 +4,10 @@ import Testing
 
 @Suite struct ProfileNameTests {
     @Test func validNamesMatchTheScriptCheck() {
-        for name in ["default", "work", "Work_2", "a.b", "x-y", "-a"] { #expect(ProfileName.isValid(name), "\(name)") }
-        for name in ["", ".", "..", ".hidden", "a/b", "a b", "naïve", "a;b"] {
+        for name in ["default", "work", "Work_2", "a.b", "x-y", "-a", "work-2", "a.b_c", "X9"] {
+            #expect(ProfileName.isValid(name), "\(name)")
+        }
+        for name in ["", ".", "..", ".hidden", "a/b", "a b", "naïve", "a;b", "prof;rm"] {
             #expect(!ProfileName.isValid(name), "\(name)")
         }
     }

@@ -37,7 +37,11 @@ enum SettingsFilePanel {
                 alert("Couldn't import the settings", SettingsTransfer.Failure.tooLarge.message)
                 return
             }
-            let data = try Data(contentsOf: url)
+            // Read at most one byte more than the limit, so a file that grew
+            // after the size check is not loaded whole. decode refuses it.
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let data = try handle.read(upToCount: SettingsTransfer.maxBytes + 1) ?? Data()
             plan = try SettingsTransfer.plan(data, current: model.settingsSnapshot, profiles: model.profileNames)
         } catch let failure as SettingsTransfer.Failure {
             alert("Couldn't import the settings", failure.message)

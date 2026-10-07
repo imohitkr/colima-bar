@@ -100,7 +100,7 @@ enum Help {
     static let profile =
         "The Colima profile that this dashboard shows. Each profile is a separate VM with its own containers, images and settings. Click to switch, start or stop a different profile, or to create or delete a profile."
     static let profiles =
-        "All Colima profiles. To create or delete one, use the profile menu in the header. The dashboard and its actions apply to the selected profile. Each docker profile also has its own ColimaBar socket and the docker context colimabar-NAME."
+        "All Colima profiles. To create or delete one, use the profile menu in the header. The dashboard and its actions apply to the selected profile. Each docker profile also has its own profile socket and the docker context colimabar-NAME."
 
     // Auto-start / auto-stop
     static let autoStart =

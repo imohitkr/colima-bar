@@ -64,6 +64,36 @@ private final class WakeLog: @unchecked Sendable {
         }
     }
 
+    @Test func aHeldProfileWaitsForTheWakeEvenWhenItsDaemonAnswers() async throws {
+        let dir = TestSocketPath.uniqueDir()
+        let daemon = FakeDaemon(path: TestSocketPath.unique())
+        try daemon.start()
+        let woke = WakeLog()
+        let proxies = ProfileProxies(dir: dir, upstream: { _ in daemon.path })
+        proxies.wake = { name in
+            woke.add(name)
+            return true
+        }
+        defer {
+            proxies.shutdown()
+            daemon.stop()
+            try? FileManager.default.removeItem(atPath: dir)
+        }
+        // Another proxy started a wake of "a". A proxy that sync makes
+        // during the wake is held too.
+        proxies.holdForWake(["a"])
+        proxies.sync(wanted: ["a"])
+        proxies.setListening(true)
+        let a = try #require(proxies.path(for: "a"))
+        #expect(await send(a, request).hasSuffix("hello"))
+        #expect(woke.all == ["a"])
+
+        // The wake ended: requests go straight to the daemon.
+        proxies.holdForWake([])
+        #expect(await send(a, request).hasSuffix("hello"))
+        #expect(woke.all == ["a"])
+    }
+
     @Test func aPingDoesNotWakeAProfile() async throws {
         try await withTwoProfiles { proxies, _, woke, _ in
             proxies.sync(wanted: ["a"])

@@ -9,6 +9,8 @@ import Foundation
 ///
 /// Stub exit codes: `STUB_OSASCRIPT_EXIT` (default 0: the user clicked OK)
 /// and `STUB_COLIMA_STATUS` for `colima status` (default 1: stopped).
+/// If `STUB_DELETE_DIR` is set, `colima delete` removes that folder, like
+/// the real `colima delete` removes the profile folder.
 final class ScriptSandbox {
     let root: String
     let home: String
@@ -40,6 +42,7 @@ final class ScriptSandbox {
             """
             printf 'colima %s\\n' "$*" >> "\(log)"
             [ "$1" = status ] && exit "${STUB_COLIMA_STATUS:-1}"
+            [ "$1" = delete ] && [ -n "${STUB_DELETE_DIR:-}" ] && rm -rf "$STUB_DELETE_DIR"
             exit 0
             """)
         try stub("docker", "printf 'docker %s\\n' \"$*\" >> \"\(log)\"\nexit 0")

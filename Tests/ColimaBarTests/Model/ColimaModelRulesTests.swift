@@ -111,4 +111,23 @@ import Testing
         for code in ["0", "130", "137", "143"] { #expect(!ColimaModel.isCrashExit(code), "\(code)") }
         #expect(!ColimaModel.isCrashExit(nil))
     }
+
+    @Test func selectedProfileWithUnknownStateUsesTheListedState() {
+        #expect(ColimaModel.selectedIsRunning(state: .running, listed: false))
+        #expect(!ColimaModel.selectedIsRunning(state: .stopped, listed: true))
+        #expect(ColimaModel.selectedIsRunning(state: .unknown, listed: true))
+        #expect(!ColimaModel.selectedIsRunning(state: .unknown, listed: false))
+        // Not in the list yet: it counts as running, so Delete is refused.
+        #expect(ColimaModel.selectedIsRunning(state: .unknown, listed: nil))
+    }
+
+    @Test func failedContextsRetryOnlyForANewSetOrAfterTheInterval() {
+        let t = Date(timeIntervalSince1970: 1000)
+        let a = ["work": "unix:///a.sock"]
+        let b = ["work": "unix:///a.sock", "dev": "unix:///b.sock"]
+        let wait = ColimaModel.contextsRetryInterval
+        #expect(!ColimaModel.contextsRetryDue(wanted: a, failed: a, failedAt: t, now: t.addingTimeInterval(60)))
+        #expect(ColimaModel.contextsRetryDue(wanted: b, failed: a, failedAt: t, now: t.addingTimeInterval(60)))
+        #expect(ColimaModel.contextsRetryDue(wanted: a, failed: a, failedAt: t, now: t.addingTimeInterval(wait)))
+    }
 }

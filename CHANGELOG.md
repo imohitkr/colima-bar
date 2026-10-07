@@ -8,20 +8,21 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Added
 
-- **Keep logs of removed containers that fail** on the System tab. This option is off by default. When it is on, ColimaBar keeps the newest 500 lines of each container that `docker run --rm` started, in memory only. If the container fails, **View logs** on its alert shows these lines for 5 minutes. See [Saved logs](docs/usage.md#saved-logs).
+- **Keep logs of removed containers that fail** on the System tab. This option is off by default. When it is on, ColimaBar keeps the newest 500 lines (at most 128 KB) of each container that `docker run --rm` started, in memory only. If the container fails, **View logs** on its alert shows these lines for 5 minutes. See [Saved logs](docs/usage.md#saved-logs).
 - **Uninstall ColimaBar…** in the right-click menu. After you confirm, it runs the uninstall script of the app in iTerm, or in Terminal when iTerm is not installed.
 - A Question issue form.
 - **Export Settings…** and **Import Settings…** on the System tab. They save the ColimaBar settings to a JSON file and load them on a different Mac. Before an import applies anything, ColimaBar shows the changes. It skips invalid values and profiles that do not exist on the Mac. See [Export and import settings](docs/usage.md#export-and-import-settings).
 - **Shrink…** next to the disk size on the System tab. Colima cannot shrink a disk in place. Thus this deletes the VM with all its containers, images, volumes and build cache, and starts it again with a smaller disk and the same settings. You must type the profile name to confirm. See [Shrink the disk](docs/usage.md#shrink-the-disk).
 - A socket and a docker context for each profile with the docker runtime, for example `~/.cache/colima-bar/profiles/work.sock` and `colimabar-work`. A docker request to the socket of a stopped profile starts that profile. Use `docker --context colimabar-work ps`, or set `DOCKER_HOST` for one project. The ColimaBar socket still follows the selected profile. See [Profile sockets](docs/auto-start.md#profile-sockets).
 - Auto-stop checks each running docker profile, not only the selected one. Each profile stops after its own idle time. See [Auto-stop](docs/auto-stop.md).
-- The profile menu in the header shows always. It starts and stops other profiles, creates a profile with **New Profile…** and deletes a profile with **Delete Profile** after a typed confirmation. See [Profiles](docs/usage.md#profiles).
+- The profile menu in the header now shows also when you have one profile. It starts and stops other profiles, creates a profile with **New Profile…** and deletes a profile with **Delete Profile** after a typed confirmation. See [Profiles](docs/usage.md#profiles).
 - Install with Homebrew: `brew install --cask imohitkr/tap/colima-bar`. The cask is in the new [imohitkr/homebrew-tap](https://github.com/imohitkr/homebrew-tap) repository. A workflow in the tap verifies the attestation of each new release before it updates the cask.
 
 ### Changed
 
-- The VM dialogs and the failure notifications name the profile, for example "Grow the Colima disk of profile 'work' to 120 GB?".
-- The uninstall script also removes the `colimabar-PROFILE` contexts, and links each profile socket to the Colima socket of its profile.
+- The VM dialogs and the failure notifications name the profile, for example "Grow the Colima disk of profile 'work' to 150 GB?".
+- The ••• menu item **Logs in iTerm** is now **Logs in Terminal**.
+- The uninstall script also removes the `colimabar-PROFILE` contexts of ColimaBar, and links each profile socket to the Colima socket of its profile.
 - The docs have a new structure. The README is short. The user guides are in `docs/`. `ARCHITECTURE.md` describes the design, and `SUPPORT.md` tells you how to get help.
 
 ### Removed
@@ -30,7 +31,11 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Fixed
 
-- Restart, **Apply** of VM resources, Rosetta, Kubernetes and a disk grow always restart a running VM. Before, the bash of macOS could end the action after `colima status` and report success, so the VM kept the old settings. A disk shrink of a running VM could also stop at this step.
+- Restart, **Apply** of VM resources, Rosetta, Kubernetes and a disk grow always restart a running VM. Before, they could report success and leave the VM unchanged: the bash of macOS ended `restart_vm` early, after `colima status`. A disk shrink of a running VM could also stop at this step.
+- **Delete Profile** refuses the names `colima` and `colima-*`. Colima maps these names to the default profile, so a delete of them deleted the default profile. It also refuses a profile that has no folder.
+- The uninstall script removes only the `colimabar-PROFILE` contexts whose description starts with "ColimaBar". Before, it also removed other contexts with such a name.
+- `colima-ctl.sh` uses the same Colima folder as Colima: `COLIMA_HOME` if it exists, `~/.colima` if it exists, else `~/.config/colima`. Before, it always used `~/.config/colima`, so a disk shrink could put `colima.yaml` back in a folder that Colima does not use.
+- `colima-ctl.sh` checks profile names in the C locale. In some locales, the name check accepted uppercase and non-ASCII letters.
 - The installer no longer stops when `gh` 2.49 to 2.67 is installed. It needs `gh` 2.68 or later to verify the download. With an older `gh`, it prints a notice and continues.
 - ColimaBar now finds iTerm in `~/Applications`. Before, it used Terminal.
 - CI no longer fails on timing benchmarks. They run only with `make perf`.

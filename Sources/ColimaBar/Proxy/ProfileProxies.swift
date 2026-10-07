@@ -20,6 +20,8 @@ final class ProfileProxies {
     private let idleTimeout: Int
     private var proxies: [String: SocketProxy] = [:]
     private var listening = false
+    /// Profiles whose wake runs now (see holdForWake).
+    private var waking: Set<String> = []
     /// Profiles whose socket path is too long. Each one is logged once.
     private var skipped: Set<String> = []
 
@@ -67,6 +69,7 @@ final class ProfileProxies {
             px.apiVersion = apiVersion
             let wake = self.wake
             px.wake = { await wake(name) }
+            px.holdForWake(waking.contains(name))
             proxies[name] = px
             if listening { px.start() } else { px.stop() }
         }
@@ -104,9 +107,11 @@ final class ProfileProxies {
         proxies[profile]?.apiVersion = version
     }
 
-    func setAPIVersionForAll(_ version: String?) {
-        apiVersion = version
-        for px in proxies.values { px.apiVersion = version }
+    /// Holds the proxy of each profile in `profiles` until its wake ends
+    /// (see SocketProxy.holdForWake), and releases all others.
+    func holdForWake(_ profiles: Set<String>) {
+        waking = profiles
+        for (name, px) in proxies { px.holdForWake(profiles.contains(name)) }
     }
 
     /// Deletes files in the folder that no proxy owns: sockets and links

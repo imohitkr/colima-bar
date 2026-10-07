@@ -36,7 +36,7 @@ The live tiles show the total CPU and memory of all containers as a share of the
 - A running container has logs, shell, restart and stop buttons. **Remove…** is in its ••• menu.
 - A stopped container has logs, start and remove buttons.
 - The shell opens in iTerm, or in Terminal when iTerm is not installed.
-- The ••• menu copies the name, ID, image or an exec command. It also opens ports and follows the logs in iTerm, or in Terminal when iTerm is not installed.
+- The ••• menu copies the name, ID, image or an exec command. It also opens ports. **Logs in Terminal** follows the logs in iTerm, or in Terminal when iTerm is not installed.
 - You can filter the list and show running containers only.
 - **Stop all** stops all running containers. ColimaBar asks first.
 
@@ -69,12 +69,12 @@ Colima cannot shrink a disk in place. Thus **Shrink…** deletes the VM and its 
 
 To shrink the disk:
 
-1. On the System tab, click **Shrink…** next to the disk size. Select a size. The menu shows only sizes that are smaller than the current disk, and 10 GB or more.
+1. On the System tab, click **Shrink…** next to the disk size. Select a size: 20, 40, 60 or 80 GB. The menu shows only the sizes that are smaller than the current disk.
 2. Read the warning. It shows the data that the disk holds now, from the **Disk usage** section. If the VM is stopped, ColimaBar cannot show this data.
 3. Type the profile name. Then click **Delete Data and Shrink**.
 4. Colima asks one more time. Click **OK**.
 
-ColimaBar then stops the VM, runs `colima delete --data`, puts back `colima.yaml` with the new `disk` value and runs `colima start`. The dashboard shows "Shrinking disk" until the VM runs again.
+ColimaBar then stops the VM, runs `colima delete --data --force`, puts back `colima.yaml` with the new `disk` value and runs `colima start`. The dashboard shows "Shrinking disk to N GB" until the VM runs again.
 
 `colima delete` also removes `colima.yaml`. Thus ColimaBar first saves a copy as `~/.cache/colima-bar/colima.PROFILE.yaml.shrink`. If the shrink fails, the notification names this copy. See [A disk shrink fails](troubleshooting.md#a-disk-shrink-fails).
 
@@ -86,10 +86,11 @@ Use these buttons to copy your ColimaBar settings to a different Mac.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 
-- It rejects a file that is not a ColimaBar settings file, and a file from a newer ColimaBar version.
+- It rejects a file that is not a ColimaBar settings file.
+- It rejects a file with a newer format version. To read it, update ColimaBar.
 - It skips a value of the wrong type or out of range. For example, the auto-stop time must be from 1 to 1440 minutes.
 - It ignores unknown keys. A setting that is not in the file keeps its current value.
-- It skips a profile that does not exist on this Mac. To create the profile, use [New Profile…](#create-a-profile), then import again.
+- It skips a profile that does not exist on this Mac. To create it, use **New Profile…** in the profile menu. See [Create a profile](#create-a-profile). Then import again.
 - It shows the changes and asks before it applies them. Then it shows the applied and skipped settings.
 
 ### Footer
@@ -170,7 +171,10 @@ The option has these limits:
 
 - It applies only to containers that start after you turn it on.
 - It applies only to the selected profile. When you switch the profile, ColimaBar drops the saved lines.
-- It keeps lines for at most 50 containers and 25 MB of text. When the limit is reached, ColimaBar drops the oldest saved lines first. If no lines are saved, a new container gets no buffer.
+- Each container keeps at most 500 lines and 128 KB of raw log data.
+- It keeps a buffer for at most 50 containers. In the worst case, this is about 6.4 MB.
+- When 50 containers have a buffer, ColimaBar drops the saved lines that expire first. If no failed container has saved lines, a new container gets no buffer.
+- ColimaBar parses the saved lines only when you open the log window.
 - It ignores testcontainers containers, because they send no alert.
 
 When you turn the option off, ColimaBar closes the log streams and drops all saved lines.

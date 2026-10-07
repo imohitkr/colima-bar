@@ -28,11 +28,11 @@ If the notification says "Colima profile NAME didn't become ready", open the Lim
 
 ## A disk shrink fails
 
-A disk shrink runs `colima stop`, `colima delete --data` and `colima start`. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
+A disk shrink runs `colima stop`, `colima delete --data --force` and `colima start`. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
 
 `colima delete` removes `colima.yaml`. ColimaBar saves a copy with the new disk size in `~/.cache/colima-bar/colima.PROFILE.yaml.shrink` before it deletes anything. If the delete failed, or `colima start` failed after the delete, do these steps:
 
-1. If `~/.config/colima/PROFILE/colima.yaml` does not exist, copy the saved file to that path.
+1. If `~/.config/colima/PROFILE/colima.yaml` does not exist, copy the saved file to that path. If your Colima folder is `~/.colima` or `COLIMA_HOME`, use that folder instead.
 2. Run `colima start --profile PROFILE`.
 
 The containers, images and volumes are gone after the delete. You cannot get them back.
@@ -69,7 +69,7 @@ To fix it, do one of these steps:
 1. Make sure that ColimaBar runs and that auto-start is on. Look at **Auto-start Colima on Demand** in the right-click menu.
 2. Start Colima, then open the System tab. Each route to the ColimaBar socket shows a check mark when it is set. The System tab shows only while Colima runs.
 3. In your terminal, run `echo $DOCKER_HOST`. If it shows a different socket, replace that line in your `~/.zshrc` with the [shell snippet](auto-start.md#shell-setup).
-4. Run `docker context show`. It must show `colimabar`. ColimaBar does not change a context that points to a different daemon.
+4. Run `docker context show`. It must show `colimabar`, or a `colimabar-PROFILE` context if you chose one. ColimaBar does not change a context that points to a different daemon.
 5. If an IDE test cannot connect, restart the IDE. An IDE reads the launchd `DOCKER_HOST` only when it starts.
 
 ## macOS blocks the first launch
