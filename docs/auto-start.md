@@ -21,11 +21,11 @@ The docker CLI needs no shell setup, because it uses the docker context. Add thi
 if [ -e "$HOME/.cache/colima-bar/docker.sock" ]; then
   export DOCKER_HOST="unix://$HOME/.cache/colima-bar/docker.sock"
 else
-  export DOCKER_HOST="unix://$HOME/.config/colima/default/docker.sock"
+  export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
 fi
 ```
 
-The snippet uses the Colima socket if the ColimaBar socket is missing. If your Colima folder is `~/.colima` or `COLIMA_HOME`, change the second path to that folder. See [Colima folder](troubleshooting.md#colimabar-uses-the-wrong-colima-folder). For a single `export DOCKER_HOST=…` line, click the copy button in the dashboard footer.
+The snippet uses the Colima socket if the ColimaBar socket is missing. If your Colima folder is `~/.config/colima` or `COLIMA_HOME`, change the second path to that folder. See [Colima folder](troubleshooting.md#colimabar-uses-the-wrong-colima-folder). For a single `export DOCKER_HOST=…` line, click the copy button in the dashboard footer.
 
 ## Profile sockets
 

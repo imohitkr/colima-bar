@@ -10,8 +10,8 @@ import os
 /// request to a stopped profile wakes that profile only. The stable socket
 /// (Paths.proxySocket) is a separate proxy that follows the selected profile.
 ///
-/// Each proxy holds one listening fd and one thread that waits in accept(),
-/// so the idle cost stays the same as for the stable socket.
+/// Each proxy holds one listening fd and one GCD read source, and no accept
+/// thread, so the idle cost stays the same as for the stable socket.
 @MainActor
 final class ProfileProxies {
     private let log = Logger(category: "proxy")

@@ -209,6 +209,7 @@ ColimaBar runs `colima start --profile NAME --cpu CPU --memory MEMORY --disk DIS
 > Delete removes the VM of the profile, its disk and its folder with `colima.yaml`. All containers, images, volumes and build cache of the profile are lost. You cannot undo this.
 
 1. If the profile is the selected profile and its VM runs, stop it first. The menu shows "(stop it first)" for it.
+   While an action runs for a profile, **Delete Profile** does not show it. If an action starts while the confirmation is open, ColimaBar refuses the delete. Wait until the action ends, then try again.
 2. In the profile menu, choose **Delete Profile**, then the profile.
 3. Read the warning. Type the profile name. Then click **Delete Profile**.
 4. Colima asks one more time. Click **OK**.

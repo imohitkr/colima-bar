@@ -59,7 +59,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 ### `System/`
 
-- `Paths`: all file paths. `colimaDir` and `limaDir` find the Colima folder and Lima's folder with the rule in [Actions and `colima-ctl.sh`](#actions-and-colima-ctlsh). The model checks both folders again on each status refresh.
+- `Paths`: all file paths. `colimaDir` and `limaDir` find the Colima folder and Lima's folder with the rule in [Actions and `colima-ctl.sh`](#actions-and-colima-ctlsh). The model checks both folders again on each status refresh and each heartbeat tick.
 - `Shell`: runs `colima`, `colima-ctl.sh` and other tools, and opens iTerm or Terminal.
 - `Routing`: sets and checks the docker routes.
 - `ProfileContexts`: creates, updates and removes the `colimabar-PROFILE` docker contexts.
@@ -173,7 +173,7 @@ ColimaBar (`Paths.colimaDir`), the script and `uninstall.sh` find the Colima fol
 4. `$XDG_CONFIG_HOME/colima`, if `XDG_CONFIG_HOME` is set.
 5. `~/.colima`, the default of Colima.
 
-Lima's folder (`Paths.limaDir`) is `LIMA_HOME` if it is set, else `_lima` in the Colima folder. ColimaBar runs each `colima` command with `COLIMA_HOME` set to the Colima folder, so Colima uses the same folder. The app reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launchd environment, not from the shell. The model checks the folders again on each status refresh, so a change needs no restart.
+Lima's folder (`Paths.limaDir`) is `LIMA_HOME` if it is set, else `_lima` in the Colima folder. ColimaBar runs each `colima` command, `colima-ctl.sh` and each Terminal command with `COLIMA_HOME` set to the Colima folder, so Colima uses the same folder. It creates the folder first, because Colima skips a `COLIMA_HOME` that does not exist. The app reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launchd environment, not from the shell. The model checks the folders again on each status refresh and each heartbeat tick, so a change needs no restart.
 
 The name checks of the script list each allowed character, not a range such as `[a-z]`. Thus they match only ASCII in every locale.
 
