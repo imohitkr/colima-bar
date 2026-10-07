@@ -68,6 +68,14 @@ extension ColimaModel {
         }
     }
 
+    /// The proxies to hold while wakes run (see SocketProxy.holdForWake).
+    /// `waking` holds the profiles whose wake runs now. The stable proxy
+    /// follows the selected profile. Each profile proxy follows its own
+    /// profile, also a proxy that is made again during the wake.
+    nonisolated static func holds(waking: Set<String>, selected: String) -> (stable: Bool, profiles: Set<String>) {
+        (waking.contains(selected), waking)
+    }
+
     /// After `ProfileContexts.apply` fails, the same wanted set runs again
     /// only after this time. Each `colima list` would run the docker CLI again.
     nonisolated static let contextsRetryInterval: TimeInterval = 30 * 60

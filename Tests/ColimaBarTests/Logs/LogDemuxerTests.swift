@@ -25,6 +25,18 @@ import Testing
         #expect(d.feed(all.dropFirst(9)).map(\.0) == ["split line"])
     }
 
+    @Test func flushReturnsThePartialLinesOnce() {
+        var d = LogDemuxer(tty: false)
+        #expect(d.feed(frame(2, "boom\r") + frame(1, "done\nla") + frame(1, "st")).map(\.0) == ["done"])
+        let rest = d.flush()
+        #expect(rest.map(\.0) == ["last", "boom"])
+        #expect(rest.map(\.1) == [false, true])
+        #expect(d.flush().isEmpty)
+        var tty = LogDemuxer(tty: true)
+        _ = tty.feed(Data("a\nb".utf8))
+        #expect(tty.flush().map(\.0) == ["b"])
+    }
+
     @Test func ttyLogsAreRawText() {
         var d = LogDemuxer(tty: true)
         #expect(d.feed(Data("a\r\nb\n".utf8)).map(\.0) == ["a", "b"])

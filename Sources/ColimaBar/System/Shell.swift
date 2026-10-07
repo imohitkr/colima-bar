@@ -15,15 +15,27 @@ final class OutputBuffer: @unchecked Sendable {
 enum Shell {
     static let searchPath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-    static let env: [String: String] = {
+    /// The environment of each tool, before `environment(for:)` adds COLIMA_HOME.
+    static let baseEnv: [String: String] = {
         var e = ProcessInfo.processInfo.environment
         e["PATH"] = searchPath
         // An inherited DOCKER_HOST (launchd's, which ColimaBar itself sets)
         // would mask docker contexts; colima-ctl.sh sets its own.
         e.removeValue(forKey: "DOCKER_HOST")
-        e["XDG_CONFIG_HOME"] = "\(Paths.home)/.config"
         return e
     }()
+
+    /// The environment for `args`. A `colima` call and colima-ctl.sh get
+    /// COLIMA_HOME set to the Colima folder of ColimaBar, so Colima uses the
+    /// same folder as the app. `colimaHome` returns that folder and creates
+    /// it if it is missing (see Paths.preparedColimaDir).
+    static func environment(
+        for args: [String], colimaHome: () -> String = Paths.preparedColimaDir
+    ) -> [String: String] {
+        var e = baseEnv
+        if args.first == "colima" || args.first == Paths.ctl { e["COLIMA_HOME"] = colimaHome() }
+        return e
+    }
 
     /// Absolute path of `tool` on the pinned search path, or nil if missing.
     static func which(_ tool: String) -> String? {
@@ -48,7 +60,7 @@ enum Shell {
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
                 p.arguments = args
-                p.environment = env.merging(extraEnv) { $1 }
+                p.environment = environment(for: args).merging(extraEnv) { $1 }
                 let pipe = Pipe()
                 p.standardOutput = pipe
                 p.standardError = args.first == Paths.ctl ? ctlLogHandle() : FileHandle.nullDevice

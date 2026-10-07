@@ -95,4 +95,52 @@ import Testing
         r.feed(Data("fifth\n".utf8))
         #expect(r.lines().map(\.text) == ["third", "fifth"])
     }
+
+    @Test func leavesOutTheLineThatADropCutInItsStream() {
+        // Frames of 8 header bytes: "ab" (no "\n"), "cd\n" and "ef\n" on
+        // stdout, then "err\n" on stderr.
+        let data =
+            LogFrame.make(1, "ab") + LogFrame.make(1, "cd\n") + LogFrame.make(1, "ef\n") + LogFrame.make(2, "err\n")
+        // The ring drops only the first frame: "cd" lost its start "ab".
+        let r = RemovedLogRing(maxLines: 500, maxBytes: data.count - 10)
+        r.feed(data)
+        #expect(r.lines().map(\.text) == ["ef", "err"])
+        // The next drop ends with a full line ("cd\n"): nothing is cut now.
+        r.feed(LogFrame.make(1, "gh\n"))
+        #expect(r.lines().map(\.text) == ["ef", "err", "gh"])
+    }
+
+    @Test func aCutInOneStreamKeepsTheOtherStream() {
+        // A stderr frame without "\n" is dropped. The first stdout line stays.
+        let data = LogFrame.make(2, "pa") + LogFrame.make(1, "out\n") + LogFrame.make(2, "nic\n")
+        let r = RemovedLogRing(maxLines: 500, maxBytes: data.count - 10)
+        r.feed(data)
+        #expect(r.lines().map(\.text) == ["out"])
+        #expect(r.lines().map(\.isStderr) == [false])
+    }
+
+    @Test func aSkippedLargeFrameCutsTheLineOnlyIfItEndsMidLine() {
+        for (tail, expected) in [("\n", ["next"]), ("", [])] {
+            let r = RemovedLogRing(maxLines: 500, maxBytes: 64)
+            // The large frame arrives in reads of 30 bytes, then the rest of
+            // its line arrives in a new frame.
+            feed(r, LogFrame.make(1, String(repeating: "x", count: 200) + tail), in: 30)
+            r.feed(LogFrame.make(1, "next\n"))
+            #expect(r.lines().map(\.text) == expected, "tail \(tail.debugDescription)")
+        }
+    }
+
+    @Test func keepsALastLineWithoutANewline() {
+        let r = RemovedLogRing(maxLines: 500, maxBytes: 1 << 20)
+        r.feed(LogFrame.make(1, "starting\n") + LogFrame.make(2, "2026-10-07T10:00:02.5Z fatal: boom"))
+        let kept = r.lines()
+        #expect(kept.map(\.text) == ["starting", "fatal: boom"])
+        #expect(kept.map(\.isStderr) == [false, true])
+        #expect(kept.map(\.id) == [0, 1])
+
+        let tty = RemovedLogRing(maxLines: 500, maxBytes: 1 << 20)
+        tty.setTTY(true)
+        tty.feed(Data("one\ncrash without newline".utf8))
+        #expect(tty.lines().map(\.text) == ["one", "crash without newline"])
+    }
 }

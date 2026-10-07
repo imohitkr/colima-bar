@@ -25,7 +25,7 @@ else
 fi
 ```
 
-The snippet uses the Colima socket if the ColimaBar socket is missing. For a single `export DOCKER_HOST=…` line, click the copy button in the dashboard footer.
+The snippet uses the Colima socket if the ColimaBar socket is missing. If your Colima folder is `~/.colima` or `COLIMA_HOME`, change the second path to that folder. See [Colima folder](troubleshooting.md#colimabar-uses-the-wrong-colima-folder). For a single `export DOCKER_HOST=…` line, click the copy button in the dashboard footer.
 
 ## Profile sockets
 

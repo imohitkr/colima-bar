@@ -44,6 +44,21 @@ struct LogDemuxer {
         return out
     }
 
+    /// Returns the partial lines that wait for their "\n", stdout first,
+    /// and empties them. Call it when no more data comes, so a last line
+    /// without "\n" (for example a crash message) is not lost.
+    mutating func flush() -> [Piece] {
+        var out: [Piece] = []
+        for stderr in [false, true] {
+            guard var rest = partial[stderr], !rest.isEmpty else { continue }
+            if rest.last == 0x0D { rest.removeLast() }  // drop "\r"
+            partial[stderr] = Data()
+            guard !rest.isEmpty else { continue }
+            out.append((String(decoding: rest, as: UTF8.self), stderr))
+        }
+        return out
+    }
+
     /// Splits on "\n" at the byte level and decodes only whole lines.
     private mutating func split(_ bytes: Data, stderr: Bool, into out: inout [Piece]) {
         var pending = partial[stderr] ?? Data()

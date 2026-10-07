@@ -33,7 +33,7 @@ From a clone of the repository, run `scripts/uninstall.sh`. It does the same ste
 The script does these steps:
 
 1. It quits ColimaBar and removes the login item. If ColimaBar does not quit, the script stops and asks you to quit ColimaBar from its menu. Then run the script again.
-2. If the current docker context is `colimabar` or a `colimabar-PROFILE` context of ColimaBar, it switches to the `colima` context. If there is no `colima` context, it switches to `default`. Then it removes the `colimabar` context and every `colimabar-PROFILE` context whose description starts with "ColimaBar". It keeps other contexts.
+2. If the current docker context is a `colimabar-PROFILE` context of ColimaBar, it switches to the `colima-PROFILE` context. If the current context is `colimabar`, or there is no `colima-PROFILE` context, it switches to the `colima` context. If there is no `colima` context, it switches to `default`. Then it removes the `colimabar` context and every `colimabar-PROFILE` context whose description starts with "ColimaBar". It keeps other contexts.
 3. It clears the launchd `DOCKER_HOST` and the testcontainers `docker.host` that ColimaBar set. It also clears the launchd `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`.
 4. It removes the `/var/run/docker.sock` symlink if it points to the ColimaBar socket. This step asks for your password.
 5. It deletes the app, the ColimaBar cache (`~/.cache/colima-bar`) and the ColimaBar settings.

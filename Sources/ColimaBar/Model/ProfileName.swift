@@ -31,9 +31,11 @@ enum ProfileName {
             let first = chars.first, let last = chars.last, first != 45, last != 45,
             !name.contains("--")
         else { return "Use lowercase letters, digits and single hyphens. Start and end with a letter or a digit." }
-        // Colima maps "colima" to the default profile and removes a "colima-" prefix.
-        if name == "default" || name == "colima" || name.hasPrefix("colima-") {
-            return "The names default and colima, and names that start with colima-, belong to the default profile."
+        if name == "default" { return "The name default belongs to the default profile." }
+        // Colima maps "colima" to "default" and removes a "colima-" prefix:
+        // "colima-work" means "work".
+        if name == "colima" || name.hasPrefix("colima-") {
+            return "Colima reads this name as a different profile. Do not use colima or names that start with colima-."
         }
         if existing.contains(where: { $0.lowercased() == name }) { return "A profile with this name exists." }
         return nil

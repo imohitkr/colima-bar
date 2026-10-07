@@ -86,14 +86,17 @@ import Testing
     }
 
     @Test(arguments: ["colima", "colima-work", "colima-"])
-    func deleteRefusesTheColimaAliasesOfDefault(name: String) throws {
-        // Colima maps these names to the default profile.
+    func deleteRefusesNamesThatColimaReadsAsAnotherProfile(name: String) throws {
+        // Colima maps "colima" to "default" and reads "colima-work" as "work".
         let sb = try ScriptSandbox()
         try sb.write(".config/colima/default/colima.yaml", config)
+        try sb.write(".config/colima/work/colima.yaml", config)
         try sb.write(".config/colima/\(name)/colima.yaml", config)
         let r = try run(sb, ["profile-delete"], profile: name)
         #expect(r.status == 1)
-        #expect(r.out.contains("COLIMABAR_NOTIFY:Can't delete profile '\(name)'"))
+        #expect(
+            r.out.contains(
+                "COLIMABAR_NOTIFY:Can't delete profile '\(name)'. Colima reads this name as a different profile."))
         #expect(sb.calls.isEmpty)  // no dialog, no colima call
     }
 
@@ -134,7 +137,7 @@ import Testing
         return text?.split(separator: "\n").first { $0.hasPrefix("disk:") }.map(String.init)
     }
 
-    @Test func diskShrinkUsesTheXDGFolderByDefault() throws {
+    @Test func diskShrinkUsesTheConfigFolderWhenItExists() throws {
         let sb = try ScriptSandbox()
         #expect(try shrink(sb, configIn: ".config/colima").status == 0)
         #expect(disk(sb, ".config/colima") == "disk: 50")
@@ -142,7 +145,7 @@ import Testing
     }
 
     @Test func diskShrinkUsesDotColimaWhenItExists() throws {
-        // Colima prefers ~/.colima over $XDG_CONFIG_HOME/colima.
+        // ~/.colima wins over ~/.config/colima.
         let sb = try ScriptSandbox()
         try sb.write(".config/colima/work/colima.yaml", "cpu: 2\ndisk: 200\n")
         #expect(try shrink(sb, configIn: ".colima").status == 0)
@@ -165,6 +168,59 @@ import Testing
         #expect(r.status == 0)
         #expect(disk(sb, ".config/colima") == "disk: 50")
         #expect(!FileManager.default.fileExists(atPath: sb.home + "/missing"))
+    }
+
+    /// A stub `colima` that also logs the COLIMA_HOME it gets.
+    private func stubColimaHome(_ sb: ScriptSandbox) throws {
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s COLIMA_HOME=%s\\n' "$*" "${COLIMA_HOME:-}" >> "\(sb.log)"
+            [ "$1" = status ] && exit 1
+            exit 0
+            """)
+    }
+
+    @Test(arguments: [["start"], ["ssh"]])
+    func colimaCallsGetTheColimaFolderInColimaHome(args: [String]) throws {
+        // A new Mac: no folder exists. ~/.colima is made first, because
+        // Colima skips a COLIMA_HOME that does not exist.
+        let sb = try ScriptSandbox()
+        try stubColimaHome(sb)
+        #expect(try run(sb, args).status == 0)
+        let call = try #require(sb.calls.first { $0.hasPrefix("colima ") })
+        #expect(call.hasSuffix("--profile work COLIMA_HOME=\(sb.home)/.colima"))
+        #expect(FileManager.default.fileExists(atPath: sb.home + "/.colima"))
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.config/colima"))
+    }
+
+    @Test func colimaCallsUseTheConfigFolderWhenOnlyItExists() throws {
+        // Colima itself would pick ~/.colima here. COLIMA_HOME keeps the
+        // VM of an older ColimaBar version in ~/.config/colima.
+        let sb = try ScriptSandbox()
+        try stubColimaHome(sb)
+        try sb.write(".config/colima/work/colima.yaml", config)
+        #expect(try run(sb, ["start"], env: ["XDG_CONFIG_HOME": sb.home + "/xdg"]).status == 0)
+        #expect(sb.calls.contains("colima start --profile work COLIMA_HOME=\(sb.home)/.config/colima"))
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
+    }
+
+    @Test func xdgConfigHomeCountsOnlyWhenNoFolderExists() throws {
+        let sb = try ScriptSandbox()
+        try stubColimaHome(sb)
+        #expect(try run(sb, ["start"], env: ["XDG_CONFIG_HOME": sb.home + "/xdg"]).status == 0)
+        #expect(sb.calls.contains("colima start --profile work COLIMA_HOME=\(sb.home)/xdg/colima"))
+        #expect(FileManager.default.fileExists(atPath: sb.home + "/xdg/colima"))
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
+    }
+
+    @Test func theScriptKeepsTheLocale() throws {
+        // A changed locale could garble non-ASCII text in dialogs. The name
+        // checks use character lists, so they need no locale.
+        let text = try String(
+            contentsOf: ScriptSandbox.repo.appendingPathComponent("scripts/colima-ctl.sh"), encoding: .utf8)
+        #expect(!text.contains("LC_ALL"))
+        #expect(!text.contains("[!a-z") && !text.contains("[!A-Z") && !text.contains("[!0-9"))
     }
 
     @Test func deleteFindsTheProfileInDotColima() throws {

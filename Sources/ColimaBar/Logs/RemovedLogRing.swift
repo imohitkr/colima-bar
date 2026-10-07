@@ -20,8 +20,11 @@ final class RemovedLogRing: @unchecked Sendable {
     private var count = 0
     /// Bytes of a frame larger than the ring that later reads still carry.
     private var skip = 0
-    /// TTY only: a drop cut the oldest line, so its start is gone.
-    private var cutLine = false
+    /// The stream of that frame: true for stderr.
+    private var skipStderr = false
+    /// The streams whose oldest kept line lost its start in a drop: true
+    /// for stderr. A TTY stream counts as stdout.
+    private var cut: Set<Bool> = []
 
     /// The smallest ring: a frame that starts in the dropped part must have
     /// its whole 8-byte header in the ring or in the new read.
@@ -45,19 +48,20 @@ final class RemovedLogRing: @unchecked Sendable {
             var d = data
             if skip > 0 {
                 let k = min(skip, d.count)
+                // The frame ends in this read: its last byte tells if the
+                // dropped part ended a line.
+                if k == skip { setCut(skipStderr, lineEnded: d[d.startIndex + k - 1] == 0x0A) }
                 d = d.dropFirst(k)
                 skip -= k
             }
             guard !d.isEmpty else { return }
             let total = count + d.count
             if total > maxBytes {
-                let cut = dropLength(need: total - maxBytes, total: total, incoming: d)
-                if tty { cutLine = byte(cut.drop - 1, d) != 0x0A }
-                let fromRing = min(cut.drop, count)
+                let drop = dropLength(need: total - maxBytes, total: total, incoming: d)
+                let fromRing = min(drop, count)
                 if fromRing > 0 { head = (head + fromRing) % store.count }
                 count -= fromRing
-                d = d.dropFirst(cut.drop - fromRing)
-                skip = cut.skip
+                d = d.dropFirst(drop - fromRing)
             }
             write(d)
         }
@@ -67,12 +71,16 @@ final class RemovedLogRing: @unchecked Sendable {
     var rawBytes: Int { lock.withLock { count } }
 
     /// Splits and parses the kept bytes: at most `maxLines` of the newest
-    /// lines, oldest first. A partial last line is left out.
+    /// lines, oldest first. A last line without "\n" is kept. The first line
+    /// of a stream that a drop cut is left out, because its start is gone.
     func lines() -> [LogLine] {
-        let (raw, tty, cutLine) = lock.withLock { (linear(), tty, cutLine) }
+        let (raw, tty, cut) = lock.withLock { (linear(), tty, cut) }
         var demux = LogDemuxer(tty: tty)
-        var pieces = demux.feed(raw)[...]
-        if cutLine, !pieces.isEmpty { pieces = pieces.dropFirst() }
+        var pieces = demux.feed(raw)
+        pieces += demux.flush()
+        for stderr in cut {
+            if let i = pieces.firstIndex(where: { $0.isStderr == stderr }) { pieces.remove(at: i) }
+        }
         return pieces.suffix(maxLines).enumerated().map { i, p in
             var l = LogLine.parse(p.text, isStderr: p.isStderr).line
             l.id = i
@@ -91,19 +99,36 @@ final class RemovedLogRing: @unchecked Sendable {
     /// so that at most `maxBytes` remain. Frames are dropped whole, so the
     /// rest still starts at a frame header. If one frame is larger than the
     /// ring, all bytes go, and `skip` is the rest of that frame in later reads.
-    private func dropLength(need: Int, total: Int, incoming d: Data) -> (drop: Int, skip: Int) {
-        if tty { return (need, 0) }
+    /// It also updates `cut` for the streams whose dropped part ends mid-line.
+    private func dropLength(need: Int, total: Int, incoming d: Data) -> Int {
+        if tty {
+            setCut(false, lineEnded: byte(need - 1, d) == 0x0A)
+            return need
+        }
         var o = 0
         while o < need {
             // o < total - maxBytes, and maxBytes >= 8: the header is complete.
+            let stderr = byte(o, d) == 2
             let size =
                 Int(byte(o + 4, d)) << 24 | Int(byte(o + 5, d)) << 16 | Int(byte(o + 6, d)) << 8
                 | Int(byte(o + 7, d))
             let end = o + 8 + size
-            if end > total { return (total, end - total) }
+            if end > total {
+                // The end of the frame is in a later read (see feed).
+                skip = end - total
+                skipStderr = stderr
+                cut.insert(stderr)
+                return total
+            }
+            if size > 0 { setCut(stderr, lineEnded: byte(end - 1, d) == 0x0A) }
             o = end
         }
-        return (o, 0)
+        return o
+    }
+
+    /// Records whether the dropped part of a stream ended with a full line.
+    private func setCut(_ stderr: Bool, lineEnded: Bool) {
+        if lineEnded { cut.remove(stderr) } else { cut.insert(stderr) }
     }
 
     /// Appends `d`. The caller made room, so `count + d.count <= maxBytes`.

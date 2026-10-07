@@ -130,4 +130,27 @@ import Testing
         #expect(ColimaModel.contextsRetryDue(wanted: b, failed: a, failedAt: t, now: t.addingTimeInterval(60)))
         #expect(ColimaModel.contextsRetryDue(wanted: a, failed: a, failedAt: t, now: t.addingTimeInterval(wait)))
     }
+
+    @Test func holdsFollowTheSelectedProfileDuringAWake() {
+        // A wake of work runs. The stable proxy holds only while work is selected.
+        let before = ColimaModel.holds(waking: ["work"], selected: "default")
+        #expect(!before.stable)
+        #expect(before.profiles == ["work"])
+        let after = ColimaModel.holds(waking: ["work"], selected: "work")
+        #expect(after.stable)
+        #expect(after.profiles == ["work"])
+        // The wake ends: nothing holds.
+        let done = ColimaModel.holds(waking: [], selected: "work")
+        #expect(!done.stable && done.profiles.isEmpty)
+    }
+
+    @Test func holdsKeepAProfileThatIsRemovedAndAddedBack() {
+        // `colima list` drops work for a moment during its wake. The hold set
+        // still names work, so its new proxy holds at once (ProfileProxies.sync).
+        let gone = ColimaModel.holds(waking: ["work", "dev"], selected: "default")
+        #expect(gone.profiles == ["work", "dev"])
+        #expect(!gone.stable)
+        let back = ColimaModel.holds(waking: ["work"], selected: "default")
+        #expect(back.profiles == ["work"])
+    }
 }

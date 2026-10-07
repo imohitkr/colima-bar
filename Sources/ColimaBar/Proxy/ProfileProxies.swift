@@ -5,7 +5,8 @@ import os
 /// One auto-start proxy for each Colima profile with the docker runtime, at
 /// `~/.cache/colima-bar/profiles/PROFILE.sock`.
 ///
-/// Each proxy has a fixed upstream: the Colima socket of its profile. A real
+/// Each proxy has one upstream: the Colima socket of its profile. It changes
+/// only when the Colima folder moves (`refreshUpstreams()`). A real
 /// request to a stopped profile wakes that profile only. The stable socket
 /// (Paths.proxySocket) is a separate proxy that follows the selected profile.
 ///
@@ -74,6 +75,15 @@ final class ProfileProxies {
             if listening { px.start() } else { px.stop() }
         }
         removeStrays()
+    }
+
+    /// Gives each proxy the upstream that `upstream` returns now, for
+    /// example after the Colima folder moved. A stopped proxy links again.
+    func refreshUpstreams() {
+        for (name, px) in proxies {
+            let up = upstream(name)
+            if px.upstream != up { px.upstream = up }
+        }
     }
 
     /// Starts or stops all proxies (the auto-start setting). A stopped proxy

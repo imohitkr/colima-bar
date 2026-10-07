@@ -77,6 +77,7 @@ import Testing
         #expect(names == ["b", "work"])
 
         try FileManager.default.removeItem(atPath: sb.home + "/.cache/colima-bar")
+        try FileManager.default.createDirectory(atPath: sb.home + "/.config/colima", withIntermediateDirectories: true)
         #expect(try call(sb, "link_profile_sockets work b").status == 0)
         let fm = FileManager.default
         #expect(
@@ -86,12 +87,61 @@ import Testing
         #expect(try call(sb, "link_profile_sockets").status == 0)  // no profiles: nothing to do
     }
 
+    @Test func colimaDirUsesTheRulesOfTheApp() throws {
+        // The same cases as PathsTests.colimaDirUsesTheFirstRuleThatApplies.
+        let sb = try ScriptSandbox()
+        let fm = FileManager.default
+        func dir(_ env: String = "") throws -> String {
+            try call(sb, "\(env) colima_dir").out.trimmingCharacters(in: .newlines)
+        }
+        let xdg = "XDG_CONFIG_HOME='\(sb.home)/xdg'"
+        // 5. Nothing exists: ~/.colima. 4. XDG_CONFIG_HOME is set: its colima folder.
+        #expect(try dir() == sb.home + "/.colima")
+        #expect(try dir(xdg) == sb.home + "/xdg/colima")
+        // 3. ~/.config/colima exists.
+        try fm.createDirectory(atPath: sb.home + "/.config/colima", withIntermediateDirectories: true)
+        #expect(try dir(xdg) == sb.home + "/.config/colima")
+        // 2. ~/.colima exists.
+        try fm.createDirectory(atPath: sb.home + "/.colima", withIntermediateDirectories: true)
+        #expect(try dir(xdg) == sb.home + "/.colima")
+        // 1. COLIMA_HOME exists. A missing one is ignored.
+        try fm.createDirectory(atPath: sb.home + "/custom", withIntermediateDirectories: true)
+        #expect(try dir("COLIMA_HOME='\(sb.home)/custom'") == sb.home + "/custom")
+        #expect(try dir("COLIMA_HOME='\(sb.home)/missing'") == sb.home + "/.colima")
+    }
+
+    @Test(arguments: [
+        ("colimabar-work", ["colima-work"], "colima-work"),
+        ("colimabar-default", ["colima"], "colima"),
+        ("colimabar", ["colima"], "colima"),
+        // Colima's context of the profile is gone: colima, then default.
+        ("colimabar-work", ["colima"], "colima"),
+        ("colimabar-work", [], "default"),
+    ])
+    func leavingAContextPrefersTheContextOfColimaForItsProfile(
+        current: String, existing: [String], expected: String
+    ) throws {
+        let sb = try ScriptSandbox()
+        // A stub docker that knows only the `existing` contexts and default.
+        let known = (existing + ["default"]).joined(separator: " ")
+        try sb.stub(
+            "docker",
+            """
+            printf 'docker %s\\n' "$*" >> "\(sb.log)"
+            for c in \(known); do [ "$3" = "$c" ] && exit 0; done
+            exit 1
+            """)
+        #expect(try call(sb, "leave_context \(current)").status == 0)
+        #expect(sb.calls.last == "docker context use \(expected)")
+    }
+
     @Test func theScriptUsesTheHelpers() throws {
         let text = try script()
         // It switches away from and removes only colimabar and the contexts of colimabar_contexts.
         #expect(text.contains("OUR_CONTEXTS=(colimabar $(colimabar_contexts))"))
         #expect(text.contains("for ctx in \"${OUR_CONTEXTS[@]}\"; do"))
         #expect(!text.contains("colimabar-*)"))
+        #expect(text.contains("leave_context \"$ctx\""))
         // The names are read before the cache folder goes away.
         let read = try #require(text.range(of: "PROFILE_NAMES=($(profile_socket_names))"))
         let rm = try #require(text.range(of: "rm -rf ~/Applications/ColimaBar.app"))

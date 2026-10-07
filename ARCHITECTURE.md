@@ -59,7 +59,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 ### `System/`
 
-- `Paths`: all file paths.
+- `Paths`: all file paths. `colimaDir` and `limaDir` find the Colima folder and Lima's folder with the rule in [Actions and `colima-ctl.sh`](#actions-and-colima-ctlsh). The model checks both folders again on each status refresh.
 - `Shell`: runs `colima`, `colima-ctl.sh` and other tools, and opens iTerm or Terminal.
 - `Routing`: sets and checks the docker routes.
 - `ProfileContexts`: creates, updates and removes the `colimabar-PROFILE` docker contexts.
@@ -67,7 +67,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `Notifier` and `AlertThrottle`: notifications and their rate limit.
 - `Updater`, `Version`, `ReleaseLink`: the daily release check.
 - `Defaults`: `UserDefaults` access.
-- `ColimaDirWatcher`: watches the Colima folders.
+- `ColimaDirWatcher`: watches the Colima folder, Lima's folder and their subfolders. Lima's folder can be outside the Colima folder (`LIMA_HOME`).
 - `FileLimit`: raises the open file limit.
 
 ### `Logs/`
@@ -131,16 +131,18 @@ The upstream of the stable socket is the Colima socket of the selected profile. 
 
 On quit, or when auto-start is off, `SocketProxy.stop()` replaces the path with a symlink to the Colima socket. It creates the link before it closes the listener, so a client never sees a missing socket.
 
+The listener is a GCD read source on a non-blocking fd. When a client waits, the event handler accepts all waiting clients and starts one thread for each connection. There is no accept thread for each proxy. Only the cancel handler of the source closes the fd. GCD runs it after the last event handler returns. Thus the system cannot give the same fd number to a new listener while an accept can still run on the old one.
+
 ### Profile sockets
 
-`ProfileProxies` runs one more `SocketProxy` for each profile with the docker runtime in the last `colima list`. The socket is `~/.cache/colima-bar/profiles/PROFILE.sock` (`Paths.profileSocket`). Its upstream is the Colima socket of that profile and never changes. A real request to it calls `wakeForProxy(profile:)` for that profile only. The readiness gate and the refusals are the same as for the stable socket.
+`ProfileProxies` runs one more `SocketProxy` for each profile with the docker runtime in the last `colima list`. The socket is `~/.cache/colima-bar/profiles/PROFILE.sock` (`Paths.profileSocket`). Its upstream is the Colima socket of that profile. It changes only when the Colima folder moves (`ProfileProxies.refreshUpstreams()`). A real request to it calls `wakeForProxy(profile:)` for that profile only. The readiness gate and the refusals are the same as for the stable socket.
 
 - `ProfileSocket.path` returns nil for an invalid name, or when the path is longer than 99 bytes: sun_path holds 103 bytes, and `UnixSocket.listen` binds at `PATH.tmp` first. ColimaBar logs the skipped name once.
 - `refreshStatus()` calls `syncProfiles()` after each `colima list`. It creates the proxies of new profiles, removes the proxies of gone profiles and deletes old files in the folder. It keeps the proxy of a profile while its busy marker exists, because a disk shrink deletes the profile for a short time. An empty list changes nothing. A debug run changes nothing.
 - `ProfileContexts` keeps one docker context `colimabar-PROFILE` for each proxy. It changes only contexts whose description starts with "ColimaBar". It runs the docker CLI only when the wanted set changes. The `colimabar` context, the launchd `DOCKER_HOST` and the testcontainers route still point at the stable socket.
 - `wakeForProxy(profile:)` runs one wake at a time for each profile. The stable socket and the profile socket of the selected profile can ask for the same wake.
 - `colima start` of any profile switches the docker context to that profile. When `refreshStatus()` sees a different profile start, it runs `Routing.apply()`.
-- Each proxy holds one listening fd and one thread in `accept()`. Thus the idle cost grows by one fd and one thread for each profile.
+- Each proxy holds one listening fd and one GCD read source. It has no accept thread. Thus the idle cost grows by one fd for each profile.
 
 On quit, or when auto-start is off, each profile socket becomes a symlink to the Colima socket of its profile.
 
@@ -151,7 +153,7 @@ The heartbeat runs each second while a dashboard is open or an action runs. Othe
 ColimaBar runs `colima list -j` only in these cases:
 
 - A ping shows that the VM went up or down.
-- `ColimaDirWatcher` sees a change in `~/.config/colima`, a profile folder or a Lima instance folder.
+- `ColimaDirWatcher` sees a change in the Colima folder (`Paths.colimaDir`), a profile folder, Lima's folder (`Paths.limaDir`) or a Lima instance folder.
 - The dashboard opens and the last list is more than 1 minute old.
 - The last list is more than 5 minutes old (1 minute when the state is not running or stopped).
 
@@ -161,9 +163,19 @@ ColimaBar sends the profile in `COLIMABAR_PROFILE`: the selected profile, or the
 
 `with_busy` runs the action in an extra subshell, `( "$@" ) &`. Without it, bash 3.2 (the `/bin/bash` of macOS) can run the first `command colima` of the action with `exec`. Then `restart_vm` ends after `colima status`, and the VM does not restart. A test with stub tools (`ColimaCtlScriptTests`) checks this.
 
-`profile-create CPU MEM DISK [RUNTIME]` runs `colima start` with these values for a new profile. It checks the name with the same rules as `ProfileName.problem`. `profile-delete` refuses the names `colima` and `colima-*`, because Colima maps them to the default profile. It also refuses a profile without a folder. Then it asks once more and runs `colima delete --data --force`. The app shows a typed confirmation before it.
+`profile-create CPU MEM DISK [RUNTIME]` runs `colima start` with these values for a new profile. It checks the name with the same rules as `ProfileName.problem`. `profile-delete` refuses the name `colima` and names that start with `colima-`, because Colima reads them as a different profile: it maps `colima` to `default` and removes the `colima-` prefix. It also refuses a profile without a folder. Then it asks once more and runs `colima delete --data --force`. The app shows a typed confirmation before it.
 
-The script uses the Colima folder that Colima uses: `COLIMA_HOME` if that path exists, `~/.colima` if it exists, else `$XDG_CONFIG_HOME/colima`. The script pins `XDG_CONFIG_HOME` to `~/.config`. It sets `LC_ALL=C`, so its name checks match ASCII only in every locale.
+ColimaBar (`Paths.colimaDir`), the script and `uninstall.sh` find the Colima folder with the same rule as Colima. They use the first match:
+
+1. `COLIMA_HOME`, if it is set and the folder exists.
+2. `~/.colima`, if it exists.
+3. `~/.config/colima`, if it exists.
+4. `$XDG_CONFIG_HOME/colima`, if `XDG_CONFIG_HOME` is set.
+5. `~/.colima`, the default of Colima.
+
+Lima's folder (`Paths.limaDir`) is `LIMA_HOME` if it is set, else `_lima` in the Colima folder. ColimaBar runs each `colima` command with `COLIMA_HOME` set to the Colima folder, so Colima uses the same folder. The app reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launchd environment, not from the shell. The model checks the folders again on each status refresh, so a change needs no restart.
+
+The name checks of the script list each allowed character, not a range such as `[a-z]`. Thus they match only ASCII in every locale.
 
 A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
 
@@ -231,7 +243,7 @@ Do not break these rules.
 - **`colima-ctl.sh`.** The app bundle contains it in `Contents/Resources`. Exit code 0 means done. Exit code 1 means failed (the script already notified the user). Exit code 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 - **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
-- **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends. These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
+- **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
 - **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item.
 
 ## Testing

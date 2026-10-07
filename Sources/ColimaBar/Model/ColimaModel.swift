@@ -247,11 +247,7 @@ final class ColimaModel {
                 await Routing.apply()
                 routing = await Routing.status()
             }
-            // Any profile starting, stopping, appearing or going away changes
-            // these directories, so no frequent `colima list` is needed.
-            dirWatcher = ColimaDirWatcher(root: Paths.colimaDir, lima: Paths.limaDir) { [weak self] in
-                Task { await self?.refreshStatus() }
-            }
+            dirWatcher = makeDirWatcher()
         }
         Task { await refreshAll() }
         lastPing = Date()
@@ -264,6 +260,14 @@ final class ColimaModel {
                 await sleep.value
                 await tick()
             }
+        }
+    }
+
+    /// Any profile starting, stopping, appearing or going away changes the
+    /// watched folders, so no frequent `colima list` is needed.
+    private func makeDirWatcher() -> ColimaDirWatcher {
+        ColimaDirWatcher(root: Paths.colimaDir, lima: Paths.limaDir) { [weak self] in
+            Task { await self?.refreshStatus() }
         }
     }
 
@@ -293,6 +297,9 @@ final class ColimaModel {
     /// marker, publishing the stat streams' latest numbers, and a socket
     /// /_ping every 3 s (dashboard open) or 10 s (closed).
     private func tick() async {
+        // A new Colima folder (for example ~/.colima made by a colima call
+        // in a terminal) moves every socket: refresh at once.
+        if Paths.colimaFoldersMoved { await refreshStatus() }
         let b = readBusy()
         if b != busy {
             let finished = busy != nil && b == nil
@@ -372,6 +379,7 @@ final class ColimaModel {
 
     func refreshStatus() async {
         lastColima = Date()
+        if Paths.refreshColimaFolders() { colimaFoldersChanged() }
         // Profiles and Lima instances come and go: watch the current set.
         dirWatcher?.rearm()
         guard Shell.which("colima") != nil else {
@@ -488,24 +496,44 @@ final class ColimaModel {
     }
 
     private func switchProfile(from old: String) {
-        generation += 1
         // An action that this app runs keeps its label on its own profile, so
         // the profile menu shows it until the action ends (see execute).
         if let b = localBusy { profileActions[old] = b }
         localBusy = profileActions.removeValue(forKey: profile)
+        // At once, not on the next tick: the Delete guard of the menu reads it.
+        set(\.busy, readBusy())
+        retargetSocket()
+        syncWakeHolds()
+        Task { await refreshAll() }
+    }
+
+    /// Points the API client, the saved logs and the stable proxy at the
+    /// socket of the selected profile, and forgets the data of the old socket.
+    private func retargetSocket() {
+        generation += 1
         clearVMData()
         for h in statStreams.values { h.cancel() }
         statStreams = [:]
         latest = [:]
         api = DockerAPI(socketPath: Paths.socket(profile))
-        keeper.reset(api: api)  // saved logs belong to the old profile
-        proxy.upstream = Paths.socket(profile)
-        syncWakeHolds()
+        keeper.reset(api: api)  // saved logs belong to the old socket
+        // A stopped proxy links its path to the new upstream. A debug run
+        // must not change the proxy sockets.
+        if !isDebug { proxy.upstream = Paths.socket(profile) }
         vm = VMInfo()
         state = .unknown
         idleSince = nil
         otherIdle = [:]
-        Task { await refreshAll() }
+    }
+
+    /// The Colima folder changed (see Paths.refreshColimaFolders). Every
+    /// socket, colima.yaml and watched folder moves with it.
+    private func colimaFoldersChanged() {
+        log.notice("the Colima folder is now \(Paths.colimaDir, privacy: .public)")
+        retargetSocket()
+        guard !isDebug else { return }
+        profileProxies.refreshUpstreams()
+        if dirWatcher != nil { dirWatcher = makeDirWatcher() }
     }
 
     /// True if the list was refreshed from the daemon.
@@ -665,9 +693,9 @@ final class ColimaModel {
     /// stable proxy for the selected profile, and the profile proxies. Their
     /// requests then wait for that wake, whichever proxy started it.
     private func syncWakeHolds() {
-        let waking = Set(wakes.keys)
-        proxy.holdForWake(waking.contains(profile))
-        profileProxies.holdForWake(waking)
+        let h = Self.holds(waking: Set(wakes.keys), selected: profile)
+        proxy.holdForWake(h.stable)
+        profileProxies.holdForWake(h.profiles)
     }
 
     /// The runtime of a profile: the live value for the selected profile,
@@ -1102,9 +1130,8 @@ final class ColimaModel {
     /// `colimabar-PROFILE` context go away. If it was selected, the
     /// dashboard switches to `default`.
     func deleteProfile(_ p: String) {
-        // The menu hides the selected profile while its action runs. The
-        // action can start while the confirmation is open.
-        if p == profile, busy != nil {
+        // An action of the profile can start while the confirmation is open.
+        if readBusy(p) != nil || profileActions[p] != nil || (p == profile && busy != nil) {
             Notifier.shared.post("Wait until the action of the profile \(p) ends, then delete it.")
             return
         }
@@ -1197,8 +1224,10 @@ final class ColimaModel {
     /// Runs a colima-ctl.sh action in a terminal window.
     func terminal(_ action: CtlAction, _ args: String..., profile p: String? = nil) {
         let words = [Paths.ctl, action.rawValue] + args
+        // The same Colima folder as the app, also when the shell sets COLIMA_HOME.
         Shell.inTerminal(
-            "COLIMABAR_PROFILE=\(Shell.quote(p ?? profile)) " + words.map(Shell.quote).joined(separator: " "))
+            "COLIMA_HOME=\(Shell.quote(Paths.preparedColimaDir())) COLIMABAR_PROFILE=\(Shell.quote(p ?? profile)) "
+                + words.map(Shell.quote).joined(separator: " "))
     }
 
     func open(port: Int) {

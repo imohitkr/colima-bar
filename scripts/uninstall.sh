@@ -20,18 +20,45 @@ colimabar_contexts() {
   return 0
 }
 
-# colima_dir -> the Colima config folder, with the rules of Colima 0.10.3
-# (config/files.go) and colima-ctl.sh: COLIMA_HOME if that path exists,
-# ~/.colima if it exists, else ~/.config/colima. ColimaBar pins
-# XDG_CONFIG_HOME to ~/.config, so the XDG_CONFIG_HOME of this shell does not count.
+# colima_dir -> the Colima config folder, with the rules of colima-ctl.sh and
+# Paths.colimaDir in ColimaBar. The first rule that applies wins: COLIMA_HOME if
+# that path exists, ~/.colima if it exists, ~/.config/colima if it exists,
+# $XDG_CONFIG_HOME/colima if XDG_CONFIG_HOME is set, else ~/.colima.
 colima_dir() {
   if [ -n "${COLIMA_HOME:-}" ] && [ -e "$COLIMA_HOME" ]; then
     echo "$COLIMA_HOME"
   elif [ -e "$HOME/.colima" ]; then
     echo "$HOME/.colima"
-  else
+  elif [ -e "$HOME/.config/colima" ]; then
     echo "$HOME/.config/colima"
+  elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
+    echo "$XDG_CONFIG_HOME/colima"
+  else
+    echo "$HOME/.colima"
   fi
+}
+
+# colima_context_for CONTEXT -> the docker context of Colima for the profile
+# of a colimabar-PROFILE context: colima-PROFILE, or colima for default. For
+# any other context, it prints colima.
+colima_context_for() {
+  case "$1" in
+    colimabar-default) echo colima ;;
+    colimabar-?*) echo "colima-${1#colimabar-}" ;;
+    *) echo colima ;;
+  esac
+}
+
+# leave_context CONTEXT -> switches docker away from CONTEXT, a context of
+# ColimaBar. It uses the context of Colima for the same profile if that
+# context exists. Else it uses colima, else default.
+leave_context() {
+  local target
+  target=$(colima_context_for "$1")
+  docker context use "$target" >/dev/null 2>&1 \
+    || docker context use colima >/dev/null 2>&1 \
+    || docker context use default >/dev/null 2>&1
+  return 0
 }
 
 # profile_socket_names -> the profiles that have a socket in PROFILES_DIR:
@@ -42,7 +69,7 @@ profile_socket_names() {
     [ -e "$f" ] || [ -L "$f" ] || continue
     n=${f##*/}
     n=${n%.sock}
-    case "$n" in *[!A-Za-z0-9._-]*|.*|"") continue ;; esac
+    case "$n" in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*|.*|"") continue ;; esac
     echo "$n"
   done
 }
@@ -99,7 +126,7 @@ OUR_CONTEXTS=(colimabar $(colimabar_contexts))
 CURRENT_CONTEXT=$(docker context show 2>/dev/null)
 for ctx in "${OUR_CONTEXTS[@]}"; do
   if [ "$ctx" = "$CURRENT_CONTEXT" ]; then
-    docker context use colima >/dev/null 2>&1 || docker context use default >/dev/null 2>&1
+    leave_context "$ctx"
     break
   fi
 done

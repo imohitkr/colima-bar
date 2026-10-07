@@ -15,14 +15,14 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - **Shrink…** next to the disk size on the System tab. Colima cannot shrink a disk in place. Thus this deletes the VM with all its containers, images, volumes and build cache, and starts it again with a smaller disk and the same settings. You must type the profile name to confirm. See [Shrink the disk](docs/usage.md#shrink-the-disk).
 - A socket and a docker context for each profile with the docker runtime, for example `~/.cache/colima-bar/profiles/work.sock` and `colimabar-work`. A docker request to the socket of a stopped profile starts that profile. Use `docker --context colimabar-work ps`, or set `DOCKER_HOST` for one project. The ColimaBar socket still follows the selected profile. See [Profile sockets](docs/auto-start.md#profile-sockets).
 - Auto-stop checks each running docker profile, not only the selected one. Each profile stops after its own idle time. See [Auto-stop](docs/auto-stop.md).
-- The profile menu in the header now shows also when you have one profile. It starts and stops other profiles, creates a profile with **New Profile…** and deletes a profile with **Delete Profile** after a typed confirmation. See [Profiles](docs/usage.md#profiles).
+- The profile menu in the header now shows also when you have one profile. It starts and stops other profiles, creates a profile with **New Profile…** and deletes a profile with **Delete Profile** after a typed confirmation. **Delete Profile** refuses `colima`, names that start with `colima-`, and a profile without a folder. See [Profiles](docs/usage.md#profiles).
 - Install with Homebrew: `brew install --cask imohitkr/tap/colima-bar`. The cask is in the new [imohitkr/homebrew-tap](https://github.com/imohitkr/homebrew-tap) repository. A workflow in the tap verifies the attestation of each new release before it updates the cask.
 
 ### Changed
 
 - The VM dialogs and the failure notifications name the profile, for example "Grow the Colima disk of profile 'work' to 150 GB?".
 - The ••• menu item **Logs in iTerm** is now **Logs in Terminal**.
-- The uninstall script also removes the `colimabar-PROFILE` contexts of ColimaBar, and links each profile socket to the Colima socket of its profile.
+- The uninstall script also removes the `colimabar-PROFILE` contexts whose description starts with "ColimaBar". It links each profile socket to the Colima socket of its profile.
 - The docs have a new structure. The README is short. The user guides are in `docs/`. `ARCHITECTURE.md` describes the design, and `SUPPORT.md` tells you how to get help.
 
 ### Removed
@@ -32,10 +32,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Fixed
 
 - Restart, **Apply** of VM resources, Rosetta, Kubernetes and a disk grow always restart a running VM. Before, they could report success and leave the VM unchanged: the bash of macOS ended `restart_vm` early, after `colima status`. A disk shrink of a running VM could also stop at this step.
-- **Delete Profile** refuses the names `colima` and `colima-*`. Colima maps these names to the default profile, so a delete of them deleted the default profile. It also refuses a profile that has no folder.
-- The uninstall script removes only the `colimabar-PROFILE` contexts whose description starts with "ColimaBar". Before, it also removed other contexts with such a name.
-- `colima-ctl.sh` uses the same Colima folder as Colima: `COLIMA_HOME` if it exists, `~/.colima` if it exists, else `~/.config/colima`. Before, it always used `~/.config/colima`, so a disk shrink could put `colima.yaml` back in a folder that Colima does not use.
-- `colima-ctl.sh` checks profile names in the C locale. In some locales, the name check accepted uppercase and non-ASCII letters.
+- ColimaBar, `colima-ctl.sh` and the uninstall script find the Colima folder like Colima does (`COLIMA_HOME`, `~/.colima`, `~/.config/colima`, `$XDG_CONFIG_HOME/colima`). They use `LIMA_HOME` for Lima's folder if it is set. Before, they always used `~/.config/colima`. Thus with `~/.colima`, the dashboard, auto-start and the VM settings used the wrong folder. See [Colima folder](docs/troubleshooting.md#colimabar-uses-the-wrong-colima-folder).
+- In some locales, the profile name check of `colima-ctl.sh` accepted non-ASCII letters.
 - The installer no longer stops when `gh` 2.49 to 2.67 is installed. It needs `gh` 2.68 or later to verify the download. With an older `gh`, it prints a notice and continues.
 - ColimaBar now finds iTerm in `~/Applications`. Before, it used Terminal.
 - CI no longer fails on timing benchmarks. They run only with `make perf`.

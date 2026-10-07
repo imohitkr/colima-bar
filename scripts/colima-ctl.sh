@@ -1,30 +1,41 @@
 #!/bin/bash
-# Action backend for ColimaBar. It pins XDG_CONFIG_HOME, so Colima uses
-# ~/.config/colima when neither COLIMA_HOME nor ~/.colima exists.
+# Action backend for ColimaBar.
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export XDG_CONFIG_HOME="$HOME/.config"
-# The C locale makes bracket ranges such as [a-z] plain ASCII byte ranges.
-# In other locales, bash 3.2 can match uppercase or non-ASCII letters there.
-export LC_ALL=C
 
-# The Colima config folder. Colima 0.10.3 (config/files.go) uses the first
-# that applies: COLIMA_HOME if that path exists, ~/.colima if it exists,
-# else $XDG_CONFIG_HOME/colima (pinned above).
+# The Colima config folder. The first rule that applies wins. Paths.colimaDir
+# in ColimaBar and uninstall.sh use the same rules.
+#   1. COLIMA_HOME, if it is set and the path exists.
+#   2. ~/.colima, if it exists.
+#   3. ~/.config/colima, if it exists (older ColimaBar versions made it).
+#   4. $XDG_CONFIG_HOME/colima, if XDG_CONFIG_HOME is set.
+#   5. ~/.colima, the default of Colima on macOS.
 if [ -n "${COLIMA_HOME:-}" ] && [ -e "$COLIMA_HOME" ]; then
   COLIMA_DIR="$COLIMA_HOME"
 elif [ -e "$HOME/.colima" ]; then
   COLIMA_DIR="$HOME/.colima"
-else
+elif [ -e "$HOME/.config/colima" ]; then
+  COLIMA_DIR="$HOME/.config/colima"
+elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
   COLIMA_DIR="$XDG_CONFIG_HOME/colima"
+else
+  COLIMA_DIR="$HOME/.colima"
 fi
+# Colima 0.10.3 (config/files.go) skips rule 3. COLIMA_HOME makes each colima
+# call use COLIMA_DIR. Colima skips a COLIMA_HOME that does not exist, so
+# colima_home creates the folder before each colima call.
+export COLIMA_HOME="$COLIMA_DIR"
+colima_home() { [ -e "$COLIMA_DIR" ] || mkdir -p "$COLIMA_DIR"; }
 # Lima keeps its instances in LIMA_HOME if it is set, else in COLIMA_DIR/_lima.
 LIMA_DIR="${LIMA_HOME:-$COLIMA_DIR/_lima}"
 
 # Profile to act on: ColimaBar passes the selected one in COLIMABAR_PROFILE.
 PROFILE="${COLIMABAR_PROFILE:-default}"
 # A leading "." would allow "." and "..", which point outside the profile folder.
+# The lists name each character: a range such as A-Z can match other letters
+# in some locales.
 case "$PROFILE" in
-  *[!A-Za-z0-9._-]*|.*|"") echo "invalid profile name: $PROFILE" >&2; exit 1 ;;
+  *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*|.*|"")
+    echo "invalid profile name: $PROFILE" >&2; exit 1 ;;
 esac
 # Dialogs and notifications name the profile: "profile 'work'".
 NAMED="profile '$PROFILE'"
@@ -37,7 +48,7 @@ KCTX=$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")
 LIMA_LOG="$LIMA_DIR/$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")/ha.stderr.log"
 
 # Every colima call targets the selected profile.
-colima() { command colima "$@" --profile "$PROFILE"; }
+colima() { colima_home; command colima "$@" --profile "$PROFILE"; }
 STATE_DIR="$HOME/.cache/colima-bar"
 BUSY="$STATE_DIR/busy.$PROFILE"
 LOCK="$STATE_DIR/lock.$PROFILE"
@@ -167,11 +178,11 @@ shrink_disk() {
 
 # The rules for a new profile name. They must match ProfileName.problem in
 # ColimaBar: lowercase letters, digits and single hyphens, a letter or digit
-# at both ends, 30 characters at most. Colima maps "colima" to the default
-# profile and removes a "colima-" prefix.
+# at both ends, 30 characters at most. Colima maps "colima" to "default" and
+# removes a "colima-" prefix, so "colima-work" means "work".
 new_name_ok() {
   case "$1" in
-    default|colima|colima-*|*[!a-z0-9-]*|-*|*-|*--*|"") return 1 ;;
+    default|colima|colima-*|*[!abcdefghijklmnopqrstuvwxyz0123456789-]*|-*|*-|*--*|"") return 1 ;;
   esac
   [ "${#1}" -le 30 ]
 }
@@ -191,7 +202,7 @@ profile_dir_exists() {
 
 # is_num VALUE -> true for a whole number.
 is_num() {
-  case "$1" in *[!0-9]*|"") return 1 ;; esac
+  case "$1" in *[!0123456789]*|"") return 1 ;; esac
 }
 
 restart_vm() {
@@ -215,7 +226,7 @@ case "$1" in
   # resources CPU MEM_GB
   resources)
     cpu="$2"; mem="$3"
-    case "$cpu$mem" in *[!0-9]*|"") notify "Invalid CPU/memory: $cpu / $mem"; exit 1 ;; esac
+    case "$cpu$mem" in *[!0123456789]*|"") notify "Invalid CPU/memory: $cpu / $mem"; exit 1 ;; esac
     lock_vm
     msg="Restart the Colima VM of $NAMED with ${cpu} CPU / ${mem} GB RAM?"
     if colima status >/dev/null 2>&1; then
@@ -254,7 +265,7 @@ case "$1" in
 
   # disk SIZE_GB (grow only)
   disk)
-    case "$2" in *[!0-9]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
+    case "$2" in *[!0123456789]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
     lock_vm
     confirm "Grow the Colima disk of $NAMED to $2 GB? A disk cannot shrink in place: to make it smaller later, all Docker data must be deleted. Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
     set_key disk "$2"
@@ -264,11 +275,11 @@ case "$1" in
   # disk-shrink SIZE_GB: deletes the VM with all its data, then starts it
   # with a new, smaller disk. Disks cannot shrink in place.
   disk-shrink)
-    case "$2" in *[!0-9]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
+    case "$2" in *[!0123456789]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
     size=$((10#$2))
     [ -f "$CONFIG" ] || { notify "$CONFIG not found."; exit 1; }
     cur=$(sed -n -E 's/^disk: *([0-9]+) *$/\1/p' "$CONFIG")
-    case "$cur" in *[!0-9]*|"") notify "Couldn't read the disk size in colima.yaml."; exit 1 ;; esac
+    case "$cur" in *[!0123456789]*|"") notify "Couldn't read the disk size in colima.yaml."; exit 1 ;; esac
     if [ "$size" -lt "$MIN_DISK" ] || [ "$size" -ge "$cur" ]; then
       notify "Invalid disk size: $size GB. Use $MIN_DISK GB or more, and less than $cur GB."
       exit 1
@@ -342,11 +353,11 @@ Then Colima starts the VM again with an empty $size GB disk and the same setting
   # profile-delete: deletes the profile in COLIMABAR_PROFILE with its VM,
   # disk and folder. ColimaBar asked for the typed profile name before.
   profile-delete)
-    # Colima maps "colima" to the default profile and removes a "colima-"
-    # prefix. Thus `colima delete --profile colima` deletes default.
+    # Colima maps "colima" to "default" and removes a "colima-" prefix.
+    # Thus `colima delete --profile colima-work` deletes the profile work.
     case "$PROFILE" in
       colima|colima-*)
-        notify "Can't delete $NAMED. Colima uses this name for the default profile."
+        notify "Can't delete $NAMED. Colima reads this name as a different profile."
         exit 1 ;;
     esac
     if ! profile_dir_exists; then
@@ -404,7 +415,7 @@ Then Colima starts the VM again with an empty $size GB disk and the same setting
     ;;
 
   # exec skips shell functions, so pass the profile here.
-  ssh)    exec command colima ssh --profile "$PROFILE" ;;
+  ssh)    colima_home; exec command colima ssh --profile "$PROFILE" ;;
   config) open -t "$CONFIG" ;;
   logs)
     # ColimaBar's action log (colima start/stop output) and Lima's host agent log.

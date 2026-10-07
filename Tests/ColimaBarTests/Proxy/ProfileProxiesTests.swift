@@ -148,6 +148,22 @@ private final class WakeLog: @unchecked Sendable {
         }
     }
 
+    @Test func upstreamsFollowAMovedColimaFolder() async throws {
+        let dir = TestSocketPath.uniqueDir()
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        final class Folder { var path = "/old" }
+        let folder = Folder()
+        let proxies = ProfileProxies(dir: dir, upstream: { "\(folder.path)/\($0)/docker.sock" })
+        proxies.sync(wanted: ["a"])
+        #expect(readLink("\(dir)/a.sock") == "/old/a/docker.sock")
+        folder.path = "/new"
+        proxies.refreshUpstreams()
+        // Auto-start is off: the link moves to the new folder at once.
+        #expect(readLink("\(dir)/a.sock") == "/new/a/docker.sock")
+        proxies.shutdown()
+        #expect(readLink("\(dir)/a.sock") == "/new/a/docker.sock")
+    }
+
     @Test func aNameThatIsTooLongGetsNoProxy() async throws {
         try await withTwoProfiles { proxies, _, _, _ in
             let long = String(repeating: "x", count: 120)

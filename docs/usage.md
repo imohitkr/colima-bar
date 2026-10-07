@@ -197,7 +197,7 @@ If the selected profile no longer exists, ColimaBar switches to `default`.
 ### Create a profile
 
 1. In the profile menu, choose **New Profile…**.
-2. Type a name. Use lowercase letters, digits and single hyphens, up to 30 characters. Start and end with a letter or a digit. You cannot use `default`, `colima` or a name that starts with `colima-`: Colima uses them for the default profile.
+2. Type a name. Use lowercase letters, digits and single hyphens, up to 30 characters. Start and end with a letter or a digit. You cannot use `default`, `colima` or a name that starts with `colima-`. Colima maps `colima` to `default` and removes the `colima-` prefix.
 3. Select the CPU, memory, disk and runtime. The form starts with the values of the selected profile. The runtime is docker by default. Only a docker profile gets auto-start, auto-stop, a profile socket and a docker context.
 4. Click **Create**.
 
