@@ -173,7 +173,7 @@ ColimaBar (`Paths.colimaDir`), the script and `uninstall.sh` find the Colima fol
 4. `$XDG_CONFIG_HOME/colima`, if `XDG_CONFIG_HOME` is set.
 5. `~/.colima`, the default of Colima.
 
-Lima's folder (`Paths.limaDir`) is `LIMA_HOME` if it is set, else `_lima` in the Colima folder. ColimaBar runs each `colima` command, `colima-ctl.sh` and each Terminal command with `COLIMA_HOME` set to the Colima folder, so Colima uses the same folder. It creates the folder first, because Colima skips a `COLIMA_HOME` that does not exist. The app reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launchd environment, not from the shell. The model checks the folders again on each status refresh and each heartbeat tick, so a change needs no restart.
+Lima's folder (`Paths.limaDir`) is `LIMA_HOME` if it is set, else `_lima` in the Colima folder. ColimaBar runs each `colima` command, `colima-ctl.sh` and each Terminal command with `COLIMA_HOME` set to the Colima folder, so Colima uses the same folder. It creates the folder first, because Colima skips a `COLIMA_HOME` that does not exist. Before it creates the folder, the app and `colima-ctl.sh` check the rules again. They create the folder only if the rules still pick it and colima is installed. If the rules now pick a different folder, the script stops the action. A new empty `~/.colima` would otherwise hide `~/.config/colima` from then on. The app reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launchd environment, not from the shell. The model checks the folders again on each status refresh and each heartbeat tick, so a change needs no restart.
 
 The name checks of the script list each allowed character, not a range such as `[a-z]`. Thus they match only ASCII in every locale.
 

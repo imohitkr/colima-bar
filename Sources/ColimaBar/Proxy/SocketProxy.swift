@@ -115,15 +115,15 @@ final class SocketProxy: @unchecked Sendable {
 
     var isRunning: Bool { lock.withLock { listener != nil } }
 
-    /// The model holds the proxy while a wake of its upstream profile runs,
-    /// also a wake that another proxy started. The stable socket and the
-    /// profile socket of the selected profile share one upstream. A held
-    /// proxy splices no request: each one waits for the shared wake.
     deinit {
         // A released source never runs its cancel handler, so the fd would leak.
         listener?.cancel()
     }
 
+    /// The model holds the proxy while a wake of its upstream profile runs,
+    /// also a wake that another proxy started. The stable socket and the
+    /// profile socket of the selected profile share one upstream. A held
+    /// proxy splices no request: each one waits for the shared wake.
     func holdForWake(_ on: Bool) {
         lock.withLock { isHeld = on }
     }

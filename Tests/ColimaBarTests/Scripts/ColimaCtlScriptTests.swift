@@ -214,6 +214,25 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
     }
 
+    @Test func aFolderChangeDuringAnActionStopsItAndCreatesNothing() throws {
+        // The action starts with ~/.colima. The user deletes it while the VM
+        // stops. An empty new ~/.colima would hide ~/.config/colima from then on.
+        let sb = try ScriptSandbox()
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s COLIMA_HOME=%s\\n' "$*" "${COLIMA_HOME:-}" >> "\(sb.log)"
+            [ "$1" = status ] && { rm -rf "\(sb.home)/.colima"; exit 0; }
+            exit 0
+            """)
+        try sb.write(".colima/work/colima.yaml", config)
+        try sb.write(".config/colima/work/colima.yaml", config)
+        let result = try run(sb, ["restart"])
+        #expect(result.status != 0)
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
+        #expect(!sb.calls.contains { $0.hasPrefix("colima stop") || $0.hasPrefix("colima start") })
+    }
+
     @Test func theScriptKeepsTheLocale() throws {
         // A changed locale could garble non-ASCII text in dialogs. The name
         // checks use character lists, so they need no locale.

@@ -9,22 +9,39 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 #   3. ~/.config/colima, if it exists (older ColimaBar versions made it).
 #   4. $XDG_CONFIG_HOME/colima, if XDG_CONFIG_HOME is set.
 #   5. ~/.colima, the default of Colima on macOS.
-if [ -n "${COLIMA_HOME:-}" ] && [ -e "$COLIMA_HOME" ]; then
-  COLIMA_DIR="$COLIMA_HOME"
-elif [ -e "$HOME/.colima" ]; then
-  COLIMA_DIR="$HOME/.colima"
-elif [ -e "$HOME/.config/colima" ]; then
-  COLIMA_DIR="$HOME/.config/colima"
-elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
-  COLIMA_DIR="$XDG_CONFIG_HOME/colima"
-else
-  COLIMA_DIR="$HOME/.colima"
-fi
+# COLIMA_HOME as the caller set it. The rules run again before a colima call.
+CALLER_COLIMA_HOME="${COLIMA_HOME:-}"
+pick_colima_dir() {
+  if [ -n "$CALLER_COLIMA_HOME" ] && [ -e "$CALLER_COLIMA_HOME" ]; then
+    echo "$CALLER_COLIMA_HOME"
+  elif [ -e "$HOME/.colima" ]; then
+    echo "$HOME/.colima"
+  elif [ -e "$HOME/.config/colima" ]; then
+    echo "$HOME/.config/colima"
+  elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
+    echo "$XDG_CONFIG_HOME/colima"
+  else
+    echo "$HOME/.colima"
+  fi
+}
+COLIMA_DIR=$(pick_colima_dir)
 # Colima 0.10.3 (config/files.go) skips rule 3. COLIMA_HOME makes each colima
 # call use COLIMA_DIR. Colima skips a COLIMA_HOME that does not exist, so
 # colima_home creates the folder before each colima call.
 export COLIMA_HOME="$COLIMA_DIR"
-colima_home() { [ -e "$COLIMA_DIR" ] || mkdir -p "$COLIMA_DIR"; }
+# An action can run for minutes. If the rules pick a different folder now
+# (for example, the user deleted ~/.colima and ~/.config/colima exists),
+# stop: a new empty folder here would hide the real one from then on.
+# Create nothing if colima is not installed.
+colima_home() {
+  [ -e "$COLIMA_DIR" ] && return 0
+  if [ "$(pick_colima_dir)" != "$COLIMA_DIR" ]; then
+    echo "the Colima folder changed during the action; try again" >&2
+    exit 1
+  fi
+  command -v colima >/dev/null || return 0
+  mkdir -p "$COLIMA_DIR"
+}
 # Lima keeps its instances in LIMA_HOME if it is set, else in COLIMA_DIR/_lima.
 LIMA_DIR="${LIMA_HOME:-$COLIMA_DIR/_lima}"
 
@@ -172,7 +189,9 @@ shrink_disk() {
     colima stop || return 1
   fi
   colima delete --data --force || return 1
-  mkdir -p "$(dirname "$CONFIG")" && cp -p "$1" "$CONFIG" || return 1
+  # Create only the profile folder, inside a Colima folder that still exists.
+  [ -d "$COLIMA_DIR" ] || return 1
+  mkdir -p "$PROFILE_DIR" && cp -p "$1" "$CONFIG" || return 1
   colima start
 }
 
