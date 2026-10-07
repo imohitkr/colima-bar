@@ -27,6 +27,9 @@ final class SocketProxy: @unchecked Sendable {
     /// the fd, so the fd number stays in use until no accept can run on it.
     private var listener: DispatchSourceRead?
     private let acceptQueue = DispatchQueue(label: "colimabar.proxy.accept")
+    /// True while accept fails (for example EMFILE), so the log gets one
+    /// error for each episode, not ten each second. Only `acceptQueue` uses it.
+    private var acceptFailing = false
     private var _upstream: String
     private var _apiVersion: String?
     private var _wake: @Sendable () async -> Bool = { false }
@@ -116,6 +119,11 @@ final class SocketProxy: @unchecked Sendable {
     /// also a wake that another proxy started. The stable socket and the
     /// profile socket of the selected profile share one upstream. A held
     /// proxy splices no request: each one waits for the shared wake.
+    deinit {
+        // A released source never runs its cancel handler, so the fd would leak.
+        listener?.cancel()
+    }
+
     func holdForWake(_ on: Bool) {
         lock.withLock { isHeld = on }
     }
@@ -195,10 +203,13 @@ final class SocketProxy: @unchecked Sendable {
                 // Out of fds (EMFILE/ENFILE) or similar: back off. The client
                 // still waits, so GCD calls this again, and the proxy keeps
                 // serving instead of leaving a socket nobody accepts on.
-                log.error("proxy accept failed: errno \(err)")
+                if !acceptFailing { log.error("proxy accept failed: errno \(err)") }
+                acceptFailing = true
                 usleep(100_000)
                 return
             }
+            if acceptFailing { log.notice("proxy accepts again") }
+            acceptFailing = false
             // A client socket inherits O_NONBLOCK from the listener on macOS.
             // serve() and splice() need blocking reads and writes.
             _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)

@@ -38,6 +38,31 @@ import Testing
         #expect(dir([:], []) == dotColima)
     }
 
+    @Test func aStaleCachedFolderIsNeverCreated() {
+        let dotColima = "/Users/me/.colima"
+        let dotConfig = "/Users/me/.config/colima"
+        // The user deleted ~/.colima; ~/.config/colima still exists. The
+        // cache still says ~/.colima until the next refresh.
+        let stale = Paths.colimaDirToPrepare(
+            cached: dotColima, current: dotConfig, exists: { $0 == dotConfig }, colimaInstalled: true)
+        #expect(stale.dir == dotConfig)
+        #expect(!stale.create)
+    }
+
+    @Test func aMissingFolderIsCreatedOnlyWhenTheRulesPickItAndColimaIsInstalled() {
+        let dotColima = "/Users/me/.colima"
+        let fresh = Paths.colimaDirToPrepare(
+            cached: dotColima, current: dotColima, exists: { _ in false }, colimaInstalled: true)
+        #expect(fresh.dir == dotColima)
+        #expect(fresh.create)
+        let noColima = Paths.colimaDirToPrepare(
+            cached: dotColima, current: dotColima, exists: { _ in false }, colimaInstalled: false)
+        #expect(!noColima.create)
+        let present = Paths.colimaDirToPrepare(
+            cached: dotColima, current: dotColima, exists: { _ in true }, colimaInstalled: true)
+        #expect(!present.create)
+    }
+
     @Test func colimaFoldersFollowTheColimaFolder() {
         let folders = Paths.colimaFolders(env: [:], home: "/Users/me", exists: { $0 == "/Users/me/.config/colima" })
         #expect(

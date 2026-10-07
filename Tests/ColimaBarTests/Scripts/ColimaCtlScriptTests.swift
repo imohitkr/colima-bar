@@ -195,7 +195,7 @@ import Testing
     }
 
     @Test func colimaCallsUseTheConfigFolderWhenOnlyItExists() throws {
-        // Colima itself would pick ~/.colima here. COLIMA_HOME keeps the
+        // Without XDG_CONFIG_HOME, Colima would pick ~/.colima here. COLIMA_HOME keeps the
         // VM of an older ColimaBar version in ~/.config/colima.
         let sb = try ScriptSandbox()
         try stubColimaHome(sb)

@@ -92,12 +92,29 @@ enum Paths {
 
     /// The Colima folder for a colima call. It creates the folder if it is
     /// missing, because Colima skips a COLIMA_HOME that does not exist.
+    /// It checks the rules again first (see `colimaDirToPrepare`).
     static func preparedColimaDir() -> String {
-        let dir = colimaDir
-        if !FileManager.default.fileExists(atPath: dir) {
-            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        }
+        let fm = FileManager.default
+        let (dir, create) = colimaDirToPrepare(
+            cached: colimaDir, current: currentColimaFolders().colima, exists: fm.fileExists(atPath:),
+            colimaInstalled: Shell.which("colima") != nil)
+        if create { try? fm.createDirectory(atPath: dir, withIntermediateDirectories: true) }
         return dir
+    }
+
+    /// The folder for a colima call, and whether to create it.
+    ///
+    /// The cached folder can be out of date until the next refresh. For
+    /// example, the user deleted ~/.colima and ~/.config/colima still exists.
+    /// If ColimaBar created the cached folder then, rule 2 would move every
+    /// later call to that new, empty folder. So it creates a folder only if
+    /// the rules still pick it now, and only if colima is installed. The tick
+    /// moves the model to a changed folder (`colimaFoldersMoved`).
+    static func colimaDirToPrepare(
+        cached: String, current: String, exists: (String) -> Bool, colimaInstalled: Bool
+    ) -> (dir: String, create: Bool) {
+        guard current == cached else { return (current, false) }
+        return (current, colimaInstalled && !exists(current))
     }
 
     /// Lima keeps the Colima instances in LIMA_HOME if it is set, else in
