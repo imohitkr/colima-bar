@@ -123,7 +123,15 @@ You can use normal engineering words such as cache, retry and idempotent. Keep c
 
 ## Releases
 
-The maintainer makes each release:
+Releases collect a set of features. Do not tag a release for each merge.
+
+Before the tag, the maintainer does these checks:
+
+1. Review every changed file with review agents or a second person, and fix the findings.
+2. Review the docs against the code: README.md, docs/, ARCHITECTURE.md, CHANGELOG.md and the hints. Fix anything out of date.
+3. Run `make check` and `make perf`.
+
+The maintainer then makes the release:
 
 1. The maintainer pushes a tag `vX.Y.Z` on `main`.
 2. CI runs the tests and builds `ColimaBar.dmg` and `ColimaBar.zip`.
@@ -133,6 +141,8 @@ The maintainer makes each release:
 Before the tag, the maintainer moves the `[Unreleased]` entries in `CHANGELOG.md` to a new version section.
 
 Contributors do not need to change version numbers. The version comes from the tag.
+
+Do not move or delete a tag after its release exists. Releases are immutable. If a release needs a fix, publish the next patch version. A tag without a release can move.
 
 ## License
 

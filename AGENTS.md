@@ -64,6 +64,13 @@ Use a light form of ASD-STE100 for docs, comments, hints, notifications, error m
 
 If you add or change a control, update its hint text in `Views/Shared/Help.swift`. If you change behavior that users see, update the user guide in `docs/`, and `README.md` if the summary changes. If you change the design, update `ARCHITECTURE.md`.
 
+## Releases
+
+- Collect features before a release. Do not tag each merge.
+- After every change, run at least one round of review agents and fix the findings.
+- Before a tag, review the docs against the code and fix anything out of date.
+- Never move or delete a tag that has a release. Releases are immutable; publish the next patch version instead.
+
 ## Commits and pull requests
 
 - Write the commit subject in the imperative mood, for example "Fix the log viewer scroll". In the body, explain why.
