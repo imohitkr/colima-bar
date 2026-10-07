@@ -32,6 +32,10 @@ final class ColimaModel {
     private(set) var images: [ImageRow] = []
     private(set) var volumes: [VolumeRow] = []
     private(set) var profiles: [ProfileRow] = []
+    /// VM actions that run for profiles other than the selected one, by
+    /// profile: the busy label, for example "Starting". The profile menu
+    /// shows them. The selected profile uses `busy`.
+    private(set) var profileActions: [String: String] = [:]
     private(set) var routing = Routing.Status()
     /// The dashboard's selected tab, set by DashboardView. No view reads it
     /// here; it tells the model which costly data is on screen.
@@ -78,12 +82,14 @@ final class ColimaModel {
             guard autoStart != oldValue else { return }
             Defaults.set(autoStart, .autoStart)
             autoStart ? proxy.start() : proxy.stop()
+            if !isDebug { profileProxies.setListening(autoStart) }
         }
     }
     var autoStop = Defaults.bool(.autoStop) ?? false {
         didSet {
             Defaults.set(autoStop, .autoStop)
             idleSince = nil
+            otherIdle = [:]
         }
     }
     var autoStopMinutes = Defaults.int(.autoStopMinutes).map(IdleMinutes.clamp) ?? 30 {
@@ -95,6 +101,7 @@ final class ColimaModel {
             }
             Defaults.set(autoStopMinutes, .autoStopMinutes)
             idleSince = nil
+            otherIdle = [:]
         }
     }
     var hideIconWhenStopped = Defaults.bool(.hideIconWhenStopped) ?? false {
@@ -152,6 +159,8 @@ final class ColimaModel {
 
     private(set) var api: DockerAPI
     let proxy: SocketProxy
+    /// One proxy for each docker profile (see ProfileProxies).
+    let profileProxies: ProfileProxies
     private let log = Logger(category: "model")
     // Internal bookkeeping that no view reads: writes skip observation.
     @ObservationIgnored private var events: StreamHandle?
@@ -173,6 +182,16 @@ final class ColimaModel {
     @ObservationIgnored private var statusOrder = LatestOnly()
     @ObservationIgnored private var isConfirmingAutoStop = false  // an auto-stop check runs a fresh list
     @ObservationIgnored private var localBusy: String?  // VM action launched here, marker not written yet
+    // One wake at a time for each profile. The stable socket and the profile
+    // socket can both ask to start the same profile.
+    @ObservationIgnored private var wakes: [String: (token: Int, task: Task<Bool, Never>)] = [:]
+    @ObservationIgnored private var wakeToken = 0
+    // Auto-stop state of the running profiles other than the selected one.
+    @ObservationIgnored private var otherIdle: [String: OtherIdle] = [:]
+    // The colimabar-PROFILE contexts: the last applied and the next wanted set.
+    @ObservationIgnored private var appliedContexts: [String: String]?
+    @ObservationIgnored private var wantedContexts: [String: String]?
+    @ObservationIgnored private var isApplyingContexts = false
     // Not observed: its buffers change with each log line.
     @ObservationIgnored private let keeper: RemovedLogKeeper
     private let historyLen = 60
@@ -201,6 +220,8 @@ final class ColimaModel {
         keeper = RemovedLogKeeper(api: client)
         proxy = SocketProxy(upstream: Paths.socket(p))
         proxy.apiVersion = Defaults.string(.apiVersion)
+        profileProxies = ProfileProxies()
+        profileProxies.apiVersion = proxy.apiVersion
         keeper.onChange = { [weak self] ids in self?.set(\.savedLogIDs, ids) }
         syncKeeper()
     }
@@ -215,6 +236,9 @@ final class ColimaModel {
         if !debug {
             proxy.wake = { [weak self] in await self?.wakeForProxy() ?? false }
             if autoStart { proxy.start() } else { proxy.stop() }
+            // The proxies appear with the first `colima list` (syncProfiles).
+            profileProxies.wake = { [weak self] p in await self?.wakeForProxy(profile: p) ?? false }
+            profileProxies.setListening(autoStart)
             Task {
                 await Routing.apply()
                 routing = await Routing.status()
@@ -258,6 +282,7 @@ final class ColimaModel {
     /// docker clients keep working without ColimaBar.
     func shutdown() {
         proxy.stop()
+        if !isDebug { profileProxies.shutdown() }
     }
 
     /// Heartbeat (see tickInterval). Cheap work only: a stat() of the busy
@@ -284,6 +309,8 @@ final class ColimaModel {
             let up = ping?.ok ?? false
             if let v = ping?.headers["api-version"], v != proxy.apiVersion {
                 proxy.apiVersion = v
+                profileProxies.apiVersion = v
+                profileProxies.setAPIVersion(v, for: profile)
                 Defaults.set(v, .apiVersion)
             }
             let stale = Date().timeIntervalSince(lastColima) > staleAfter
@@ -294,6 +321,7 @@ final class ColimaModel {
             }
         }
         checkIdle()
+        checkOtherProfilesIdle()
     }
 
     /// False when the profile's runtime is known and isn't docker (e.g.
@@ -305,6 +333,11 @@ final class ColimaModel {
     /// just launched whose script hasn't written its marker yet.
     private func readBusy() -> String? {
         Self.readBusyMarker(profile) ?? localBusy
+    }
+
+    /// The busy marker of any profile, or an action this app runs for it.
+    private func readBusy(_ p: String) -> String? {
+        p == profile ? readBusy() : Self.readBusyMarker(p) ?? profileActions[p]
     }
 
     /// The busy marker colima-ctl.sh writes while a long action runs. One left
@@ -369,13 +402,23 @@ final class ColimaModel {
             profile = "default"
             return
         }
+        let wasRunningNames = Set(profiles.filter(\.isRunning).map(\.name))
+        let hadProfiles = !profiles.isEmpty
         set(
             \.profiles,
             all.map {
                 ProfileRow(
                     name: $0.name ?? "default", isRunning: $0.status == "Running", cpus: $0.cpus ?? 0,
-                    memGB: Int(($0.memory ?? 0) / ByteFormat.bytesPerGiB))
+                    memGB: Int(($0.memory ?? 0) / ByteFormat.bytesPerGiB), runtime: $0.runtime ?? "")
             })
+        syncProfiles()
+        // `colima start` of any profile switches the docker context to that
+        // profile. The selected profile applies the routes below.
+        if !isDebug, hadProfiles,
+            profiles.contains(where: { $0.isRunning && $0.name != profile && !wasRunningNames.contains($0.name) })
+        {
+            Task { await Routing.apply() }
+        }
         let info = all.first { ($0.name ?? "default") == profile }
         let newState: VMState = info?.status == "Running" ? .running : .stopped
         let wasRunning = state == .running
@@ -453,6 +496,7 @@ final class ColimaModel {
         vm = VMInfo()
         state = .unknown
         idleSince = nil
+        otherIdle = [:]
         Task { await refreshAll() }
     }
 
@@ -589,24 +633,42 @@ final class ColimaModel {
 
     // MARK: - Auto-start / auto-stop
 
-    /// Called by the proxy when a docker request arrives while the VM is down:
-    /// start it and return once Docker is really ready.
-    ///
+    /// Called by a proxy when a docker request arrives while the VM is down:
+    /// start it and return once Docker is really ready. `profile` is the
+    /// profile of a profile socket; nil means the selected profile (the
+    /// stable socket). Two calls for the same profile share one wake.
+    func wakeForProxy(profile target: String? = nil) async -> Bool {
+        let p = target ?? profile
+        if let running = wakes[p] { return await running.task.value }
+        wakeToken += 1
+        let token = wakeToken
+        let task = Task { await performWake(p) }
+        wakes[p] = (token, task)
+        let ok = await task.value
+        if wakes[p]?.token == token { wakes[p] = nil }
+        return ok
+    }
+
+    /// The runtime of a profile: the live value for the selected profile,
+    /// else the one from the last `colima list`. "" when unknown.
+    private func runtime(of p: String) -> String {
+        p == profile ? vm.runtime : profiles.first { $0.name == p }?.runtime ?? ""
+    }
+
     /// "The socket accepts connections" is not ready: Lima's ssh tunnel opens
     /// it seconds before dockerd, and Colima's provisioning restarts dockerd
     /// and containerd a few times. A request in that window fails with
     /// "Unavailable: error reading from server: EOF". So this waits for
     /// `colima start` to exit, then for several successes in a row on an
     /// endpoint that goes through containerd.
-    private func wakeForProxy() async -> Bool {
-        let p = profile
+    private func performWake(_ p: String) async -> Bool {
         let probe = DockerAPI(socketPath: Paths.socket(p))
         // GET /images/json is served by containerd's image store.
         let probePath =
             "/images/json?filters=" + DockerAPI.percentEncoded(#"{"reference":["colimabar-readiness-probe"]}"#)
         func ready() async -> Bool { await probe.get(probePath, timeout: 3)?.ok ?? false }
 
-        if readBusy() == nil, await ready() { return true }
+        if readBusy(p) == nil, await ready() { return true }
         // A deleted profile: `colima start` would provision a new VM. A disk
         // shrink deletes colima.yaml for a short time, so check again after
         // the wait for a running action.
@@ -617,16 +679,15 @@ final class ColimaModel {
             }
             return false
         }
-        if readBusy() == nil, profileMissing() { return false }
+        if readBusy(p) == nil, profileMissing() { return false }
         // Only the docker runtime has a docker socket to wait for.
-        if !hasDockerSocket {
-            log.notice(
-                "profile \(p, privacy: .public) uses the \(self.vm.runtime, privacy: .public) runtime; not auto-starting"
-            )
+        let rt = runtime(of: p)
+        if !Self.hasDockerSocket(runtime: rt) {
+            log.notice("profile \(p, privacy: .public) uses the \(rt, privacy: .public) runtime; not auto-starting")
             return false
         }
         func startInFlight() async -> Bool {
-            if readBusy() != nil { return true }
+            if readBusy(p) != nil { return true }
             return await Task.detached { Self.colimaStartRunning(p) }.value
         }
         // A start/stop is already running (menu, auto-stop, a terminal): let it
@@ -638,12 +699,17 @@ final class ColimaModel {
         if !(await ready()) {
             if profileMissing() { return false }
             log.notice("auto-starting profile \(p, privacy: .public)")
-            setBusyNow("Starting")
+            let selected = p == profile
+            if selected { setBusyNow("Starting") } else { profileActions[p] = "Starting" }
             let r = await Shell.run(
                 [Paths.ctl, CtlAction.start.rawValue], timeout: 600,
                 extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
-            localBusy = nil
-            if !r.ok { log.error("auto-start: colima-ctl.sh start exited \(r.status)") }
+            if selected {
+                localBusy = nil
+            } else if profileActions[p] == "Starting" {
+                profileActions[p] = nil
+            }
+            if !r.ok { log.error("auto-start: colima-ctl.sh start exited \(r.status) for \(p, privacy: .public)") }
         }
         var streak = 0
         let deadline = Date().addingTimeInterval(Self.readinessTimeout)
@@ -653,33 +719,68 @@ final class ColimaModel {
                 // Refresh the cached API version from the real daemon (a Colima
                 // update can change it) before more pings are answered locally.
                 if let v = await probe.get("/_ping", timeout: 3)?.headers["api-version"] {
-                    proxy.apiVersion = v
-                    Defaults.set(v, .apiVersion)
+                    profileProxies.setAPIVersion(v, for: p)
+                    if p == profile {
+                        proxy.apiVersion = v
+                        profileProxies.apiVersion = v
+                        Defaults.set(v, .apiVersion)
+                    }
                 }
                 Task { await refreshAll() }
                 return true
             }
             try? await Task.sleep(for: Self.readinessInterval)
         }
-        Notifier.shared.post("Colima didn't become ready. Check the Colima log.")
+        Notifier.shared.post("Colima profile \(p) didn't become ready. Check the Colima log.")
         return false
+    }
+
+    /// Makes one proxy and one `colimabar-PROFILE` context for each docker
+    /// profile of the last `colima list`, and removes the ones of profiles
+    /// that are gone. A debug run changes nothing. An empty list changes
+    /// nothing either: it can come from a broken Colima install.
+    private func syncProfiles() {
+        guard !isDebug, !profiles.isEmpty else { return }
+        let wanted = Set(
+            profiles.filter { Self.hasDockerSocket(runtime: $0.runtime) && ProfileName.isValid($0.name) }.map(\.name))
+        // A VM action can delete a profile for a short time (disk shrink):
+        // keep its proxy until the action ends.
+        let keep = profileProxies.names.filter { readBusy($0) != nil }
+        profileProxies.sync(wanted: wanted, keep: keep)
+        var hosts: [String: String] = [:]
+        for p in profileProxies.names {
+            if let path = profileProxies.path(for: p) { hosts[p] = "unix://\(path)" }
+        }
+        applyContexts(hosts)
+    }
+
+    /// Applies the `colimabar-PROFILE` contexts in the background, one run at
+    /// a time. A run applies the newest wanted set.
+    private func applyContexts(_ hosts: [String: String]) {
+        wantedContexts = hosts
+        guard !isApplyingContexts else { return }
+        isApplyingContexts = true
+        Task {
+            while let want = wantedContexts, want != appliedContexts {
+                wantedContexts = nil
+                guard await ProfileContexts.apply(wanted: want) else { break }
+                appliedContexts = want
+            }
+            isApplyingContexts = false
+        }
     }
 
     /// Stops the VM once it has had no running containers for the chosen time.
     /// Builds, pulls and pushes show no running container, so live docker
-    /// traffic through the proxy also counts as "not idle".
+    /// traffic through the proxies also counts as "not idle". Transfers count
+    /// on the stable socket and on the socket of the selected profile.
     private func checkIdle() {
-        guard autoStop, state == .running, busy == nil, !isConfirmingAutoStop, running.isEmpty,
-            proxy.activeTransfers() == 0
-        else {
-            if idleSince != nil { idleSince = nil }
-            return
-        }
-        guard let since = idleSince else {
-            idleSince = Date()
-            return
-        }
-        guard Date().timeIntervalSince(since) >= Double(autoStopMinutes * 60) else { return }
+        let check = AutoStopRule.evaluate(
+            enabled: autoStop, isRunning: state == .running, isBusy: busy != nil || isConfirmingAutoStop,
+            runningContainers: running.count, transfers: selectedTransfers(), idleSince: idleSince, now: Date(),
+            idleMinutes: autoStopMinutes)
+        if check.idleSince != idleSince { idleSince = check.idleSince }
+        guard check.isDue else { return }
         // The list can be stale (events missed during a reconnect): confirm
         // with a fresh one right before stopping.
         isConfirmingAutoStop = true
@@ -689,7 +790,7 @@ final class ColimaModel {
             // No fresh list (timeout, error): don't stop on stale data.
             let fresh = await refreshContainers()
             guard fresh, gen == generation, autoStop, state == .running, busy == nil,
-                running.isEmpty, proxy.activeTransfers() == 0
+                running.isEmpty, selectedTransfers() == 0
             else {
                 idleSince = nil
                 return
@@ -698,6 +799,71 @@ final class ColimaModel {
             log.notice("auto-stopping idle profile \(self.profile, privacy: .public)")
             run(.autoStop, "\(autoStopMinutes)")
         }
+    }
+
+    private func selectedTransfers() -> Int {
+        proxy.activeTransfers() + profileProxies.activeTransfers(profile)
+    }
+
+    /// The auto-stop state of a running profile other than the selected one.
+    private struct OtherIdle {
+        var since: Date?
+        var lastCheck: Date?
+        var isChecking = false
+    }
+
+    /// Auto-stop for each running docker profile other than the selected
+    /// one, with the same rules and timeout. Work through the profile's proxy
+    /// resets its idle time at each tick. Each `AutoStopRule.otherCheckInterval`,
+    /// a fresh container list from the profile's own socket counts its
+    /// running containers. A failed list does not count as idle.
+    private func checkOtherProfilesIdle() {
+        guard autoStop, !isDebug else {
+            if !otherIdle.isEmpty { otherIdle = [:] }
+            return
+        }
+        let names = AutoStopRule.otherProfiles(profiles, selected: profile)
+        for p in otherIdle.keys where !names.contains(p) { otherIdle[p] = nil }
+        let now = Date()
+        for p in names {
+            var s = otherIdle[p] ?? OtherIdle()
+            guard !s.isChecking else { continue }
+            if profileProxies.activeTransfers(p, now: now) > 0 || readBusy(p) != nil {
+                s.since = nil
+                otherIdle[p] = s
+                continue
+            }
+            guard AutoStopRule.isCheckDue(lastCheck: s.lastCheck, now: now) else { continue }
+            s.isChecking = true
+            s.lastCheck = now
+            otherIdle[p] = s
+            let gen = generation
+            let api = DockerAPI(socketPath: Paths.socket(p))
+            Task {
+                let count = await Self.runningContainerCount(api)
+                // A profile switch or a settings change reset the state.
+                guard gen == generation, var s = otherIdle[p] else { return }
+                s.isChecking = false
+                let check = AutoStopRule.evaluate(
+                    enabled: autoStop, isRunning: profiles.contains { $0.name == p && $0.isRunning } && p != profile,
+                    isBusy: readBusy(p) != nil, runningContainers: count, transfers: profileProxies.activeTransfers(p),
+                    idleSince: s.since, now: Date(), idleMinutes: autoStopMinutes)
+                s.since = check.idleSince
+                otherIdle[p] = check.isDue ? nil : s
+                guard check.isDue else { return }
+                log.notice("auto-stopping idle profile \(p, privacy: .public)")
+                run(.autoStop, "\(autoStopMinutes)", profile: p)
+            }
+        }
+    }
+
+    /// The number of running containers on a profile's socket, or nil if
+    /// the request failed.
+    nonisolated private static func runningContainerCount(_ api: DockerAPI) async -> Int? {
+        guard let r = await api.get("/containers/json", timeout: 5), r.ok,
+            let list = try? JSONDecoder().decode([APIContainer].self, from: r.body)
+        else { return nil }
+        return list.count
     }
 
     // MARK: - Live stats
@@ -830,32 +996,94 @@ final class ColimaModel {
 
     // MARK: - Actions
 
-    /// Runs a colima-ctl.sh action for the selected profile (it owns confirm
-    /// dialogs, config edits, the busy marker and notifications), then refreshes.
-    func run(_ action: CtlAction, _ args: String...) {
-        let p = profile
-        let label = action.busyLabel
-        if let label { setBusyNow(label) }
+    /// Runs a colima-ctl.sh action (it owns confirm dialogs, config edits,
+    /// the busy marker and notifications), then refreshes. `profile` is the
+    /// profile to act on; nil means the selected profile.
+    func run(_ action: CtlAction, _ args: String..., profile target: String? = nil) {
+        let p = target ?? profile
+        let label = markBusy(action, p)
+        Task { await execute(action, args, profile: p, label: label) }
+    }
+
+    /// Shows the busy label at once, not on the next tick, so a second click
+    /// can't race the action. The selected profile shows it in the header,
+    /// another profile in the profile menu.
+    private func markBusy(_ action: CtlAction, _ p: String) -> String? {
+        guard let label = action.busyLabel else { return nil }
+        if p == profile { setBusyNow(label) } else { profileActions[p] = label }
+        return label
+    }
+
+    /// Returns true if the script exited with 0.
+    @discardableResult
+    private func execute(_ action: CtlAction, _ args: [String], profile p: String, label: String?) async -> Bool {
+        let r = await Shell.run(
+            [Paths.ctl, action.rawValue] + args, timeout: 900,
+            extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
+        // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
+        // lines when ColimaBar runs it, so they arrive as native alerts.
+        var notified = false
+        for line in r.out.split(separator: "\n") where line.hasPrefix("COLIMABAR_NOTIFY:") {
+            Notifier.shared.post(String(line.dropFirst("COLIMABAR_NOTIFY:".count)))
+            notified = true
+        }
+        // Exit 2 = the user cancelled a confirm dialog or another action holds the lock.
+        if !r.ok, !notified, r.status != 2 {
+            Notifier.shared.post(
+                "\(action.rawValue) failed for profile \(p) (exit \(r.status)). See \(Paths.ctlLog).")
+        }
+        // The action is over (done, failed or cancelled): drop the
+        // placeholder, but only if a newer action hasn't replaced it.
+        if p == profile, localBusy == label { localBusy = nil }
+        if let label, profileActions[p] == label { profileActions[p] = nil }
+        busy = readBusy()
+        await refreshAll(urgentDF: action.changesDisk)
+        return r.ok
+    }
+
+    // MARK: - Profiles
+
+    /// Starts the VM of a profile that is not selected.
+    func startProfile(_ p: String) { run(.start, profile: p) }
+
+    /// Stops the VM of a profile that is not selected.
+    func stopProfile(_ p: String) { run(.stop, profile: p) }
+
+    /// Creates a profile and starts its VM. The directory watcher then
+    /// lists it, and it gets its proxy and its docker context.
+    func createProfile(_ form: NewProfileForm) {
+        if let problem = form.problem(existing: profiles.map(\.name)) {
+            Notifier.shared.post(problem)
+            return
+        }
+        let label = markBusy(.profileCreate, form.name)
+        Task { await execute(.profileCreate, form.arguments, profile: form.name, label: label) }
+    }
+
+    /// True while the VM of the profile runs.
+    func isRunning(profile p: String) -> Bool {
+        p == profile ? state == .running : profiles.contains { $0.name == p && $0.isRunning }
+    }
+
+    /// Deletes a profile with its VM and data. A running selected profile
+    /// must stop first. After the delete, its proxy socket and its
+    /// `colimabar-PROFILE` context go away. If it was selected, the
+    /// dashboard switches to `default`.
+    func deleteProfile(_ p: String) {
+        if let refusal = ProfileDelete.refusal(profile: p, selected: profile, isRunning: isRunning(profile: p)) {
+            Notifier.shared.post(refusal)
+            return
+        }
+        let label = markBusy(.profileDelete, p)
         Task {
-            let r = await Shell.run(
-                [Paths.ctl, action.rawValue] + args, timeout: 900,
-                extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
-            // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
-            // lines when ColimaBar runs it, so they arrive as native alerts.
-            var notified = false
-            for line in r.out.split(separator: "\n") where line.hasPrefix("COLIMABAR_NOTIFY:") {
-                Notifier.shared.post(String(line.dropFirst("COLIMABAR_NOTIFY:".count)))
-                notified = true
+            guard await execute(.profileDelete, [], profile: p, label: label) else { return }
+            if !isDebug {
+                profileProxies.remove(p)
+                appliedContexts?[p] = nil
+                await ProfileContexts.remove(profile: p)
             }
-            // Exit 2 = the user cancelled a confirm dialog or another action holds the lock.
-            if !r.ok, !notified, r.status != 2 {
-                Notifier.shared.post("\(action.rawValue) failed (exit \(r.status)). See \(Paths.ctlLog).")
-            }
-            // The action is over (done, failed or cancelled): drop the
-            // placeholder, but only if a newer action hasn't replaced it.
-            if p == profile, localBusy == label { localBusy = nil }
-            busy = readBusy()
-            await refreshAll(urgentDF: action.changesDisk)
+            let next = ProfileDelete.nextSelection(deleted: p, selected: profile, remaining: profiles.map(\.name))
+            if next != profile { profile = next }
         }
     }
 

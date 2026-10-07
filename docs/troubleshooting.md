@@ -24,7 +24,7 @@ log show --info --last 1h --predicate 'subsystem == "com.imohitkr.ColimaBar"'
 
 If a VM action fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
 
-If the notification says "Colima didn't become ready", open the Lima log from the dashboard footer.
+If the notification says "Colima profile NAME didn't become ready", open the Lima log from the dashboard footer.
 
 ## A disk shrink fails
 
@@ -45,7 +45,7 @@ If auto-start cannot start the VM, the docker client gets HTTP status 503 with t
 ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.
 ```
 
-After `colima start` exits, ColimaBar waits up to 60 seconds for the Docker daemon to become ready. Then it stops and sends the notification "Colima didn't become ready. Check the Colima log."
+After `colima start` exits, ColimaBar waits up to 60 seconds for the Docker daemon to become ready. Then it stops and sends the notification "Colima profile NAME didn't become ready. Check the Colima log."
 
 To fix it, do these steps:
 

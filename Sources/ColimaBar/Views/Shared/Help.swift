@@ -98,9 +98,9 @@ enum Help {
 
     // Profiles
     static let profile =
-        "The Colima profile that this dashboard shows. Each profile is a separate VM with its own containers, images and settings. To switch, select a different profile."
+        "The Colima profile that this dashboard shows. Each profile is a separate VM with its own containers, images and settings. Click to switch, start or stop a different profile, or to create or delete a profile."
     static let profiles =
-        "All Colima profiles. To create one, run `colima start --profile NAME`. The dashboard and all actions apply to the selected profile."
+        "All Colima profiles. To create or delete one, use the profile menu in the header. The dashboard and its actions apply to the selected profile. Each docker profile also has its own ColimaBar socket and the docker context colimabar-NAME."
 
     // Auto-start / auto-stop
     static let autoStart =
@@ -115,7 +115,7 @@ enum Help {
     static let linkVarRun =
         "Create /var/run/docker.sock as a symlink to the ColimaBar socket. ColimaBar asks for your admin password."
     static let autoStop =
-        "Stop the VM after it is idle for the selected time. Running containers and docker builds, pulls or pushes keep it running. If auto-start is on, the next docker command starts it again."
+        "Stop the VM of each running profile after it is idle for the selected time. Each profile has its own idle time. Running containers and docker builds, pulls or pushes keep a VM running. If auto-start is on, the next docker command starts it again."
     static let autoStopMinutes =
         "The time with no running containers and no docker builds, pulls or pushes before the VM stops."
     static let autoStopCustom =

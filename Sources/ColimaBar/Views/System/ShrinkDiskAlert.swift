@@ -22,7 +22,7 @@ enum ShrinkDiskAlert {
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
         field.placeholderString = profile
         field.setAccessibilityLabel("Profile name")
-        let watcher = NameWatcher(profile: profile, button: delete)
+        let watcher = TypedNameWatcher(button: delete) { DiskShrink.confirms(typed: $0, profile: profile) }
         field.delegate = watcher
         alert.accessoryView = field
         alert.window.initialFirstResponder = field
@@ -31,22 +31,5 @@ enum ShrinkDiskAlert {
         let answer = alert.runModal()
         field.delegate = nil
         return answer == .alertFirstButtonReturn && DiskShrink.confirms(typed: field.stringValue, profile: profile)
-    }
-}
-
-/// Turns the destructive button on only while the field holds the profile name.
-@MainActor
-private final class NameWatcher: NSObject, NSTextFieldDelegate {
-    let profile: String
-    let button: NSButton
-
-    init(profile: String, button: NSButton) {
-        self.profile = profile
-        self.button = button
-    }
-
-    func controlTextDidChange(_ note: Notification) {
-        guard let field = note.object as? NSTextField else { return }
-        button.isEnabled = DiskShrink.confirms(typed: field.stringValue, profile: profile)
     }
 }

@@ -42,7 +42,8 @@ import Testing
 
     @Test func vmActionsShowABusyLabel() {
         let vm: Set<CtlAction> = [
-            .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop,
+            .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop, .profileCreate,
+            .profileDelete,
         ]
         for a in CtlAction.allCases {
             #expect(a.isVMAction == vm.contains(a), "\(a.rawValue)")
@@ -52,6 +53,15 @@ import Testing
         #expect(CtlAction.autoStop.busyLabel == "Stopping")
         #expect(CtlAction.disk.busyLabel == "Restarting")
         #expect(CtlAction.diskShrink.busyLabel == "Shrinking disk")
+        #expect(CtlAction.profileCreate.busyLabel == "Creating")
+        #expect(CtlAction.profileDelete.busyLabel == "Deleting")
+    }
+
+    @Test func profileActionsMatchTheScriptLabels() throws {
+        #expect(CtlAction.profileCreate.rawValue == "profile-create")
+        #expect(CtlAction.profileDelete.rawValue == "profile-delete")
+        let labels = try scriptActions()
+        #expect(labels.contains("profile-create") && labels.contains("profile-delete"))
     }
 
     @Test func diskShrinkMatchesTheScriptLabel() throws {

@@ -18,6 +18,11 @@ enum Paths {
     /// The stable socket every docker client is pointed at: ColimaBar's
     /// auto-start proxy while it runs, a symlink to Colima's socket otherwise.
     static let proxySocket = "\(cacheDir)/docker.sock"
+    /// The folder of the proxy sockets of each profile (`PROFILE.sock`).
+    static let profilesDir = "\(cacheDir)/profiles"
+    /// The proxy socket of one profile, or nil if the name is invalid or the
+    /// path is too long for a unix socket (see ProfileSocket).
+    static func profileSocket(_ profile: String) -> String? { ProfileSocket.path(dir: profilesDir, profile: profile) }
     static let testcontainersProps = "\(home)/.testcontainers.properties"
 
     static func profileDir(_ profile: String) -> String { "\(home)/.config/colima/\(profile)" }

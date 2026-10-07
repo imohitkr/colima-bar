@@ -65,11 +65,14 @@ enum UnixSocket {
         return fd
     }
 
-    /// Creates the socket's directory. ColimaBar's own cache directory is
-    /// also made private to this user (0700); any other directory (tests) is
-    /// left as it is.
+    /// Creates the socket's directory. ColimaBar's own cache directory and
+    /// its profile socket folder are also made private to this user (0700);
+    /// any other directory (tests) is left as it is.
     static func makePrivateDir(_ dir: String) {
-        let own = (dir as NSString).standardizingPath == (Paths.cacheDir as NSString).standardizingPath
+        let path = (dir as NSString).standardizingPath
+        let own = [Paths.cacheDir, Paths.profilesDir].contains { ($0 as NSString).standardizingPath == path }
+        // The parent must also be private when this call creates it.
+        if own, path != (Paths.cacheDir as NSString).standardizingPath { makePrivateDir(Paths.cacheDir) }
         try? FileManager.default.createDirectory(
             atPath: dir, withIntermediateDirectories: true,
             attributes: own ? [.posixPermissions: 0o700] : nil)

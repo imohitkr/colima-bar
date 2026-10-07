@@ -14,6 +14,10 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// Deletes the VM with all its data and starts it with a smaller disk.
     case diskShrink = "disk-shrink"
     case autoStop = "auto-stop"
+    /// Creates a new profile with `colima start` and starts its VM.
+    case profileCreate = "profile-create"
+    /// Deletes a profile with `colima delete --data --force`.
+    case profileDelete = "profile-delete"
     case copyEnv = "copy-env"
     case containerRemove = "ctr-rm"
     case containerLogs = "ctr-logs"
@@ -31,7 +35,9 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// not on the next 1 s tick, so a second click can't race it.
     var isVMAction: Bool {
         switch self {
-        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop: true
+        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop, .profileCreate,
+            .profileDelete:
+            true
         default: false
         }
     }
@@ -53,6 +59,8 @@ enum CtlAction: String, CaseIterable, Sendable {
         case .start: return "Starting"
         case .stop, .autoStop: return "Stopping"
         case .diskShrink: return "Shrinking disk"
+        case .profileCreate: return "Creating"
+        case .profileDelete: return "Deleting"
         default: return "Restarting"
         }
     }

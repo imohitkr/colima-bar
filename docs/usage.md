@@ -25,7 +25,7 @@ The tabs (Containers, Images, Volumes and System) and the live tiles show only w
 
 ### Header and live usage
 
-The header shows the VM state, its CPUs, memory, disk and architecture, and the start, stop and restart buttons.
+The header shows the VM state, its CPUs, memory, disk and architecture, and the start, stop and restart buttons. Next to the name "Colima", the profile menu shows the selected profile. See [Profiles](#profiles).
 
 The live tiles show the total CPU and memory of all containers as a share of the VM, with 60-second graphs. A third tile counts running, stopped and unhealthy containers.
 
@@ -89,7 +89,7 @@ Use these buttons to copy your ColimaBar settings to a different Mac.
 - It rejects a file that is not a ColimaBar settings file, and a file from a newer ColimaBar version.
 - It skips a value of the wrong type or out of range. For example, the auto-stop time must be from 1 to 1440 minutes.
 - It ignores unknown keys. A setting that is not in the file keeps its current value.
-- It skips a profile that does not exist on this Mac. To create the profile, run `colima start --profile NAME`, then import again.
+- It skips a profile that does not exist on this Mac. To create the profile, use [New Profile…](#create-a-profile), then import again.
 - It shows the changes and asks before it applies them. Then it shows the applied and skipped settings.
 
 ### Footer
@@ -177,9 +177,43 @@ When you turn the option off, ColimaBar closes the log streams and drops all sav
 
 ## Profiles
 
-If you have more than one Colima profile, a profile picker appears in the header. With one profile, the picker stays hidden. To create a profile, run `colima start --profile NAME`.
+Each Colima profile is a separate VM with its own containers, images and settings. The profile menu in the header shows the selected profile. Click it to see these items:
 
-The dashboard, all actions, auto-start and auto-stop apply to the selected profile only. If the selected profile no longer exists, ColimaBar switches to `default`.
+- **Show**: all profiles with their state. Select a profile to show it in the dashboard.
+- **Start** and **Stop**: start or stop the VM of a different profile. The selected profile uses the buttons in the header.
+- **New Profile…**: create a profile. See [Create a profile](#create-a-profile).
+- **Delete Profile**: delete a profile with all its data. See [Delete a profile](#delete-a-profile).
+
+While an action runs for a different profile, the menu shows it next to the profile name, for example "work · starting…".
+
+The dashboard and its actions apply to the selected profile. The ColimaBar socket follows the selected profile. Each docker profile also has its own socket and docker context, for example `colimabar-work`. See [Profile sockets](auto-start.md#profile-sockets). Auto-stop checks each running profile. See [Auto-stop](auto-stop.md).
+
+If the selected profile no longer exists, ColimaBar switches to `default`.
+
+### Create a profile
+
+1. In the profile menu, choose **New Profile…**.
+2. Type a name. Use lowercase letters, digits and single hyphens, up to 30 characters. Start and end with a letter or a digit. You cannot use `default`, `colima` or a name that starts with `colima-`: Colima uses them for the default profile.
+3. Select the CPU, memory, disk and runtime. The form starts with the values of the selected profile. The runtime is docker by default. Only a docker profile gets auto-start, auto-stop, a profile socket and a docker context.
+4. Click **Create**.
+
+ColimaBar runs `colima start --profile NAME --cpu CPU --memory MEMORY --disk DISK --runtime RUNTIME`. The first start of a new profile can take some minutes. The dashboard keeps showing the selected profile.
+
+### Delete a profile
+
+> [!WARNING]
+> Delete removes the VM of the profile, its disk and its folder with `colima.yaml`. All containers, images, volumes and build cache of the profile are lost. You cannot undo this.
+
+1. If the profile is the selected profile and its VM runs, stop it first. The menu shows "(stop it first)" for it.
+2. In the profile menu, choose **Delete Profile**, then the profile.
+3. Read the warning. Type the profile name. Then click **Delete Profile**.
+4. Colima asks one more time. Click **OK**.
+
+ColimaBar runs `colima delete --profile NAME --data --force`. Then it removes the socket of the profile and its `colimabar-NAME` context. If you deleted the selected profile, ColimaBar switches to `default`.
+
+You can delete a different profile while its VM runs. Colima stops it first.
+
+You can also delete `default`. The warning then tells you that a plain `colima start` creates it again with an empty disk. If you delete the selected `default` profile, ColimaBar switches to a different profile, if you have one.
 
 ## The login item
 

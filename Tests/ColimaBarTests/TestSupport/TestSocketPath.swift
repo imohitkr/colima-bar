@@ -19,4 +19,13 @@ enum TestSocketPath {
         let tag = String(UInt32.random(in: 0..<(36 * 36 * 36 * 36)), radix: 36)
         return "/tmp/cb-\(getpid())-\(n)-\(tag).sock"
     }
+
+    /// A new, empty folder with a short path for test sockets, for example
+    /// "/tmp/cbd-4242-8-k3x9". The caller removes it.
+    static func uniqueDir() -> String {
+        let path = unique().replacingOccurrences(of: "/tmp/cb-", with: "/tmp/cbd-")
+            .replacingOccurrences(of: ".sock", with: "")
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return path
+    }
 }

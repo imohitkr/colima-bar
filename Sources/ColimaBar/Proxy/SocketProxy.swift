@@ -2,10 +2,13 @@ import Darwin
 import Foundation
 import os
 
-/// The auto-start proxy behind ColimaBar's stable socket (Paths.proxySocket).
+/// The auto-start proxy behind ColimaBar's stable socket (Paths.proxySocket),
+/// and behind the socket of each profile (Paths.profileSocket, see
+/// ProfileProxies).
 ///
 /// Every docker client (shell DOCKER_HOST, launchd env for IDEs, the docker
-/// context, testcontainers.properties) points at that one path. While the VM is
+/// context, testcontainers.properties) points at the stable path. The
+/// `colimabar-PROFILE` contexts point at the profile sockets. While the VM is
 /// up, connections are spliced byte-for-byte to Colima's socket, so attach,
 /// exec, builds and log streams all work. While it's down, the first real
 /// request starts Colima, waits for it, then continues on the same connection.
@@ -62,17 +65,21 @@ final class SocketProxy: @unchecked Sendable {
     /// `colima start` (+10 s to kill it) + 60 s of readiness probes.
     static let waitBudget: TimeInterval = 20 * 60
 
-    /// Where the stable socket lives (injectable for tests).
+    /// Where the socket lives (injectable for tests).
     let path: String
 
+    /// The profile of a profile socket, for the log. Empty for the stable socket.
+    let label: String
+
     init(
-        upstream: String, path: String = Paths.proxySocket, idleTimeout: Int = 5 * 60,
+        upstream: String, path: String = Paths.proxySocket, idleTimeout: Int = 5 * 60, label: String = "",
         connectUpstream: @escaping @Sendable (String) -> Result<Int32, UnixSocket.Error> = {
             UnixSocket.tryConnect($0)
         }
     ) {
         _upstream = upstream
         self.path = path
+        self.label = label
         self.idleTimeout = idleTimeout
         self.connectUpstream = connectUpstream
     }
@@ -125,6 +132,18 @@ final class SocketProxy: @unchecked Sendable {
         // Link first: a client that connects in between still reaches a live
         // listener, never a closed one (ECONNREFUSED).
         linkStable(to: upstream)
+        if fd >= 0 { close(fd) }
+    }
+
+    /// Stops accepting and removes the socket path, for a profile that no
+    /// longer exists. Nothing replaces the path.
+    func remove() {
+        let fd = lock.withLock { () -> Int32 in
+            let fd = listenFD
+            listenFD = -1
+            return fd
+        }
+        unlink(path)
         if fd >= 0 { close(fd) }
     }
 
@@ -269,7 +288,9 @@ final class SocketProxy: @unchecked Sendable {
             case .down:
                 break
             }
-            log.notice("waking Colima for: \(Self.logTarget(requestLine), privacy: .public)")
+            log.notice(
+                "waking Colima\(self.label.isEmpty ? "" : " profile " + self.label, privacy: .public) for: \(Self.logTarget(requestLine), privacy: .public)"
+            )
             guard waitForWake() else {
                 reply503(client, Self.couldNotStart)
                 return

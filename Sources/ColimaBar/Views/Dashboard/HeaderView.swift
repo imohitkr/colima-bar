@@ -12,8 +12,8 @@ struct HeaderView: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text("Colima").font(.headline)
-                    // Only worth showing once there's more than one profile.
-                    if model.profiles.count > 1 { ProfileMenu(model: model) }
+                    // It also creates profiles, so it shows whenever Colima is installed.
+                    if model.state != .notInstalled { ProfileMenu(model: model) }
                     if let busy = model.busy {
                         ProgressView().controlSize(.mini)
                         Text(busy + "…").font(.caption).foregroundStyle(.orange)
@@ -65,20 +65,61 @@ struct HeaderView: View {
     }
 }
 
-/// Header chip that shows the selected profile and switches between them.
+/// Header chip that shows the selected profile. Its menu switches between
+/// profiles, starts and stops the other profiles, and creates and deletes
+/// profiles.
 struct ProfileMenu: View {
     let model: ColimaModel
 
     var body: some View {
         Menu {
-            ForEach(model.profiles) { p in
-                Button {
-                    model.profile = p.name
-                } label: {
-                    Text("\(p.name == model.profile ? "✓ " : "")\(p.name)  ·  \(p.isRunning ? "running" : "stopped")")
+            Section("Show") {
+                ForEach(model.profiles) { p in
+                    Button {
+                        model.profile = p.name
+                    } label: {
+                        Text("\(p.name == model.profile ? "✓ " : "")\(p.name)  ·  \(status(p))")
+                    }
+                }
+                ForEach(pendingNew, id: \.self) { name in
+                    Text("\(name)  ·  \(model.profileActions[name] ?? "")…")
+                }
+                if model.profiles.isEmpty && pendingNew.isEmpty { Text("No profiles yet") }
+            }
+            Divider()
+            let others = model.profiles.filter { $0.name != model.profile && model.profileActions[$0.name] == nil }
+            Menu("Start") {
+                ForEach(others.filter { !$0.isRunning }) { p in
+                    Button(p.name) { model.startProfile(p.name) }
                 }
             }
-            if model.profiles.isEmpty { Text("No profiles yet") }
+            .disabled(!others.contains { !$0.isRunning })
+            Menu("Stop") {
+                ForEach(others.filter(\.isRunning)) { p in
+                    Button(p.name) { model.stopProfile(p.name) }
+                }
+            }
+            .disabled(!others.contains(where: \.isRunning))
+            Divider()
+            Button("New Profile…") {
+                let defaults = NewProfileForm.defaults(from: model.vm)
+                if let form = NewProfileAlert.run(defaults: defaults, existing: model.profiles.map(\.name)) {
+                    model.createProfile(form)
+                }
+            }
+            Menu("Delete Profile") {
+                ForEach(model.profiles.filter { model.profileActions[$0.name] == nil }) { p in
+                    let running = model.isRunning(profile: p.name)
+                    let refusal = ProfileDelete.refusal(profile: p.name, selected: model.profile, isRunning: running)
+                    Button(refusal == nil ? "\(p.name)…" : "\(p.name) (stop it first)") {
+                        if DeleteProfileAlert.confirm(profile: p.name, isRunning: running) {
+                            model.deleteProfile(p.name)
+                        }
+                    }
+                    .disabled(refusal != nil)
+                }
+            }
+            .disabled(model.profiles.isEmpty)
         } label: {
             HStack(spacing: 2) {
                 Text(model.profile)
@@ -90,5 +131,17 @@ struct ProfileMenu: View {
         }
         .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
         .hint(Help.profile)
+    }
+
+    /// "running", "stopped", or the action that runs for the profile.
+    private func status(_ p: ProfileRow) -> String {
+        if let action = model.profileActions[p.name] { return action.lowercased() + "…" }
+        return p.isRunning ? "running" : "stopped"
+    }
+
+    /// Profiles that New Profile creates now: `colima list` shows them
+    /// only after the VM exists.
+    private var pendingNew: [String] {
+        model.profileActions.keys.filter { name in !model.profiles.contains { $0.name == name } }.sorted()
     }
 }
