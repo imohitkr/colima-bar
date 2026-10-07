@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // Before launch completes, so a notification click that launched us
         // isn't lost.
         Notifier.shared.install()
+        model.dismissPopover = { [weak self] in self?.popover.performClose(nil) }
         Notifier.shared.onAlert = { [weak self] title, body, ctr in
             self?.model.record(title, body, containerID: ctr?.id)
         }
@@ -386,8 +387,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let alert = NSAlert()
         alert.messageText = "Uninstall ColimaBar?"
         alert.informativeText = Help.uninstallConfirm
-        alert.addButton(withTitle: "Uninstall").hasDestructiveAction = true
-        alert.addButton(withTitle: "Cancel")
+        let remove = alert.addButton(withTitle: "Uninstall")
+        remove.hasDestructiveAction = true
+        remove.keyEquivalent = ""  // Return must not uninstall
+        alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
         NSApp.activate()
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         Shell.inTerminal(Shell.quote(script))

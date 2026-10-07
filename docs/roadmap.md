@@ -2,13 +2,7 @@
 
 [Docs index](README.md)
 
-These features are planned. Only the next version has a target.
-
-## v0.5.0
-
-- **Keep logs of removed containers that fail.** This option is off by default. When it is on, ColimaBar keeps the logs of auto-removed containers that fail. Auto-removed containers come from `docker run --rm`, `docker compose run --rm` and testcontainers.
-- **Export and import settings.** Save the ColimaBar settings to a file, and load them on a different Mac.
-- **Install with Homebrew.** Run `brew install --cask imohitkr/tap/colima-bar`, and update with `brew upgrade`.
+These features are planned. They have no target version yet.
 
 ## Later
 

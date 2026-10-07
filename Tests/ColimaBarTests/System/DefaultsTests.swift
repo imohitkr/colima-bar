@@ -9,7 +9,7 @@ import Testing
         let expected: Set<String> = [
             "profile", "notifyOnCrash", "autoStart", "autoStop", "autoStopMinutes", "hideIconWhenStopped",
             "toldIconHidden", "apiVersion", "checkUpdates", "notifiedVersion", "didOfferLoginItem",
-            "didMigrateLoginItem", "revealOnLaunch",
+            "didMigrateLoginItem", "revealOnLaunch", "keepRemovedLogs",
         ]
         #expect(Set(Defaults.Key.allCases.map(\.rawValue)) == expected)
     }

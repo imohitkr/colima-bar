@@ -38,4 +38,15 @@ import Testing
         #expect(list.first?.Ports?.compactMap { $0.IP != nil ? $0.PublicPort : nil } == [8080])
         #expect(list.first?.Labels?["com.docker.compose.project"] == "shop")
     }
+
+    @Test func inspectReadsAutoRemoveAndTty() throws {
+        let json = """
+            {"Id":"abc","Config":{"Tty":true,"Image":"alpine"},"HostConfig":{"AutoRemove":true,"NetworkMode":"bridge"}}
+            """
+        let i = try JSONDecoder().decode(APIInspect.self, from: Data(json.utf8))
+        #expect(i.HostConfig?.AutoRemove == true)
+        #expect(i.Config?.Tty == true)
+        let plain = try JSONDecoder().decode(APIInspect.self, from: Data(#"{"Id":"abc"}"#.utf8))
+        #expect(plain.HostConfig?.AutoRemove == nil)
+    }
 }

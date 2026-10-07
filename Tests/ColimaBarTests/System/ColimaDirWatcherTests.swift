@@ -26,6 +26,18 @@ import Testing
         #expect(ColimaDirWatcher.watchPaths(root: "\(root)/missing").isEmpty)
     }
 
+    @Test func watchesASeparateLimaFolder() throws {
+        // LIMA_HOME moves the Lima instances out of the Colima config folder.
+        let root = try tempRoot()
+        defer { try? FileManager.default.removeItem(atPath: root) }
+        let lima = "\(root)/_lima"
+        #expect(
+            ColimaDirWatcher.watchPaths(root: "\(root)/default", lima: lima) == [
+                "\(root)/default", lima, "\(lima)/colima", "\(lima)/colima-work",
+            ])
+        #expect(ColimaDirWatcher.watchPaths(root: "\(root)/missing", lima: lima).count == 3)
+    }
+
     /// Waits up to `seconds` for `cond`, letting the main queue run.
     @MainActor private func wait(_ seconds: Double, _ cond: () -> Bool) async -> Bool {
         let end = Date().addingTimeInterval(seconds)

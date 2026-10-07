@@ -16,6 +16,8 @@ struct FooterView: View {
             IconButton("list.bullet.rectangle", Help.log) { model.run(.logs) }
             Spacer()
             Button {
+                // A manual check always ends with an alert; the popover would cover it.
+                model.dismissPopover()
                 Task { await Updater.shared.check(manual: true) }
             } label: {
                 Text("v\(AppDelegate.version)").font(.caption2.monospacedDigit())

@@ -4,7 +4,7 @@
 
 Auto-start is on by default. All docker clients use the ColimaBar socket (`~/.cache/colima-bar/docker.sock`). While Colima is stopped, the first real docker request to this socket starts the VM. The request then continues. A cold `docker run` takes about 15 seconds.
 
-Auto-start starts the VM of the selected [profile](usage.md#profiles) only.
+The ColimaBar socket starts the VM of the selected [profile](usage.md#profiles). Each docker profile also has its own socket, which starts that profile. See [Profile sockets](#profile-sockets).
 
 A ping (`/_ping`) does not start the VM. ColimaBar answers it, so idle pollers do not start the VM. ColimaBar can answer a ping only after it reached the Docker daemon one time. Thus on a fresh install, the first ping can start the VM. To learn how the socket works, read [ARCHITECTURE.md](../ARCHITECTURE.md#auto-start-proxy).
 
@@ -21,11 +21,42 @@ The docker CLI needs no shell setup, because it uses the docker context. Add thi
 if [ -e "$HOME/.cache/colima-bar/docker.sock" ]; then
   export DOCKER_HOST="unix://$HOME/.cache/colima-bar/docker.sock"
 else
-  export DOCKER_HOST="unix://$HOME/.config/colima/default/docker.sock"
+  export DOCKER_HOST="unix://$HOME/.colima/default/docker.sock"
 fi
 ```
 
-The snippet uses the Colima socket if the ColimaBar socket is missing. For a single `export DOCKER_HOST=…` line, click the copy button in the dashboard footer.
+The snippet uses the Colima socket if the ColimaBar socket is missing. If your Colima folder is `~/.config/colima` or `COLIMA_HOME`, change the second path to that folder. See [Colima folder](troubleshooting.md#colimabar-uses-the-wrong-colima-folder). For a single `export DOCKER_HOST=…` line, click the copy button in the dashboard footer.
+
+## Profile sockets
+
+Each Colima profile with the docker runtime has its own socket and docker context:
+
+| Profile | Socket | Docker context |
+|---|---|---|
+| `default` | `~/.cache/colima-bar/profiles/default.sock` | `colimabar-default` |
+| `work` | `~/.cache/colima-bar/profiles/work.sock` | `colimabar-work` |
+
+A profile socket works like the ColimaBar socket, but it always uses its own profile. It does not follow the profile that you select in the dashboard. A real docker request to the socket of a stopped profile starts that profile, and only that profile. A ping does not start it.
+
+To use one profile from the docker CLI, give its context:
+
+```sh
+docker --context colimabar-work ps
+```
+
+To use one profile for a project, set `DOCKER_HOST` for that project only, for example in its `.envrc` file:
+
+```sh
+export DOCKER_HOST="unix://$HOME/.cache/colima-bar/profiles/work.sock"
+```
+
+ColimaBar creates the socket and the context when a profile appears, and removes them when the profile goes away. It changes only the contexts that it created. Their description starts with "ColimaBar". If a context with the name `colimabar-NAME` already exists and ColimaBar did not create it, ColimaBar leaves it alone.
+
+The `colimabar` context and the other [routes](#how-docker-clients-reach-colima) still use the ColimaBar socket. ColimaBar does not change them for the profile sockets.
+
+ColimaBar skips a profile if the socket path would be longer than 99 bytes. A unix socket path holds at most 103 bytes, and ColimaBar needs 4 bytes for a temporary name. With a home folder of normal length, a name of up to about 45 characters fits. ColimaBar writes the skipped name to its log.
+
+A profile with the containerd runtime has no Docker daemon. Thus it gets no socket and no context.
 
 ## IDEs
 
@@ -39,24 +70,24 @@ ColimaBar does not replace a real socket at that path, for example the socket of
 
 ## When ColimaBar quits
 
-When ColimaBar quits, the ColimaBar socket becomes a symlink to the Colima socket. All clients continue to work, but auto-start stops. Colima and your containers continue to run.
+When ColimaBar quits, the ColimaBar socket becomes a symlink to the Colima socket of the selected profile. Each profile socket becomes a symlink to the Colima socket of its profile. All clients continue to work, but auto-start stops. Colima and your containers continue to run.
 
 You do not need to change the routes back. When ColimaBar starts again, auto-start starts again.
 
-If you turn off auto-start, the ColimaBar socket also becomes a symlink to the Colima socket.
+If you turn off auto-start, the ColimaBar socket and the profile sockets also become symlinks to the Colima sockets.
 
 ## When auto-start does not start the VM
 
 Auto-start does not start the VM in these cases:
 
-- The selected profile uses the containerd runtime. This runtime has no Docker daemon.
-- The selected profile is not `default`, and you deleted it. ColimaBar sends the notification "Profile NAME doesn't exist, so it wasn't started."
+- The profile uses the containerd runtime. This runtime has no Docker daemon.
+- The profile is not `default`, and you deleted it. ColimaBar sends the notification "Profile NAME doesn't exist, so it wasn't started."
 
 If the start fails, the docker client gets an error. See [Auto-start fails](troubleshooting.md#auto-start-fails).
 
 ## How docker clients reach Colima
 
-ColimaBar sets a route for each kind of docker client:
+ColimaBar sets a route for each kind of docker client. All routes use the ColimaBar socket. The [profile sockets](#profile-sockets) are extra, and only the clients that you point at them use them.
 
 <p align="center">
   <img src="assets/docker-routes.svg" width="900" alt="Each docker client reaches the ColimaBar socket through its own route. While ColimaBar runs, the socket is the proxy. When ColimaBar quits, it is a symlink to the Colima socket.">

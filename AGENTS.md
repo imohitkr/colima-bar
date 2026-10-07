@@ -24,7 +24,7 @@ It uses Swift 6.4 and SwiftPM, in the Swift 6 language mode, with Command Line T
 
 Run `make fmt` and `make lint` before you commit. CI fails on any lint finding.
 
-For screenshots, use a debug run: `build/ColimaBar.app/Contents/MacOS/ColimaBar --snapshot PATH [TAB]`. A debug run does not touch the proxy socket, the docker routes or the login item. CONTRIBUTING.md lists all debug flags.
+For screenshots, use a debug run: `build/ColimaBar.app/Contents/MacOS/ColimaBar --snapshot PATH [TAB]`. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. CONTRIBUTING.md lists all debug flags.
 
 ## Layout
 
@@ -36,7 +36,7 @@ User guides live in `docs/`. `README.md` is a short summary for users.
 
 ## Invariants
 
-Do not break the rules in [ARCHITECTURE.md](ARCHITECTURE.md#invariants). In short: a fixed popover size, a fixed proxy socket path and modes, working clients after quit, fixed `colima-ctl.sh` exit codes, a plain LaunchAgent login item, the log `since` format, the readiness gate after a wake, and debug runs that change nothing.
+Do not break the rules in [ARCHITECTURE.md](ARCHITECTURE.md#invariants). In short: a fixed popover size, fixed proxy socket paths and modes, working clients after quit, only ColimaBar's own docker contexts, fixed `colima-ctl.sh` exit codes, a plain LaunchAgent login item, the log `since` format, the readiness gate after a wake, and debug runs that change nothing.
 
 ## Tests
 
@@ -47,7 +47,7 @@ Do not break the rules in [ARCHITECTURE.md](ARCHITECTURE.md#invariants). In shor
 - If a test must wait for a condition, poll it with `waitUntil`. Do not use a fixed sleep before a check.
 - Do not name files, suites or tests after review rounds or fixes. Name them after the behavior that they check.
 - If you change logic, add or update tests.
-- Do not write tests that depend on exact timing. If a test must measure time, use a generous bound.
+- Do not write tests that depend on exact timing. Put wall-clock bounds only in a benchmark test marked `@Test(.benchmark)`. CI does not run benchmarks; run them with `make perf`.
 - Do not start or stop the user's Colima VM in automated runs.
 - Do not quit or kill the installed ColimaBar in automated runs.
 
@@ -63,6 +63,13 @@ Use a light form of ASD-STE100 for docs, comments, hints, notifications, error m
 - Keep code, identifiers and command output exact.
 
 If you add or change a control, update its hint text in `Views/Shared/Help.swift`. If you change behavior that users see, update the user guide in `docs/`, and `README.md` if the summary changes. If you change the design, update `ARCHITECTURE.md`.
+
+## Releases
+
+- Collect features before a release. Do not tag each merge.
+- After every change, run at least one round of review agents and fix the findings.
+- Before a tag, review the docs against the code and fix anything out of date.
+- Never move or delete a tag that has a release. Releases are immutable; publish the next patch version instead.
 
 ## Commits and pull requests
 

@@ -105,4 +105,59 @@ import Testing
         #expect(ColimaModel.showsDiskUsage(.volumes))
         #expect(ColimaModel.showsDiskUsage(.system))
     }
+
+    @Test func crashExitMatchesTheAlertRule() {
+        for code in ["1", "2", "125", "139", "255"] { #expect(ColimaModel.isCrashExit(code), "\(code)") }
+        for code in ["0", "130", "137", "143"] { #expect(!ColimaModel.isCrashExit(code), "\(code)") }
+        #expect(!ColimaModel.isCrashExit(nil))
+    }
+
+    @Test func selectedProfileWithUnknownStateUsesTheListedState() {
+        #expect(ColimaModel.selectedIsRunning(state: .running, listed: false))
+        #expect(!ColimaModel.selectedIsRunning(state: .stopped, listed: true))
+        #expect(ColimaModel.selectedIsRunning(state: .unknown, listed: true))
+        #expect(!ColimaModel.selectedIsRunning(state: .unknown, listed: false))
+        // Not in the list yet: it counts as running, so Delete is refused.
+        #expect(ColimaModel.selectedIsRunning(state: .unknown, listed: nil))
+    }
+
+    @Test func failedContextsRetryOnlyForANewSetOrAfterTheInterval() {
+        let t = Date(timeIntervalSince1970: 1000)
+        let a = ["work": "unix:///a.sock"]
+        let b = ["work": "unix:///a.sock", "dev": "unix:///b.sock"]
+        let wait = ColimaModel.contextsRetryInterval
+        #expect(!ColimaModel.contextsRetryDue(wanted: a, failed: a, failedAt: t, now: t.addingTimeInterval(60)))
+        #expect(ColimaModel.contextsRetryDue(wanted: b, failed: a, failedAt: t, now: t.addingTimeInterval(60)))
+        #expect(ColimaModel.contextsRetryDue(wanted: a, failed: a, failedAt: t, now: t.addingTimeInterval(wait)))
+    }
+
+    @Test func holdsFollowTheSelectedProfileDuringAWake() {
+        // A wake of work runs. The stable proxy holds only while work is selected.
+        let before = ColimaModel.holds(waking: ["work"], selected: "default")
+        #expect(!before.stable)
+        #expect(before.profiles == ["work"])
+        let after = ColimaModel.holds(waking: ["work"], selected: "work")
+        #expect(after.stable)
+        #expect(after.profiles == ["work"])
+        // The wake ends: nothing holds.
+        let done = ColimaModel.holds(waking: [], selected: "work")
+        #expect(!done.stable && done.profiles.isEmpty)
+    }
+
+    @Test func holdsKeepAProfileThatIsRemovedAndAddedBack() {
+        // `colima list` drops work for a moment during its wake. The hold set
+        // still names work, so its new proxy holds at once (ProfileProxies.sync).
+        let gone = ColimaModel.holds(waking: ["work", "dev"], selected: "default")
+        #expect(gone.profiles == ["work", "dev"])
+        #expect(!gone.stable)
+        let back = ColimaModel.holds(waking: ["work"], selected: "default")
+        #expect(back.profiles == ["work"])
+    }
+
+    @Test func anyRunningActionBlocksAutoStop() {
+        #expect(!ColimaModel.blocksAutoStop(busyMarker: nil, actionsInFlight: 0))
+        #expect(ColimaModel.blocksAutoStop(busyMarker: "Restarting", actionsInFlight: 0))
+        // A prune that waits for its dialog writes no busy marker.
+        #expect(ColimaModel.blocksAutoStop(busyMarker: nil, actionsInFlight: 1))
+    }
 }

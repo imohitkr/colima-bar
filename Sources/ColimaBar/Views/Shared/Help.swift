@@ -79,7 +79,9 @@ enum Help {
     static let k8s =
         "Run a single-node k3s Kubernetes cluster in the VM and add a kubectl context: 'colima', or 'colima-PROFILE' for other profiles. It uses about 0.5 to 1 GB of RAM. A change restarts the VM."
     static let disk =
-        "The virtual disk of the VM. It holds images, containers, volumes and build cache. It can grow but cannot shrink. The file on your Mac uses only the space that the VM uses."
+        "The virtual disk of the VM. It holds images, containers, volumes and build cache. It grows in place and keeps your data. The file on your Mac uses only the space that the VM uses."
+    static let diskShrink =
+        "Make the disk smaller. A disk cannot shrink in place, so this deletes the VM and all its containers, images, volumes and build cache. Then the VM starts again with an empty disk and the same settings. You must type the profile name to confirm."
 
     // System: disk usage
     static let dfImages = "Images that you downloaded or built. Reclaimable is the part that no container uses."
@@ -96,9 +98,9 @@ enum Help {
 
     // Profiles
     static let profile =
-        "The Colima profile that this dashboard shows. Each profile is a separate VM with its own containers, images and settings. To switch, select a different profile."
+        "The Colima profile that this dashboard shows. Each profile is a separate VM with its own containers, images and settings. Click to switch, start or stop a different profile, or to create or delete a profile."
     static let profiles =
-        "All Colima profiles. To create one, run `colima start --profile NAME`. The dashboard and all actions apply to the selected profile."
+        "All Colima profiles. To create or delete one, use the profile menu in the header. The dashboard and its actions apply to the selected profile. Each docker profile also has its own profile socket and the docker context colimabar-NAME."
 
     // Auto-start / auto-stop
     static let autoStart =
@@ -113,7 +115,7 @@ enum Help {
     static let linkVarRun =
         "Create /var/run/docker.sock as a symlink to the ColimaBar socket. ColimaBar asks for your admin password."
     static let autoStop =
-        "Stop the VM after it is idle for the selected time. Running containers and docker builds, pulls or pushes keep it running. If auto-start is on, the next docker command starts it again."
+        "Stop the VM of each running profile after it is idle for the selected time. Each profile has its own idle time. Running containers and docker builds, pulls or pushes keep a VM running. If auto-start is on, the next docker command starts it again."
     static let autoStopMinutes =
         "The time with no running containers and no docker builds, pulls or pushes before the VM stops."
     static let autoStopCustom =
@@ -134,8 +136,16 @@ enum Help {
     }
     static let notify =
         "Send an alert when a container exits with an error, runs out of memory or fails its healthcheck. ColimaBar ignores testcontainers containers. Failed actions always send an alert."
+    static let keepRemovedLogs =
+        "Docker deletes a container started with --rm and its logs when it exits. With this on, ColimaBar keeps the last 500 lines of such a container in memory. If the container fails, View logs on its alert shows them for 5 minutes. It works only while crash notifications are on."
+    static let savedLogs =
+        "Open the last lines that ColimaBar saved before Docker removed this container. ColimaBar keeps them for 5 minutes."
     static let login =
         "Start ColimaBar when you log in. If it crashes, start it again immediately. Thus the ColimaBar socket continues to work."
+    static let exportSettings =
+        "Save the ColimaBar settings to a JSON file. Use the file to set up ColimaBar on a different Mac."
+    static let importSettings =
+        "Load ColimaBar settings from a JSON file. ColimaBar shows the changes before it applies them. A profile that does not exist on this Mac is skipped."
 
     // Footer
     static let ssh = "Open a shell in the Colima VM, in iTerm, or in Terminal when iTerm is not installed."

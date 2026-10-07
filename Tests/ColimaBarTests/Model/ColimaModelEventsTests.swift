@@ -78,7 +78,7 @@ import Testing
         #expect(ColimaModel.reaction(type: "image", action: "delete").contains(.disk))
         #expect(ColimaModel.reaction(type: "volume", action: "destroy").contains(.disk))
         #expect(ColimaModel.reaction(type: "container", action: "create").contains(.disk))
-        #expect(ColimaModel.reaction(type: "container", action: "start") == .containers)
+        #expect(ColimaModel.reaction(type: "container", action: "start") == [.containers, .savedLogs])
         #expect(ColimaModel.reaction(type: "container", action: "health_status: unhealthy") == .containers)
         #expect(ColimaModel.reaction(type: "container", action: "exec_start: sh").isEmpty)
         #expect(ColimaModel.reaction(type: "network", action: "prune").isEmpty)
@@ -89,5 +89,18 @@ import Testing
         #expect(ColimaModel.ignores(action: "top"))
         #expect(!ColimaModel.ignores(action: "die"))
         #expect(!ColimaModel.ignores(action: "health_status: unhealthy"))
+    }
+
+    /// RemovedLogKeeper needs start (inspect for AutoRemove), oom and die
+    /// (keep or drop) and destroy (drop). The filter must pass them.
+    @Test func keeperEventsPassTheFilter() throws {
+        for a in ["start", "oom", "die", "destroy"] {
+            #expect(ColimaModel.reaction(type: "container", action: a).contains(.savedLogs), "\(a)")
+            #expect(try filterPasses("container", a), "\(a)")
+        }
+        for a in ["create", "stop", "kill", "restart", "health_status: unhealthy", "commit"] {
+            #expect(!ColimaModel.reaction(type: "container", action: a).contains(.savedLogs), "\(a)")
+        }
+        #expect(!ColimaModel.reaction(type: "image", action: "delete").contains(.savedLogs))
     }
 }

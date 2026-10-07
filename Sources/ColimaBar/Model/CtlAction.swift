@@ -11,7 +11,13 @@ enum CtlAction: String, CaseIterable, Sendable {
     case rosetta
     case k8s
     case disk
+    /// Deletes the VM with all its data and starts it with a smaller disk.
+    case diskShrink = "disk-shrink"
     case autoStop = "auto-stop"
+    /// Creates a new profile with `colima start` and starts its VM.
+    case profileCreate = "profile-create"
+    /// Deletes a profile with `colima delete --data --force`.
+    case profileDelete = "profile-delete"
     case copyEnv = "copy-env"
     case containerRemove = "ctr-rm"
     case containerLogs = "ctr-logs"
@@ -29,7 +35,9 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// not on the next 1 s tick, so a second click can't race it.
     var isVMAction: Bool {
         switch self {
-        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .autoStop: true
+        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop, .profileCreate,
+            .profileDelete:
+            true
         default: false
         }
     }
@@ -38,7 +46,20 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// or volume leaves its row and a second Remove can't fail.
     var changesDisk: Bool {
         switch self {
-        case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll: true
+        case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll, .diskShrink: true
+        default: false
+        }
+    }
+
+    /// The script asks the user with a dialog first. The dialog comes from
+    /// another process, so ColimaBar closes the popover before it runs:
+    /// the popover would cover the dialog. A test checks this list against
+    /// the script.
+    var showsDialog: Bool {
+        switch self {
+        case .resources, .rosetta, .k8s, .disk, .diskShrink, .profileDelete, .containerRemove, .imageRemove,
+            .volumeRemove, .stopAll, .prune:
+            true
         default: false
         }
     }
@@ -50,6 +71,9 @@ enum CtlAction: String, CaseIterable, Sendable {
         switch self {
         case .start: return "Starting"
         case .stop, .autoStop: return "Stopping"
+        case .diskShrink: return "Shrinking disk"
+        case .profileCreate: return "Creating"
+        case .profileDelete: return "Deleting"
         default: return "Restarting"
         }
     }

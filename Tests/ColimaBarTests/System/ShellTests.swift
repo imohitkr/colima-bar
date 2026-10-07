@@ -25,6 +25,26 @@ import Testing
         #expect(script.contains(#"do script "echo \"a\\b\"""#))
     }
 
+    @Test func colimaCallsGetTheColimaFolderInColimaHome() {
+        let inherited = ProcessInfo.processInfo.environment
+        for args in [["colima", "list", "-j"], [Paths.ctl, "start"]] {
+            let env = Shell.environment(for: args, colimaHome: { "/data/colima" })
+            #expect(env["COLIMA_HOME"] == "/data/colima", "\(args)")
+            // XDG_CONFIG_HOME is not pinned: COLIMA_HOME chooses the folder.
+            #expect(env["XDG_CONFIG_HOME"] == inherited["XDG_CONFIG_HOME"], "\(args)")
+            #expect(env["DOCKER_HOST"] == nil)
+        }
+        // Other tools keep the inherited value, and no folder is made for them.
+        let docker = Shell.environment(
+            for: ["docker", "context", "show"],
+            colimaHome: {
+                Issue.record("colimaHome ran for docker")
+                return ""
+            })
+        #expect(docker["COLIMA_HOME"] == inherited["COLIMA_HOME"])
+        #expect(docker["PATH"] == Shell.searchPath)
+    }
+
     @Test func returnsAllOutput() async {
         let r = await Shell.run(["sh", "-c", "i=0; while [ $i -lt 2000 ]; do echo line$i; i=$((i+1)); done"])
         #expect(r.ok)

@@ -47,4 +47,51 @@ extension ColimaModel {
     }
 
     nonisolated static let projectConcurrency = 8
+
+    /// True when the exit code of a `die` event is a failure. Then the crash
+    /// alert goes out, and `RemovedLogKeeper` keeps the logs. No code, 0 and
+    /// the codes in `ignoredExitCodes` are a normal stop.
+    nonisolated static func isCrashExit(_ code: String?) -> Bool {
+        guard let code else { return false }
+        return !ignoredExitCodes.contains(code)
+    }
+
+    /// Whether the selected profile counts as running, for Delete Profile.
+    /// `listed` is its state in the last `colima list`, nil if the list does
+    /// not show it. Right after a switch the state is unknown: then the list
+    /// decides, and no list entry counts as running.
+    nonisolated static func selectedIsRunning(state: VMState, listed: Bool?) -> Bool {
+        switch state {
+        case .running: true
+        case .unknown: listed ?? true
+        case .stopped, .notInstalled: false
+        }
+    }
+
+    /// A profile is not idle while a VM action runs (its busy marker) or
+    /// while any colima-ctl.sh action that ColimaBar started still runs.
+    /// For example, a prune can wait minutes for its dialog, then needs the VM.
+    nonisolated static func blocksAutoStop(busyMarker: String?, actionsInFlight: Int) -> Bool {
+        busyMarker != nil || actionsInFlight > 0
+    }
+
+    /// The proxies to hold while wakes run (see SocketProxy.holdForWake).
+    /// `waking` holds the profiles whose wake runs now. The stable proxy
+    /// follows the selected profile. Each profile proxy follows its own
+    /// profile, also a proxy that is made again during the wake.
+    nonisolated static func holds(waking: Set<String>, selected: String) -> (stable: Bool, profiles: Set<String>) {
+        (waking.contains(selected), waking)
+    }
+
+    /// After `ProfileContexts.apply` fails, the same wanted set runs again
+    /// only after this time. Each `colima list` would run the docker CLI again.
+    nonisolated static let contextsRetryInterval: TimeInterval = 30 * 60
+
+    /// True if the `colimabar-PROFILE` contexts can be applied for `wanted`
+    /// after the apply for `failed` failed at `failedAt`. A new set runs at once.
+    nonisolated static func contextsRetryDue(
+        wanted: [String: String], failed: [String: String], failedAt: Date, now: Date
+    ) -> Bool {
+        wanted != failed || now.timeIntervalSince(failedAt) >= contextsRetryInterval
+    }
 }

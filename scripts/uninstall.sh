@@ -2,8 +2,93 @@
 # Removes ColimaBar and points every docker client straight back at Colima.
 set -uo pipefail
 
-COLIMA_SOCK="$HOME/.config/colima/default/docker.sock"
 STABLE="$HOME/.cache/colima-bar/docker.sock"
+PROFILES_DIR="$HOME/.cache/colima-bar/profiles"
+
+# BEGIN helpers: functions only. Tests source this block.
+
+# colimabar_contexts -> the names of the colimabar-PROFILE docker contexts
+# that ColimaBar made: their description starts with "ColimaBar". This is the
+# rule of ProfileContexts.isOurs. Other contexts stay.
+colimabar_contexts() {
+  local name desc
+  docker context ls --format '{{.Name}}\t{{.Description}}' 2>/dev/null \
+    | while IFS=$'\t' read -r name desc; do
+        case "$name" in colimabar-?*) ;; *) continue ;; esac
+        case "$desc" in ColimaBar*) echo "$name" ;; esac
+      done
+  return 0
+}
+
+# colima_dir -> the Colima config folder, with the rules of colima-ctl.sh and
+# Paths.colimaDir in ColimaBar. The first rule that applies wins: COLIMA_HOME if
+# that path exists, ~/.colima if it exists, ~/.config/colima if it exists,
+# $XDG_CONFIG_HOME/colima if XDG_CONFIG_HOME is set, else ~/.colima.
+colima_dir() {
+  if [ -n "${COLIMA_HOME:-}" ] && [ -e "$COLIMA_HOME" ]; then
+    echo "$COLIMA_HOME"
+  elif [ -e "$HOME/.colima" ]; then
+    echo "$HOME/.colima"
+  elif [ -e "$HOME/.config/colima" ]; then
+    echo "$HOME/.config/colima"
+  elif [ -n "${XDG_CONFIG_HOME:-}" ]; then
+    echo "$XDG_CONFIG_HOME/colima"
+  else
+    echo "$HOME/.colima"
+  fi
+}
+
+# colima_context_for CONTEXT -> the docker context of Colima for the profile
+# of a colimabar-PROFILE context: colima-PROFILE, or colima for default. For
+# any other context, it prints colima.
+colima_context_for() {
+  case "$1" in
+    colimabar-default) echo colima ;;
+    colimabar-?*) echo "colima-${1#colimabar-}" ;;
+    *) echo colima ;;
+  esac
+}
+
+# leave_context CONTEXT -> switches docker away from CONTEXT, a context of
+# ColimaBar. It uses the context of Colima for the same profile if that
+# context exists. Else it uses colima, else default.
+leave_context() {
+  local target
+  target=$(colima_context_for "$1")
+  docker context use "$target" >/dev/null 2>&1 \
+    || docker context use colima >/dev/null 2>&1 \
+    || docker context use default >/dev/null 2>&1
+  return 0
+}
+
+# profile_socket_names -> the profiles that have a socket in PROFILES_DIR:
+# "work" for work.sock. It skips other files and invalid names.
+profile_socket_names() {
+  local f n
+  for f in "$PROFILES_DIR"/*.sock; do
+    [ -e "$f" ] || [ -L "$f" ] || continue
+    n=${f##*/}
+    n=${n%.sock}
+    case "$n" in *[!ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-]*|.*|"") continue ;; esac
+    echo "$n"
+  done
+}
+
+# link_profile_sockets NAME... -> makes each PROFILES_DIR/NAME.sock a symlink
+# to the Colima socket of that profile, like the stable path.
+link_profile_sockets() {
+  local n dir
+  [ "$#" -gt 0 ] || return 0
+  dir=$(colima_dir)
+  (umask 077 && mkdir -p "$PROFILES_DIR") || return 1
+  for n in "$@"; do
+    ln -sfn "$dir/$n/docker.sock" "$PROFILES_DIR/$n.sock"
+  done
+}
+
+# END helpers
+
+COLIMA_SOCK="$(colima_dir)/default/docker.sock"
 
 wait_for_exit() {
   for _ in $(seq 1 20); do
@@ -34,11 +119,20 @@ if pgrep -U "$(id -u)" -xq ColimaBar; then
 fi
 rm -f ~/Library/LaunchAgents/com.imohitkr.ColimaBar.login.plist
 
-# docker context, launchd env, testcontainers
-if [ "$(docker context show 2>/dev/null)" = colimabar ]; then
-  docker context use colima >/dev/null 2>&1 || docker context use default >/dev/null 2>&1
-fi
-docker context rm -f colimabar >/dev/null 2>&1
+# docker contexts: colimabar and each colimabar-PROFILE of ColimaBar, launchd env, testcontainers
+# Docker context names have no spaces.
+# shellcheck disable=SC2207
+OUR_CONTEXTS=(colimabar $(colimabar_contexts))
+CURRENT_CONTEXT=$(docker context show 2>/dev/null)
+for ctx in "${OUR_CONTEXTS[@]}"; do
+  if [ "$ctx" = "$CURRENT_CONTEXT" ]; then
+    leave_context "$ctx"
+    break
+  fi
+done
+for ctx in "${OUR_CONTEXTS[@]}"; do
+  docker context rm -f "$ctx" >/dev/null 2>&1
+done
 if [ "$(launchctl getenv DOCKER_HOST)" = "unix://$STABLE" ]; then
   launchctl unsetenv DOCKER_HOST
 fi
@@ -57,12 +151,20 @@ if [ "$(readlink /var/run/docker.sock 2>/dev/null)" = "$STABLE" ]; then
   sudo rm /var/run/docker.sock
 fi
 
+# Read the profile socket names before the cache folder goes away.
+# shellcheck disable=SC2207 # profile names have no spaces (see the case above)
+PROFILE_NAMES=($(profile_socket_names))
 rm -rf ~/Applications/ColimaBar.app /Applications/ColimaBar.app ~/.cache/colima-bar
 rm -f ~/.local/bin/colima-ctl.sh
 # Keep the stable path as a link to Colima's socket, so a DOCKER_HOST that
 # still points at it (shell rc files, scripts) keeps working.
 (umask 077 && mkdir -p "$(dirname "$STABLE")") && ln -sfn "$COLIMA_SOCK" "$STABLE"
+# The same for each profile socket: link it to the Colima socket of its profile.
+link_profile_sockets ${PROFILE_NAMES[@]+"${PROFILE_NAMES[@]}"}
 defaults delete com.imohitkr.ColimaBar >/dev/null 2>&1
 
 echo "ColimaBar removed. Docker clients now use Colima's socket: $COLIMA_SOCK"
 echo "$STABLE now links to Colima's socket, so a DOCKER_HOST that points at it keeps working."
+if [ "${#PROFILE_NAMES[@]}" -gt 0 ]; then
+  echo "Each socket in $PROFILES_DIR now links to the Colima socket of its profile."
+fi

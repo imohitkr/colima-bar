@@ -37,7 +37,7 @@ The version comes from `git describe --tags`. Without a tag, the version is the 
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy socket, the docker routes or the login item. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|
@@ -123,16 +123,27 @@ You can use normal engineering words such as cache, retry and idempotent. Keep c
 
 ## Releases
 
-The maintainer makes each release:
+Releases collect a set of features. Do not tag a release for each merge.
+
+Before the tag, the maintainer does these checks:
+
+1. Review every changed file with review agents or a second person, and fix the findings.
+2. Review the docs against the code: README.md, docs/, ARCHITECTURE.md, CHANGELOG.md and the hints. Fix anything out of date.
+3. Run `make check` and `make perf`.
+
+The maintainer then makes the release:
 
 1. The maintainer pushes a tag `vX.Y.Z` on `main`.
 2. CI runs the tests and builds `ColimaBar.dmg` and `ColimaBar.zip`.
 3. CI signs a build provenance attestation for both files.
 4. CI publishes the GitHub release with generated notes.
+5. Within 6 hours, a workflow in imohitkr/homebrew-tap verifies the attestation of `ColimaBar.zip` and updates the cask.
 
 Before the tag, the maintainer moves the `[Unreleased]` entries in `CHANGELOG.md` to a new version section.
 
 Contributors do not need to change version numbers. The version comes from the tag.
+
+Do not move or delete a tag after its release exists. Releases are immutable. If a release needs a fix, publish the next patch version. A tag without a release can move.
 
 ## License
 

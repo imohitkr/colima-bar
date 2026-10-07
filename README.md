@@ -58,6 +58,8 @@ You need a Mac with Apple silicon, macOS 14 or later, and [Colima](https://githu
 curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | bash
 ```
 
+**Homebrew.** Run `brew install --cask imohitkr/tap/colima-bar`. Allow the first launch as described for the disk image below.
+
 **The disk image.** Download [ColimaBar.dmg](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.dmg) and drag ColimaBar into Applications. Apple does not notarize ColimaBar, so macOS blocks the first launch. To allow it, open **System Settings > Privacy & Security** and click **Open Anyway**.
 
 The [Install guide](docs/install.md) has the full steps, the download check and the build from source.
@@ -77,7 +79,7 @@ The [Usage guide](docs/usage.md) describes the icon, each tab and each menu item
 
 ## Update
 
-Run the installer again. ColimaBar checks for a new version each day and shows an **Update** button in the dashboard when one is available.
+Run the installer again. If you use Homebrew, run `brew upgrade --cask colima-bar`. ColimaBar checks for a new version each day and shows an **Update** button in the dashboard when one is available.
 
 ## Uninstall
 
@@ -85,6 +87,7 @@ Right-click the menu bar icon and choose **Uninstall ColimaBar…**. Colima, you
 
 - If the icon is hidden, open ColimaBar from Spotlight first.
 - If your version does not have the menu item, [run the uninstall script manually](docs/uninstall.md#run-the-script-manually).
+- If you installed with Homebrew, run `brew uninstall --cask colima-bar` after you uninstall. Do not run it first: Homebrew cannot restore your docker settings.
 
 The [Uninstall guide](docs/uninstall.md) lists what the script removes.
 

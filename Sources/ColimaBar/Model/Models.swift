@@ -55,6 +55,8 @@ struct ProfileRow: Identifiable, Equatable {
     let isRunning: Bool
     let cpus: Int
     let memGB: Int
+    /// "docker", "containerd" or "" when unknown.
+    var runtime = ""
 }
 
 struct Stat: Equatable {

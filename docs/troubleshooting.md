@@ -9,7 +9,7 @@ This page lists the ColimaBar logs, fixes for common problems and the steps to r
 | Log | Contents |
 |---|---|
 | `~/.cache/colima-bar/ctl.log` | The output of VM actions, for example `colima start` and `colima stop`. ColimaBar starts a new file when it passes 1 MB. |
-| `~/.config/colima/_lima/colima/ha.stderr.log` | The Lima host agent log of the `default` profile. For a different profile, the folder is `colima-PROFILE`. |
+| `_lima/colima/ha.stderr.log` in your [Colima folder](#colimabar-uses-the-wrong-colima-folder) | The Lima host agent log of the `default` profile. If `LIMA_HOME` is set, the log is `colima/ha.stderr.log` in `LIMA_HOME`. For a different profile, the folder is `colima-PROFILE`. |
 | The macOS unified log | The messages of ColimaBar itself. |
 
 To open the first two logs in Console, click the log button in the dashboard footer.
@@ -24,7 +24,18 @@ log show --info --last 1h --predicate 'subsystem == "com.imohitkr.ColimaBar"'
 
 If a VM action fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
 
-If the notification says "Colima didn't become ready", open the Lima log from the dashboard footer.
+If the notification says "Colima profile NAME didn't become ready", open the Lima log from the dashboard footer.
+
+## A disk shrink fails
+
+A disk shrink runs `colima stop`, `colima delete --data --force` and `colima start`. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
+
+`colima delete` removes `colima.yaml`. ColimaBar saves a copy with the new disk size in `~/.cache/colima-bar/colima.PROFILE.yaml.shrink` before it deletes anything. If the delete failed, or `colima start` failed after the delete, do these steps:
+
+1. If `PROFILE/colima.yaml` does not exist in your [Colima folder](#colimabar-uses-the-wrong-colima-folder), copy the saved file to that path.
+2. Run `colima start --profile PROFILE`.
+
+The containers, images and volumes are gone after the delete. You cannot get them back.
 
 ## Auto-start fails
 
@@ -34,7 +45,7 @@ If auto-start cannot start the VM, the docker client gets HTTP status 503 with t
 ColimaBar could not start Colima. Check the Colima log or start it from the menu bar.
 ```
 
-After `colima start` exits, ColimaBar waits up to 60 seconds for the Docker daemon to become ready. Then it stops and sends the notification "Colima didn't become ready. Check the Colima log."
+After `colima start` exits, ColimaBar waits up to 60 seconds for the Docker daemon to become ready. Then it stops and sends the notification "Colima profile NAME didn't become ready. Check the Colima log."
 
 To fix it, do these steps:
 
@@ -58,8 +69,27 @@ To fix it, do one of these steps:
 1. Make sure that ColimaBar runs and that auto-start is on. Look at **Auto-start Colima on Demand** in the right-click menu.
 2. Start Colima, then open the System tab. Each route to the ColimaBar socket shows a check mark when it is set. The System tab shows only while Colima runs.
 3. In your terminal, run `echo $DOCKER_HOST`. If it shows a different socket, replace that line in your `~/.zshrc` with the [shell snippet](auto-start.md#shell-setup).
-4. Run `docker context show`. It must show `colimabar`. ColimaBar does not change a context that points to a different daemon.
+4. Run `docker context show`. It must show `colimabar`, or a `colimabar-PROFILE` context if you chose one. ColimaBar does not change a context that points to a different daemon.
 5. If an IDE test cannot connect, restart the IDE. An IDE reads the launchd `DOCKER_HOST` only when it starts.
+
+## ColimaBar uses the wrong Colima folder
+
+ColimaBar finds the Colima folder like Colima does. It uses the first match:
+
+1. `COLIMA_HOME`, if it is set and the folder exists.
+2. `~/.colima`, if it exists.
+3. `~/.config/colima`, if it exists.
+4. `$XDG_CONFIG_HOME/colima`, if `XDG_CONFIG_HOME` is set.
+5. `~/.colima`.
+
+Lima's folder is `LIMA_HOME` if it is set, else `_lima` in the Colima folder. ColimaBar checks the folders again while it runs. If you create or move a folder, you do not have to restart ColimaBar.
+
+ColimaBar reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launchd environment, not from `~/.zshrc`. If you set one of them in your shell, do these steps:
+
+1. Run `launchctl setenv NAME VALUE` with the same value, for example `launchctl setenv COLIMA_HOME "$HOME/colima-home"`.
+2. Quit ColimaBar and open it again.
+
+`launchctl setenv` lasts until you log out. To keep the value after a restart of the Mac, run the command again after each login.
 
 ## macOS blocks the first launch
 

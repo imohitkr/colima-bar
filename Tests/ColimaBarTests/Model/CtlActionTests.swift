@@ -33,13 +33,50 @@ import Testing
         }
     }
 
+    /// The top-level actions of scripts/colima-ctl.sh that call `confirm`.
+    private func scriptActionsWithADialog() throws -> Set<String> {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let script = try String(
+            contentsOf: root.appendingPathComponent("scripts/colima-ctl.sh"), encoding: .utf8)
+        let lines = script.components(separatedBy: "\n")
+        let start = try #require(lines.firstIndex(of: #"case "$1" in"#))
+        let end = try #require(lines[start...].firstIndex(of: "esac"))
+        var current: [String] = []
+        var found: Set<String> = []
+        for line in lines[start..<end] {
+            if line.hasPrefix("  "), !line.hasPrefix("   "), let paren = line.firstIndex(of: ")") {
+                let label = line.dropFirst(2)[..<paren]
+                // "a|b)" names two actions. Any other label form ends the last action.
+                current =
+                    label.allSatisfy({ $0.isLowercase || $0.isNumber || $0 == "-" || $0 == "|" })
+                    ? label.split(separator: "|").map(String.init) : []
+            }
+            if line.contains("confirm \"") { found.formUnion(current) }
+        }
+        return found
+    }
+
+    @Test func actionsWithADialogMatchTheScript() throws {
+        let script = try scriptActionsWithADialog()
+        #expect(script.contains("prune"))  // the parser found the dialogs
+        let app = Set(CtlAction.allCases.filter(\.showsDialog).map(\.rawValue))
+        #expect(app == script)
+    }
+
     @Test func diskActionsAreUrgent() {
-        let disk: Set<CtlAction> = [.imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll]
+        let disk: Set<CtlAction> = [
+            .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,
+        ]
         for a in CtlAction.allCases { #expect(a.changesDisk == disk.contains(a), "\(a.rawValue)") }
     }
 
     @Test func vmActionsShowABusyLabel() {
-        let vm: Set<CtlAction> = [.start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .autoStop]
+        let vm: Set<CtlAction> = [
+            .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop, .profileCreate,
+            .profileDelete,
+        ]
         for a in CtlAction.allCases {
             #expect(a.isVMAction == vm.contains(a), "\(a.rawValue)")
             #expect((a.busyLabel != nil) == vm.contains(a), "\(a.rawValue)")
@@ -47,5 +84,20 @@ import Testing
         #expect(CtlAction.start.busyLabel == "Starting")
         #expect(CtlAction.autoStop.busyLabel == "Stopping")
         #expect(CtlAction.disk.busyLabel == "Restarting")
+        #expect(CtlAction.diskShrink.busyLabel == "Shrinking disk")
+        #expect(CtlAction.profileCreate.busyLabel == "Creating")
+        #expect(CtlAction.profileDelete.busyLabel == "Deleting")
+    }
+
+    @Test func profileActionsMatchTheScriptLabels() throws {
+        #expect(CtlAction.profileCreate.rawValue == "profile-create")
+        #expect(CtlAction.profileDelete.rawValue == "profile-delete")
+        let labels = try scriptActions()
+        #expect(labels.contains("profile-create") && labels.contains("profile-delete"))
+    }
+
+    @Test func diskShrinkMatchesTheScriptLabel() throws {
+        #expect(CtlAction.diskShrink.rawValue == "disk-shrink")
+        #expect(try scriptActions().contains("disk-shrink"))
     }
 }
