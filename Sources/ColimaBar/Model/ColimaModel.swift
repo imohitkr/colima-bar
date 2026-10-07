@@ -853,7 +853,8 @@ final class ColimaModel {
             defer { isConfirmingAutoStop = false }
             // No fresh list (timeout, error): don't stop on stale data.
             let fresh = await refreshContainers()
-            guard fresh, gen == generation, autoStop, state == .running, busy == nil,
+            guard fresh, gen == generation, autoStop, state == .running,
+                !Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0),
                 running.isEmpty, selectedTransfers() == 0
             else {
                 idleSince = nil

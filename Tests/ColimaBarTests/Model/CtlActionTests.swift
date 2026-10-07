@@ -43,14 +43,17 @@ import Testing
         let lines = script.components(separatedBy: "\n")
         let start = try #require(lines.firstIndex(of: #"case "$1" in"#))
         let end = try #require(lines[start...].firstIndex(of: "esac"))
-        var current: String?
+        var current: [String] = []
         var found: Set<String> = []
         for line in lines[start..<end] {
             if line.hasPrefix("  "), !line.hasPrefix("   "), let paren = line.firstIndex(of: ")") {
                 let label = line.dropFirst(2)[..<paren]
-                if label.allSatisfy({ $0.isLowercase || $0.isNumber || $0 == "-" }) { current = String(label) }
+                // "a|b)" names two actions. Any other label form ends the last action.
+                current =
+                    label.allSatisfy({ $0.isLowercase || $0.isNumber || $0 == "-" || $0 == "|" })
+                    ? label.split(separator: "|").map(String.init) : []
             }
-            if line.contains("confirm \""), let current { found.insert(current) }
+            if line.contains("confirm \"") { found.formUnion(current) }
         }
         return found
     }
