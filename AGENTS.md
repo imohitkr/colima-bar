@@ -14,6 +14,7 @@ It uses Swift 6.4 and SwiftPM, in the Swift 6 language mode, with Command Line T
 |---|---|
 | `make build` | Build `build/ColimaBar.app`. |
 | `make test` | Run the tests. |
+| `make perf` | Run the tests and the timing benchmarks. |
 | `timeout 300 swift test` | Run the tests with a time limit. On macOS, `timeout` comes from GNU coreutils and can be named `gtimeout`. |
 | `make lint` | Check the Swift format (`.swift-format`), the shell scripts (ShellCheck 0.11.0) and the workflows (actionlint 1.7.12). If ShellCheck or actionlint is not installed, it uses docker. If docker does not work, it skips that check. |
 | `make fmt` | Format the Swift code in place. |

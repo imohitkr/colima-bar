@@ -90,7 +90,7 @@ import Testing
         }
     }
 
-    @Test func filtersTwentyThousandLinesQuickly() {
+    @Test(.benchmark) func filtersTwentyThousandLinesQuickly() {
         let lines = (0..<20_000).map {
             "2026-10-06 INFO worker-\($0 % 64) handled GET /api/v1/items/\($0) in \($0 % 900) ms"
         }
@@ -147,7 +147,7 @@ import Testing
         }
     }
 
-    @Test func prefilterKeepsSlowPathFast() {
+    @Test(.benchmark) func prefilterKeepsSlowPathFast() {
         // 20k lines of 1.5 KB non-ASCII text with no match.
         let line = String(repeating: "Grüße aus Köln, ", count: 90)
         var m = LogFilter.Matcher(query: "ÄPFEL")
