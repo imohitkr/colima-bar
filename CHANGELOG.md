@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-07
+
 ### Added
 
 - **Keep logs of removed containers that fail** on the System tab. This option is off by default. When it is on, ColimaBar keeps the newest 500 lines (at most 128 KB) of each container that `docker run --rm` started, in memory only. If the container fails, **View logs** on its alert shows these lines for 5 minutes. See [Saved logs](docs/usage.md#saved-logs).
@@ -123,7 +125,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/imohitkr/colima-bar/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/imohitkr/colima-bar/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/imohitkr/colima-bar/compare/v0.2.0...v0.3.0
