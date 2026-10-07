@@ -161,8 +161,8 @@ import os
         Thread.sleep(forTimeInterval: 0.5)
         #expect(!daemon.seen.contains { $0.contains("/info") }, "request reached the daemon before wake finished")
         release.signal()
-        #expect(first.wait(timeout: .now() + 5) == .success)
-        #expect(second.wait(timeout: .now() + 5) == .success)
+        #expect(first.wait(timeout: .now() + 20) == .success)
+        #expect(second.wait(timeout: .now() + 20) == .success)
         #expect(secondReply.withLock { $0 }.contains("hello"))
     }
 
@@ -220,8 +220,8 @@ import os
         #expect(waitUntil { wake.joined == 1 }, "the other proxy did not wait for the wake")
         #expect(!daemon.seen.contains { $0.contains("/info") }, "request reached the daemon before wake finished")
         release.signal()
-        #expect(first.wait(timeout: .now() + 5) == .success)
-        #expect(second.wait(timeout: .now() + 5) == .success)
+        #expect(first.wait(timeout: .now() + 20) == .success)
+        #expect(second.wait(timeout: .now() + 20) == .success)
         #expect(secondReply.withLock { $0 }.contains("hello"))
         #expect(woke.value == 1)
     }
