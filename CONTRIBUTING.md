@@ -99,7 +99,7 @@ Open a [bug report](https://github.com/imohitkr/colima-bar/issues/new?template=b
 6. Open the pull request. Fill in the template: What, Why and How tested.
 7. If you change the UI, add screenshots. Use `--snapshot` to make them.
 
-CI runs `swift format lint`, ShellCheck, actionlint, `swift test` and `./build.sh` on each pull request. The macOS jobs use Swift 6.4.0 from swift.org. CI must pass before a maintainer merges.
+CI runs `swift format lint`, ShellCheck, actionlint, `swift test` and `./build.sh` on each pull request. The macOS jobs use Swift 6.4.0 from swift.org. CI must pass before a maintainer merges. If you open the pull request from a fork, CI starts only after a maintainer approves the run. This protects the repository from code in pull requests that nobody has read yet.
 
 ## Commit messages
 
