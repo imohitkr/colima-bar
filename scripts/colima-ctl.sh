@@ -9,9 +9,6 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 #   3. ~/.config/colima, if it exists (older ColimaBar versions made it).
 #   4. $XDG_CONFIG_HOME/colima, if XDG_CONFIG_HOME is set.
 #   5. ~/.colima, the default of Colima on macOS.
-# The streams the script started with, for messages from colima_home.
-exec 3>&1 4>&2
-
 # COLIMA_HOME as the caller set it. The rules run again before a colima call.
 CALLER_COLIMA_HOME="${COLIMA_HOME:-}"
 pick_colima_dir() {
@@ -39,10 +36,12 @@ export COLIMA_HOME="$COLIMA_DIR"
 colima_home() {
   [ -e "$COLIMA_DIR" ] && return 0
   if [ "$(pick_colima_dir)" != "$COLIMA_DIR" ]; then
-    # A caller can redirect stdout and stderr (colima status >/dev/null), so
-    # write to the streams the script started with.
-    echo "the Colima folder changed during the action: $COLIMA_DIR" >&4
-    notify "The Colima folder changed during the action of $NAMED. Try again." >&3
+    # This can run in a subshell (with_busy), so leave a marker: cleanup tells
+    # the user. A caller can also redirect stdout (colima status >/dev/null),
+    # and bash 3.2 can keep that redirect in the EXIT trap. So ctl.log always
+    # gets the reason.
+    echo "the Colima folder changed during the action: $COLIMA_DIR" >>"$CTL_LOG"
+    (umask 077 && mkdir -p "$STATE_DIR") && touch "$FOLDER_CHANGED"
     exit 1
   fi
   # type -P finds only a file: the colima function below would match command -v.
@@ -77,6 +76,9 @@ STATE_DIR="$HOME/.cache/colima-bar"
 BUSY="$STATE_DIR/busy.$PROFILE"
 LOCK="$STATE_DIR/lock.$PROFILE"
 CTL_LOG="$STATE_DIR/ctl.log"
+# colima_home leaves this marker when the Colima folder changed ($$ is the
+# PID of the script, also in subshells).
+FOLDER_CHANGED="$STATE_DIR/folder-changed.$$"
 SEE_LOG="see ~/.cache/colima-bar/ctl.log"
 
 # Exit codes: 0 done, 1 failed (already notified), 2 cancelled or another
@@ -138,6 +140,10 @@ lock_vm() {
 WROTE_BUSY=""
 CHILD=""
 cleanup() {
+  if [ -e "$FOLDER_CHANGED" ]; then
+    rm -f "$FOLDER_CHANGED"
+    notify "The Colima folder changed during the action of $NAMED. Try again."
+  fi
   [ -n "$WROTE_BUSY" ] && rm -f "$BUSY"
   [ -n "$HOLD_LOCK" ] && rmdir "$LOCK" 2>/dev/null
   return 0
@@ -168,6 +174,8 @@ with_busy() {
   CHILD=""
   rm -f "$BUSY"
   WROTE_BUSY=""
+  # cleanup gives the reason; skip the caller's general failure notice.
+  [ -e "$FOLDER_CHANGED" ] && exit 1
   return $rc
 }
 

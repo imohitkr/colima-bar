@@ -246,7 +246,32 @@ import Testing
         // restart runs `colima status`, which deletes ~/.colima here, then `colima stop`.
         let result = try run(sb, ["restart"])
         #expect(result.status == 1)
-        #expect(result.out.contains("COLIMABAR_NOTIFY:The Colima folder changed during the action of profile 'work'"))
+        // One notice with the reason, not also the general failure notice.
+        let notices = result.out.split(separator: "\n").filter { $0.hasPrefix("COLIMABAR_NOTIFY:") }
+        #expect(
+            notices == ["COLIMABAR_NOTIFY:The Colima folder changed during the action of profile 'work'. Try again."])
+    }
+
+    @Test func aFolderChangeUnderARedirectStopsAndLogsTheReason() throws {
+        // resources checks `colima status >/dev/null 2>&1` in the main shell.
+        // The stub mkdir deletes ~/.colima when lock_vm takes the lock, before
+        // that check. Bash 3.2 can keep that redirect while the EXIT trap runs,
+        // so ctl.log holds the reason; ColimaBar points to it for exit 1.
+        let sb = try ScriptSandbox()
+        try sb.stub(
+            "mkdir",
+            """
+            case "$*" in *lock.work*) rm -rf "\(sb.home)/.colima" ;; esac
+            exec /bin/mkdir "$@"
+            """)
+        try sb.write(".colima/work/colima.yaml", config)
+        try sb.write(".config/colima/work/colima.yaml", config)
+        let result = try run(sb, ["resources", "2", "4"])
+        #expect(result.status == 1)
+        let log = (try? String(contentsOfFile: sb.home + "/.cache/colima-bar/ctl.log", encoding: .utf8)) ?? ""
+        #expect(log.contains("the Colima folder changed during the action"))
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
+        #expect(dialogs(sb).isEmpty)
     }
 
     @Test func nothingIsCreatedWhenColimaIsNotInstalled() throws {
