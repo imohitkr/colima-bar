@@ -54,10 +54,12 @@ import Testing
     }
 
     @Test func orphanHoldingThePipeDoesNotHang() async {
+        // The orphan keeps the pipe open for 30 s. run() must return long
+        // before that; the wide margin keeps a slow CI runner from failing.
         let start = Date()
-        let r = await Shell.run(["sh", "-c", "sleep 5 & echo hi"])
+        let r = await Shell.run(["sh", "-c", "sleep 30 & echo hi"])
         #expect(r.ok)
         #expect(r.out == "hi\n")
-        #expect(Date().timeIntervalSince(start) < 3)
+        #expect(Date().timeIntervalSince(start) < 20)
     }
 }
