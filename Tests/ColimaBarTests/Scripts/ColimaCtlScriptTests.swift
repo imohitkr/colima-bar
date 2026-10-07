@@ -278,6 +278,39 @@ import Testing
         #expect(!state.contains { $0.hasPrefix("folder-changed.") })
     }
 
+    @Test func aFolderChangeDuringAShrinkNamesTheBackup() throws {
+        let sb = try ScriptSandbox()
+        try sb.stub(
+            "colima",
+            """
+            [ "$1" = status ] && { rm -rf "\(sb.home)/.colima"; exit 0; }
+            exit 0
+            """)
+        try sb.write(".config/colima/work/colima.yaml", config)
+        let result = try shrink(sb, configIn: ".colima")
+        #expect(result.status == 1)
+        let backup = sb.home + "/.cache/colima-bar/colima.work.yaml.shrink"
+        #expect(result.out.contains("Try again. A copy of colima.yaml is in \(backup)."))
+        #expect(FileManager.default.fileExists(atPath: backup))
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
+    }
+
+    @Test func aMarkerOfAnEarlierScriptWithTheSamePIDIsIgnored() throws {
+        let sb = try ScriptSandbox()
+        try sb.write(".config/colima/work/colima.yaml", config)
+        let script = try sb.copy("colima-ctl.sh")
+        // exec keeps the PID, so the script sees a marker with its own PID.
+        let result = try sb.bash(
+            [
+                "-c",
+                "mkdir -p \"$HOME/.cache/colima-bar\" && touch \"$HOME/.cache/colima-bar/folder-changed.$$\" "
+                    + "&& exec /bin/bash \"$0\" stop", script,
+            ],
+            env: ["COLIMABAR_PROFILE": "work", "COLIMABAR_APP": "1"])
+        #expect(result.status == 0)
+        #expect(!result.out.contains("COLIMABAR_NOTIFY:"))
+    }
+
     @Test func nothingIsCreatedWhenColimaIsNotInstalled() throws {
         let sb = try ScriptSandbox()
         // A copy whose PATH has the stubs and the system folders only, and no colima.
