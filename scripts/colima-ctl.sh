@@ -40,8 +40,9 @@ colima_home() {
     # the user. A caller can also redirect stdout (colima status >/dev/null),
     # and bash 3.2 can keep that redirect in the EXIT trap. So ctl.log always
     # gets the reason.
+    (umask 077 && mkdir -p "$STATE_DIR")
     echo "the Colima folder changed during the action: $COLIMA_DIR" >>"$CTL_LOG"
-    (umask 077 && mkdir -p "$STATE_DIR") && touch "$FOLDER_CHANGED"
+    touch "$FOLDER_CHANGED"
     exit 1
   fi
   # type -P finds only a file: the colima function below would match command -v.
@@ -79,6 +80,10 @@ CTL_LOG="$STATE_DIR/ctl.log"
 # colima_home leaves this marker when the Colima folder changed ($$ is the
 # PID of the script, also in subshells).
 FOLDER_CHANGED="$STATE_DIR/folder-changed.$$"
+# A marker left by a killed script with the same PID is not ours.
+rm -f "$FOLDER_CHANGED"
+# More text for that notice, for example where a backup is.
+FOLDER_NOTE=""
 SEE_LOG="see ~/.cache/colima-bar/ctl.log"
 
 # Exit codes: 0 done, 1 failed (already notified), 2 cancelled or another
@@ -142,7 +147,7 @@ CHILD=""
 cleanup() {
   if [ -e "$FOLDER_CHANGED" ]; then
     rm -f "$FOLDER_CHANGED"
-    notify "The Colima folder changed during the action of $NAMED. Try again."
+    notify "The Colima folder changed during the action of $NAMED. Try again.$FOLDER_NOTE"
   fi
   [ -n "$WROTE_BUSY" ] && rm -f "$BUSY"
   [ -n "$HOLD_LOCK" ] && rmdir "$LOCK" 2>/dev/null
@@ -332,6 +337,7 @@ Then Colima starts the VM again with an empty $size GB disk and the same setting
     backup="$STATE_DIR/colima.$PROFILE.yaml.shrink"
     cp -p "$CONFIG" "$backup" || { notify "Couldn't copy colima.yaml to $backup."; exit 1; }
     set_key disk "$size" "$backup"
+    FOLDER_NOTE=" A copy of colima.yaml is in $backup."
     with_busy "Shrinking disk to $size GB" shrink_disk "$backup" \
       || { notify "Disk shrink of $NAMED failed - $SEE_LOG. A copy of colima.yaml is in $backup."; exit 1; }
     rm -f "$backup"

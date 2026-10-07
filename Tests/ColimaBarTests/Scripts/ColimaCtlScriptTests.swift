@@ -250,6 +250,8 @@ import Testing
         let notices = result.out.split(separator: "\n").filter { $0.hasPrefix("COLIMABAR_NOTIFY:") }
         #expect(
             notices == ["COLIMABAR_NOTIFY:The Colima folder changed during the action of profile 'work'. Try again."])
+        let state = (try? FileManager.default.contentsOfDirectory(atPath: sb.home + "/.cache/colima-bar")) ?? []
+        #expect(!state.contains { $0.hasPrefix("folder-changed.") })
     }
 
     @Test func aFolderChangeUnderARedirectStopsAndLogsTheReason() throws {
@@ -272,6 +274,8 @@ import Testing
         #expect(log.contains("the Colima folder changed during the action"))
         #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
         #expect(dialogs(sb).isEmpty)
+        let state = (try? FileManager.default.contentsOfDirectory(atPath: sb.home + "/.cache/colima-bar")) ?? []
+        #expect(!state.contains { $0.hasPrefix("folder-changed.") })
     }
 
     @Test func nothingIsCreatedWhenColimaIsNotInstalled() throws {
