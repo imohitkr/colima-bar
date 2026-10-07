@@ -153,4 +153,11 @@ import Testing
         let back = ColimaModel.holds(waking: ["work"], selected: "default")
         #expect(back.profiles == ["work"])
     }
+
+    @Test func anyRunningActionBlocksAutoStop() {
+        #expect(!ColimaModel.blocksAutoStop(busyMarker: nil, actionsInFlight: 0))
+        #expect(ColimaModel.blocksAutoStop(busyMarker: "Restarting", actionsInFlight: 0))
+        // A prune that waits for its dialog writes no busy marker.
+        #expect(ColimaModel.blocksAutoStop(busyMarker: nil, actionsInFlight: 1))
+    }
 }

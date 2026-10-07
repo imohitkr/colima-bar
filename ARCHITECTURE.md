@@ -183,7 +183,7 @@ The exit codes are fixed. 0 means done. 1 means failed, and the script already n
 
 ### Auto-stop
 
-`AutoStopRule.evaluate` holds the idle rule for one profile. A profile is idle when no container runs, no VM action runs and its proxies have no active transfers. A transfer is a connection whose latest request is a build, pull, push, load, save, commit or BuildKit session (`SocketProxy.isWork`). Each profile has its own idle time. The timeout setting is the same for all.
+`AutoStopRule.evaluate` holds the idle rule for one profile. A profile is idle when no container runs, no `colima-ctl.sh` action that ColimaBar started runs (`blocksAutoStop`) and its proxies have no active transfers. A transfer is a connection whose latest request is a build, pull, push, load, save, commit or BuildKit session (`SocketProxy.isWork`). Each profile has its own idle time. The timeout setting is the same for all.
 
 - `checkIdle()` checks the selected profile at each tick. It counts the transfers of the stable socket and of the profile socket of the selected profile. Before it stops the VM, it gets a fresh container list. If that fails, it does not stop.
 - `checkOtherProfilesIdle()` checks each other running docker profile (`AutoStopRule.otherProfiles`). A transfer or a busy marker resets its idle time at each tick. Each 30 seconds (`AutoStopRule.otherCheckInterval`), it gets a fresh container list from the socket of the profile. A failed list does not count as idle. When the idle time is over, it runs `auto-stop` for that profile.
@@ -237,6 +237,7 @@ Live stats stream only while a dashboard is on screen. Saved-log streams open on
 Do not break these rules.
 
 - **Fixed popover size.** The popover is 480 x 640 points (`AppDelegate.popoverSize`). In `ColimaModel`, assign a property only when its value changes. Otherwise the popover jitters and SwiftUI redraws too much.
+- **No dialog behind the popover.** Call `model.dismissPopover()` before an alert or a file panel opens from the popover. A `colima-ctl.sh` action that asks with a dialog has `CtlAction.showsDialog`, and `run()` closes the popover for it. A test checks that list against the script.
 - **Proxy sockets.** The stable socket is `~/.cache/colima-bar/docker.sock` (`Paths.proxySocket`). The profile sockets are `~/.cache/colima-bar/profiles/PROFILE.sock` (`Paths.profileSocket`). Each socket has mode `0600`. Their folders have mode `0700`. Do not change the paths or relax the modes.
 - **Quit behavior.** On quit, or when auto-start is off, the stable socket path becomes a symlink to the Colima socket of the selected profile, and each profile socket path a symlink to the Colima socket of its profile (`SocketProxy.stop()`). Docker clients must keep working without ColimaBar.
 - **Docker contexts.** ColimaBar creates, updates and removes only the `colimabar` context and the `colimabar-PROFILE` contexts whose description starts with "ColimaBar". It never changes other contexts.

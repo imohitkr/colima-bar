@@ -36,6 +36,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Restart, **Apply** of VM resources, Rosetta, Kubernetes and a disk grow always restart a running VM. Before, they could report success and leave the VM unchanged: the bash of macOS ended `restart_vm` early, after `colima status`. A disk shrink of a running VM could also stop at this step.
 - ColimaBar, `colima-ctl.sh` and the uninstall script find the Colima folder like Colima does (`COLIMA_HOME`, `~/.colima`, `~/.config/colima`, `$XDG_CONFIG_HOME/colima`). They use `LIMA_HOME` for Lima's folder if it is set. Before, they always used `~/.config/colima`. Thus with `~/.colima`, the dashboard, auto-start and the VM settings used the wrong folder. See [Colima folder](docs/troubleshooting.md#colimabar-uses-the-wrong-colima-folder).
 - In some locales, the profile name check of `colima-ctl.sh` accepted non-ASCII letters.
+- The popover closes before a confirmation dialog opens. Before, the dialog of a cleanup, a remove or a VM setting could open behind the popover, for example over an app in full screen.
+- Auto-stop does not stop the VM while an action that you started still runs. Before, it could stop the VM while a cleanup waited for you to click **OK**.
 - The installer no longer stops when `gh` 2.49 to 2.67 is installed. It needs `gh` 2.68 or later to verify the download. With an older `gh`, it prints a notice and continues.
 - ColimaBar now finds iTerm in `~/Applications`. Before, it used Terminal.
 - CI no longer fails on timing benchmarks. They run only with `make perf`.

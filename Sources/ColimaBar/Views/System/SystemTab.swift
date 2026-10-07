@@ -302,7 +302,10 @@ struct SystemTab: View {
     private func shrinkDisk(to size: Int) {
         let p = model.profile
         let from = model.vm.diskGB
-        guard DiskShrink.isValid(size, current: from),
+        guard DiskShrink.isValid(size, current: from) else { return }
+        // The popover would cover the alert.
+        model.dismissPopover()
+        guard
             ShrinkDiskAlert.confirm(
                 profile: p, from: from, to: size, usage: model.df,
                 kubernetes: model.isKubernetesEnabled),

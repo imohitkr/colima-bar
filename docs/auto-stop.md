@@ -23,6 +23,7 @@ The VM of a profile is idle when all of these are true:
 - No container of the profile runs.
 - No docker build, pull, push, image load, image save or commit for the profile runs through ColimaBar. For the selected profile, this includes the ColimaBar socket and the [profile socket](auto-start.md#profile-sockets). For another profile, it includes the socket of that profile.
 - No VM action runs for the profile, for example a start or a restart.
+- No other action that you started from ColimaBar runs for the profile. For example, a cleanup that waits for you to click **OK** counts as activity.
 
 Idle pollers and event streams do not count as activity. A docker client that connects to the Colima socket directly does not count either.
 

@@ -52,6 +52,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // Before launch completes, so a notification click that launched us
         // isn't lost.
         Notifier.shared.install()
+        model.dismissPopover = { [weak self] in self?.popover.performClose(nil) }
         Notifier.shared.onAlert = { [weak self] title, body, ctr in
             self?.model.record(title, body, containerID: ctr?.id)
         }

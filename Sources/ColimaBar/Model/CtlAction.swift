@@ -51,6 +51,19 @@ enum CtlAction: String, CaseIterable, Sendable {
         }
     }
 
+    /// The script asks the user with a dialog first. The dialog comes from
+    /// another process, so ColimaBar closes the popover before it runs:
+    /// the popover would cover the dialog. A test checks this list against
+    /// the script.
+    var showsDialog: Bool {
+        switch self {
+        case .resources, .rosetta, .k8s, .disk, .diskShrink, .profileDelete, .containerRemove, .imageRemove,
+            .volumeRemove, .stopAll, .prune:
+            true
+        default: false
+        }
+    }
+
     /// The busy text the UI shows for a VM action until the script writes
     /// its own marker.
     var busyLabel: String? {

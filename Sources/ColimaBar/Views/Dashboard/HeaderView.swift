@@ -103,6 +103,7 @@ struct ProfileMenu: View {
             Divider()
             Button("New Profile…") {
                 let defaults = NewProfileForm.defaults(from: model.vm)
+                model.dismissPopover()
                 if let form = NewProfileAlert.run(defaults: defaults, existing: model.profiles.map(\.name)) {
                     model.createProfile(form)
                 }
@@ -112,6 +113,7 @@ struct ProfileMenu: View {
                     let running = model.isRunning(profile: p.name)
                     let refusal = ProfileDelete.refusal(profile: p.name, selected: model.profile, isRunning: running)
                     Button(refusal == nil ? "\(p.name)…" : "\(p.name) (stop it first)") {
+                        model.dismissPopover()
                         if DeleteProfileAlert.confirm(profile: p.name, isRunning: running) {
                             model.deleteProfile(p.name)
                         }

@@ -165,6 +165,12 @@ final class ColimaModel {
     let profileProxies: ProfileProxies
     private let log = Logger(category: "model")
     // Internal bookkeeping that no view reads: writes skip observation.
+    /// Closes the dashboard popover, so a dialog is not hidden behind it.
+    /// AppDelegate sets it.
+    @ObservationIgnored var dismissPopover: @MainActor () -> Void = {}
+    /// The colima-ctl.sh actions that run now, for each profile. A running
+    /// action (for example a prune that waits for its dialog) is not idle.
+    @ObservationIgnored private var actionsInFlight: [String: Int] = [:]
     @ObservationIgnored private var events: StreamHandle?
     @ObservationIgnored private var statStreams: [String: StreamHandle] = [:]
     @ObservationIgnored private var latest: [String: Stat] = [:]  // written by stat streams, published once a second
@@ -832,7 +838,9 @@ final class ColimaModel {
     /// on the stable socket and on the socket of the selected profile.
     private func checkIdle() {
         let check = AutoStopRule.evaluate(
-            enabled: autoStop, isRunning: state == .running, isBusy: busy != nil || isConfirmingAutoStop,
+            enabled: autoStop, isRunning: state == .running,
+            isBusy: Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0)
+                || isConfirmingAutoStop,
             runningContainers: running.count, transfers: selectedTransfers(), idleSince: idleSince, now: Date(),
             idleMinutes: autoStopMinutes)
         if check.idleSince != idleSince { idleSince = check.idleSince }
@@ -902,7 +910,8 @@ final class ColimaModel {
                 s.isChecking = false
                 let check = AutoStopRule.evaluate(
                     enabled: autoStop, isRunning: profiles.contains { $0.name == p && $0.isRunning } && p != profile,
-                    isBusy: readBusy(p) != nil, runningContainers: count, transfers: profileProxies.activeTransfers(p),
+                    isBusy: Self.blocksAutoStop(busyMarker: readBusy(p), actionsInFlight: actionsInFlight[p] ?? 0),
+                    runningContainers: count, transfers: profileProxies.activeTransfers(p),
                     idleSince: s.since, now: Date(), idleMinutes: autoStopMinutes)
                 s.since = check.idleSince
                 otherIdle[p] = check.isDue ? nil : s
@@ -1057,6 +1066,7 @@ final class ColimaModel {
     /// profile to act on; nil means the selected profile.
     func run(_ action: CtlAction, _ args: String..., profile target: String? = nil) {
         let p = target ?? profile
+        if action.showsDialog { dismissPopover() }
         let label = markBusy(action, p)
         Task { await execute(action, args, profile: p, label: label) }
     }
@@ -1073,6 +1083,8 @@ final class ColimaModel {
     /// Returns true if the script exited with 0.
     @discardableResult
     private func execute(_ action: CtlAction, _ args: [String], profile p: String, label: String?) async -> Bool {
+        actionsInFlight[p, default: 0] += 1
+        defer { actionsInFlight[p, default: 1] -= 1 }
         let r = await Shell.run(
             [Paths.ctl, action.rawValue] + args, timeout: 900,
             extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])

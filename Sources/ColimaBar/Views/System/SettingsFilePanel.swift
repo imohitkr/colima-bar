@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 @MainActor
 enum SettingsFilePanel {
     static func export(model: ColimaModel) {
+        model.dismissPopover()
         let panel = NSSavePanel()
         panel.title = "Export Settings"
         panel.nameFieldStringValue = SettingsTransfer.fileName
@@ -22,6 +23,7 @@ enum SettingsFilePanel {
     }
 
     static func importFile(model: ColimaModel, form: SystemForm) {
+        model.dismissPopover()
         let panel = NSOpenPanel()
         panel.title = "Import Settings"
         panel.allowedContentTypes = [.json]

@@ -68,6 +68,13 @@ extension ColimaModel {
         }
     }
 
+    /// A profile is not idle while a VM action runs (its busy marker) or
+    /// while any colima-ctl.sh action that ColimaBar started still runs.
+    /// For example, a prune can wait minutes for its dialog, then needs the VM.
+    nonisolated static func blocksAutoStop(busyMarker: String?, actionsInFlight: Int) -> Bool {
+        busyMarker != nil || actionsInFlight > 0
+    }
+
     /// The proxies to hold while wakes run (see SocketProxy.holdForWake).
     /// `waking` holds the profiles whose wake runs now. The stable proxy
     /// follows the selected profile. Each profile proxy follows its own

@@ -33,6 +33,35 @@ import Testing
         }
     }
 
+    /// The top-level actions of scripts/colima-ctl.sh that call `confirm`.
+    private func scriptActionsWithADialog() throws -> Set<String> {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let script = try String(
+            contentsOf: root.appendingPathComponent("scripts/colima-ctl.sh"), encoding: .utf8)
+        let lines = script.components(separatedBy: "\n")
+        let start = try #require(lines.firstIndex(of: #"case "$1" in"#))
+        let end = try #require(lines[start...].firstIndex(of: "esac"))
+        var current: String?
+        var found: Set<String> = []
+        for line in lines[start..<end] {
+            if line.hasPrefix("  "), !line.hasPrefix("   "), let paren = line.firstIndex(of: ")") {
+                let label = line.dropFirst(2)[..<paren]
+                if label.allSatisfy({ $0.isLowercase || $0.isNumber || $0 == "-" }) { current = String(label) }
+            }
+            if line.contains("confirm \""), let current { found.insert(current) }
+        }
+        return found
+    }
+
+    @Test func actionsWithADialogMatchTheScript() throws {
+        let script = try scriptActionsWithADialog()
+        #expect(script.contains("prune"))  // the parser found the dialogs
+        let app = Set(CtlAction.allCases.filter(\.showsDialog).map(\.rawValue))
+        #expect(app == script)
+    }
+
     @Test func diskActionsAreUrgent() {
         let disk: Set<CtlAction> = [
             .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,
