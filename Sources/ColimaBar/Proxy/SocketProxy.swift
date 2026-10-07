@@ -23,7 +23,10 @@ import os
 final class SocketProxy: @unchecked Sendable {
     private let log = Logger(category: "proxy")
     private let lock = NSLock()
-    private var listenFD: Int32 = -1
+    /// The accept source of the listening socket. Its cancel handler closes
+    /// the fd, so the fd number stays in use until no accept can run on it.
+    private var listener: DispatchSourceRead?
+    private let acceptQueue = DispatchQueue(label: "colimabar.proxy.accept")
     private var _upstream: String
     private var _apiVersion: String?
     private var _wake: @Sendable () async -> Bool = { false }
@@ -107,7 +110,7 @@ final class SocketProxy: @unchecked Sendable {
         set { lock.withLock { _apiVersion = newValue } }
     }
 
-    var isRunning: Bool { lock.withLock { listenFD >= 0 } }
+    var isRunning: Bool { lock.withLock { listener != nil } }
 
     /// The model holds the proxy while a wake of its upstream profile runs,
     /// also a wake that another proxy started. The stable socket and the
@@ -122,9 +125,20 @@ final class SocketProxy: @unchecked Sendable {
         UnixSocket.makePrivateDir((path as NSString).deletingLastPathComponent)
         do {
             let fd = try UnixSocket.listen(path)
-            lock.withLock { listenFD = fd }
+            // Non-blocking, so acceptPending() can drain the queue and return.
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+            let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: acceptQueue)
+            source.setEventHandler { [weak self, weak source] in
+                guard let self, let source else { return }
+                self.acceptPending(fd, source)
+            }
+            // Only this handler closes the fd. GCD runs it after the last
+            // event handler returns, so another listener cannot get the same
+            // fd number while an accept can still run on it.
+            source.setCancelHandler { close(fd) }
+            lock.withLock { listener = source }
+            source.activate()
             log.notice("proxy listening on \(self.path, privacy: .public)")
-            Thread.detachNewThread { [weak self] in self?.acceptLoop(fd) }
         } catch {
             log.error("proxy failed to listen: \(String(describing: error), privacy: .public)")
             linkStable(to: upstream)
@@ -133,27 +147,26 @@ final class SocketProxy: @unchecked Sendable {
 
     /// Stops accepting and leaves a symlink to Colima's socket in its place.
     func stop() {
-        let fd = lock.withLock { () -> Int32 in
-            let fd = listenFD
-            listenFD = -1
-            return fd
-        }
+        let source = takeListener()
         // Link first: a client that connects in between still reaches a live
         // listener, never a closed one (ECONNREFUSED).
         linkStable(to: upstream)
-        if fd >= 0 { close(fd) }
+        source?.cancel()
     }
 
     /// Stops accepting and removes the socket path, for a profile that no
     /// longer exists. Nothing replaces the path.
     func remove() {
-        let fd = lock.withLock { () -> Int32 in
-            let fd = listenFD
-            listenFD = -1
-            return fd
-        }
+        let source = takeListener()
         unlink(path)
-        if fd >= 0 { close(fd) }
+        source?.cancel()
+    }
+
+    private func takeListener() -> DispatchSourceRead? {
+        lock.withLock {
+            defer { listener = nil }
+            return listener
+        }
     }
 
     /// Atomically replaces `path` with a symlink to `target` (symlink at a
@@ -170,22 +183,25 @@ final class SocketProxy: @unchecked Sendable {
 
     // MARK: - Connections
 
-    private func acceptLoop(_ fd: Int32) {
-        // Check before each accept: after stop(), another proxy can get the
-        // same fd number for its listener, and this loop must not take its clients.
-        while lock.withLock({ listenFD == fd }) {
+    /// Accepts every waiting client, then returns. GCD calls it again when
+    /// more clients wait.
+    private func acceptPending(_ fd: Int32, _ source: DispatchSourceRead) {
+        while !source.isCancelled {
             let client = accept(fd, nil, nil)
             if client < 0 {
                 let err = errno
-                // stop() closed (or replaced) the listening socket: we're done.
-                if lock.withLock({ listenFD != fd }) { return }
                 if err == EINTR || err == ECONNABORTED { continue }
-                // Out of fds (EMFILE/ENFILE) or similar: back off and keep
+                if err == EAGAIN || err == EWOULDBLOCK { return }
+                // Out of fds (EMFILE/ENFILE) or similar: back off. The client
+                // still waits, so GCD calls this again, and the proxy keeps
                 // serving instead of leaving a socket nobody accepts on.
                 log.error("proxy accept failed: errno \(err)")
                 usleep(100_000)
-                continue
+                return
             }
+            // A client socket inherits O_NONBLOCK from the listener on macOS.
+            // serve() and splice() need blocking reads and writes.
+            _ = fcntl(client, F_SETFL, fcntl(client, F_GETFL) & ~O_NONBLOCK)
             UnixSocket.configure(client, timeout: 0)
             Thread.detachNewThread { [weak self] in self?.serve(client) }
         }

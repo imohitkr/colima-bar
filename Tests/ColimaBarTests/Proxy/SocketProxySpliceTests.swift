@@ -81,6 +81,31 @@ import os
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: stable)) == upstream)
     }
 
+    @Test func aRemovedProxyNeverTakesTheClientsOfANewOne() throws {
+        // ProfileProxies.sync removes a proxy and starts another in one call,
+        // so the new listener can get the fd number that was just freed.
+        let otherUpstream = TestSocketPath.unique()
+        let otherPath = TestSocketPath.unique()
+        let old = FakeDaemon(path: upstream) { _ in (200, Data("old".utf8)) }
+        let new = FakeDaemon(path: otherUpstream) { _ in (200, Data("new".utf8)) }
+        try old.start()
+        try new.start()
+        defer {
+            old.stop()
+            new.stop()
+        }
+        for _ in 0..<50 {
+            let a = SocketProxy(upstream: upstream, path: stable)
+            a.start()
+            a.remove()
+            let b = SocketProxy(upstream: otherUpstream, path: otherPath)
+            b.start()
+            let resp = roundTrip(otherPath, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
+            b.remove()
+            #expect(resp.hasSuffix("new"))
+        }
+    }
+
     @Test func linkStableReplacesSocketWithSymlink() throws {
         let px = SocketProxy(upstream: upstream, path: stable)
         let fd = try UnixSocket.listen(stable)
