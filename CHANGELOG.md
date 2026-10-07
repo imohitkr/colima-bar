@@ -6,8 +6,6 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
-## [0.4.1] - 2026-10-07
-
 ### Added
 
 - **Uninstall ColimaBar…** in the right-click menu. After you confirm, it runs the uninstall script of the app in iTerm, or in Terminal when iTerm is not installed.
@@ -112,8 +110,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.4.1...HEAD
-[0.4.1]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...v0.4.1
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/imohitkr/colima-bar/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/imohitkr/colima-bar/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/imohitkr/colima-bar/compare/v0.2.0...v0.3.0
