@@ -26,6 +26,17 @@ If a VM action fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/
 
 If the notification says "Colima didn't become ready", open the Lima log from the dashboard footer.
 
+## A disk shrink fails
+
+A disk shrink runs `colima stop`, `colima delete --data` and `colima start`. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
+
+`colima delete` removes `colima.yaml`. ColimaBar saves a copy with the new disk size in `~/.cache/colima-bar/colima.PROFILE.yaml.shrink` before it deletes anything. If the delete failed, or `colima start` failed after the delete, do these steps:
+
+1. If `~/.config/colima/PROFILE/colima.yaml` does not exist, copy the saved file to that path.
+2. Run `colima start --profile PROFILE`.
+
+The containers, images and volumes are gone after the delete. You cannot get them back.
+
 ## Auto-start fails
 
 If auto-start cannot start the VM, the docker client gets HTTP status 503 with this message:

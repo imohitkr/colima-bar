@@ -53,12 +53,44 @@ These tabs show sizes and the items that containers use. You can pull the latest
 ### System tab
 
 - **VM resources**: Light, Standard and Heavy presets, or your own CPU and memory values. **Apply** restarts the VM.
-- **Features**: Rosetta, Kubernetes (k3s) and disk growth. A disk can grow but cannot shrink.
+- **Features**: Rosetta, Kubernetes (k3s) and the disk size. A disk grows in place and keeps your data. To make it smaller, use **Shrink…**. See [Shrink the disk](#shrink-the-disk).
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons.
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
 - **Profiles**: shown only when you have more than one profile.
-- **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail** and **Launch ColimaBar at login**.
+- **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
+
+### Shrink the disk
+
+> [!WARNING]
+> Shrink deletes all Docker data of the profile: all containers, images, volumes and build cache. If Kubernetes is on, it also deletes the cluster and its data. You cannot undo this. Before you shrink, save the data that you want to keep, for example with `docker save` or a volume backup.
+
+Colima cannot shrink a disk in place. Thus **Shrink…** deletes the VM and its disk, and starts the VM again with an empty, smaller disk. The other VM settings in `colima.yaml` stay: CPU, memory, runtime, architecture, VM type, mount type, Rosetta and Kubernetes.
+
+To shrink the disk:
+
+1. On the System tab, click **Shrink…** next to the disk size. Select a size. The menu shows only sizes that are smaller than the current disk, and 10 GB or more.
+2. Read the warning. It shows the data that the disk holds now, from the **Disk usage** section. If the VM is stopped, ColimaBar cannot show this data.
+3. Type the profile name. Then click **Delete Data and Shrink**.
+4. Colima asks one more time. Click **OK**.
+
+ColimaBar then stops the VM, runs `colima delete --data`, puts back `colima.yaml` with the new `disk` value and runs `colima start`. The dashboard shows "Shrinking disk" until the VM runs again.
+
+`colima delete` also removes `colima.yaml`. Thus ColimaBar first saves a copy as `~/.cache/colima-bar/colima.PROFILE.yaml.shrink`. If the shrink fails, the notification names this copy. See [A disk shrink fails](troubleshooting.md#a-disk-shrink-fails).
+
+### Export and import settings
+
+Use these buttons to copy your ColimaBar settings to a different Mac.
+
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Hide menu bar icon while Colima is stopped**, crash notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile and the login item. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+
+**Import Settings…** reads such a file. ColimaBar does this:
+
+- It rejects a file that is not a ColimaBar settings file, and a file from a newer ColimaBar version.
+- It skips a value of the wrong type or out of range. For example, the auto-stop time must be from 1 to 1440 minutes.
+- It ignores unknown keys. A setting that is not in the file keeps its current value.
+- It skips a profile that does not exist on this Mac. To create the profile, run `colima start --profile NAME`, then import again.
+- It shows the changes and asks before it applies them. Then it shows the applied and skipped settings.
 
 ### Footer
 

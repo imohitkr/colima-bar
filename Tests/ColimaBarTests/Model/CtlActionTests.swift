@@ -34,12 +34,16 @@ import Testing
     }
 
     @Test func diskActionsAreUrgent() {
-        let disk: Set<CtlAction> = [.imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll]
+        let disk: Set<CtlAction> = [
+            .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,
+        ]
         for a in CtlAction.allCases { #expect(a.changesDisk == disk.contains(a), "\(a.rawValue)") }
     }
 
     @Test func vmActionsShowABusyLabel() {
-        let vm: Set<CtlAction> = [.start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .autoStop]
+        let vm: Set<CtlAction> = [
+            .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop,
+        ]
         for a in CtlAction.allCases {
             #expect(a.isVMAction == vm.contains(a), "\(a.rawValue)")
             #expect((a.busyLabel != nil) == vm.contains(a), "\(a.rawValue)")
@@ -47,5 +51,11 @@ import Testing
         #expect(CtlAction.start.busyLabel == "Starting")
         #expect(CtlAction.autoStop.busyLabel == "Stopping")
         #expect(CtlAction.disk.busyLabel == "Restarting")
+        #expect(CtlAction.diskShrink.busyLabel == "Shrinking disk")
+    }
+
+    @Test func diskShrinkMatchesTheScriptLabel() throws {
+        #expect(CtlAction.diskShrink.rawValue == "disk-shrink")
+        #expect(try scriptActions().contains("disk-shrink"))
     }
 }

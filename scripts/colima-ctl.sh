@@ -118,11 +118,29 @@ running_count() {
   docker ps -q 2>/dev/null | wc -l | tr -d ' '
 }
 
-# set_key KEY VALUE -> sets a top-level key in colima.yaml and checks it took.
+# set_key KEY VALUE [FILE] -> sets a top-level key in colima.yaml (or in
+# FILE, a copy of it) and checks it took.
 set_key() {
-  [ -f "$CONFIG" ] || { notify "$CONFIG not found."; exit 1; }
-  sed -i '' -E "s/^$1: .*/$1: $2/" "$CONFIG"
-  grep -qE "^$1: $2\$" "$CONFIG" || { notify "Couldn't set $1 in colima.yaml (key not found)."; exit 1; }
+  local file="${3:-$CONFIG}"
+  [ -f "$file" ] || { notify "$file not found."; exit 1; }
+  sed -i '' -E "s/^$1: .*/$1: $2/" "$file"
+  grep -qE "^$1: $2\$" "$file" || { notify "Couldn't set $1 in colima.yaml (key not found)."; exit 1; }
+}
+
+# The smallest disk that disk-shrink accepts, in GB.
+MIN_DISK=10
+
+# shrink_disk BACKUP -> stops the VM, deletes it with its data, puts the
+# edited colima.yaml back and starts the VM. `colima delete` removes the
+# whole profile folder with colima.yaml, so the copy in BACKUP (with the new
+# disk size) goes back before the start. Thus the other VM settings stay.
+shrink_disk() {
+  if colima status >/dev/null 2>&1; then
+    colima stop || return 1
+  fi
+  colima delete --data --force || return 1
+  mkdir -p "$(dirname "$CONFIG")" && cp -p "$1" "$CONFIG" || return 1
+  colima start
 }
 
 restart_vm() {
@@ -187,9 +205,40 @@ case "$1" in
   disk)
     case "$2" in *[!0-9]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
     lock_vm
-    confirm "Grow the Colima disk to $2 GB? Disks cannot be shrunk later. Colima will restart and $(running_count) running container(s) will stop." || exit 2
+    confirm "Grow the Colima disk to $2 GB? A disk cannot shrink in place: to make it smaller later, all Docker data must be deleted. Colima will restart and $(running_count) running container(s) will stop." || exit 2
     set_key disk "$2"
     with_busy "Growing disk to $2 GB" restart_vm || { notify "Disk resize failed - $SEE_LOG"; exit 1; }
+    ;;
+
+  # disk-shrink SIZE_GB: deletes the VM with all its data, then starts it
+  # with a new, smaller disk. Disks cannot shrink in place.
+  disk-shrink)
+    case "$2" in *[!0-9]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
+    size=$((10#$2))
+    [ -f "$CONFIG" ] || { notify "$CONFIG not found."; exit 1; }
+    cur=$(sed -n -E 's/^disk: *([0-9]+) *$/\1/p' "$CONFIG")
+    case "$cur" in *[!0-9]*|"") notify "Couldn't read the disk size in colima.yaml."; exit 1 ;; esac
+    if [ "$size" -lt "$MIN_DISK" ] || [ "$size" -ge "$cur" ]; then
+      notify "Invalid disk size: $size GB. Use $MIN_DISK GB or more, and less than $cur GB."
+      exit 1
+    fi
+    lock_vm
+    k8s_note=""
+    if sed -n '/^kubernetes:/,/^[a-z]/p' "$CONFIG" | grep -qE '^  enabled: true$'; then
+      k8s_note=" The Kubernetes cluster and its data are also deleted."
+    fi
+    confirm "Delete all Docker data of $PROFILE and shrink its disk from $cur GB to $size GB?
+
+Colima deletes the VM and its disk. All containers, images, volumes and build cache are lost for good.$k8s_note
+
+Then Colima starts the VM again with an empty $size GB disk and the same settings." || exit 2
+    # Edit a copy first: if colima.yaml has no disk key, nothing is deleted.
+    backup="$STATE_DIR/colima.$PROFILE.yaml.shrink"
+    cp -p "$CONFIG" "$backup" || { notify "Couldn't copy colima.yaml to $backup."; exit 1; }
+    set_key disk "$size" "$backup"
+    with_busy "Shrinking disk to $size GB" shrink_disk "$backup" \
+      || { notify "Disk shrink failed - $SEE_LOG. A copy of colima.yaml is in $backup."; exit 1; }
+    rm -f "$backup"
     ;;
 
   copy-env)
@@ -259,7 +308,7 @@ case "$1" in
     if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
-    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|auto-stop MIN}" >&2
+    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|disk-shrink GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|auto-stop MIN}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
     exit 1 ;;
 esac

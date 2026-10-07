@@ -102,9 +102,20 @@ struct SystemTab: View {
                 ForEach([150, 200, 300].filter { $0 > model.vm.diskGB }, id: \.self) { d in
                     Button("\(d) GB") { model.run(.disk, "\(d)") }.controlSize(.small)
                 }
+                let smaller = DiskShrink.options(current: model.vm.diskGB)
+                if !smaller.isEmpty {
+                    Menu("Shrink…") {
+                        ForEach(smaller, id: \.self) { d in
+                            Button("\(d) GB") { shrinkDisk(to: d) }
+                        }
+                    }
+                    .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
+                    .hint(Help.diskShrink)
+                }
             }
             .hint(Help.disk)
-            Text("Disks can only grow, not shrink.").font(.caption2).foregroundStyle(.secondary)
+            Text("A disk grows in place. Shrink deletes all images, containers and volumes.")
+                .font(.caption2).foregroundStyle(.secondary)
 
             Divider()
             SectionHeader(title: "Disk usage")
@@ -270,6 +281,12 @@ struct SystemTab: View {
                     Button("Open") { SMAppService.openSystemSettingsLoginItems() }.controlSize(.mini)
                 }
             }
+            HStack(spacing: 6) {
+                Button("Export Settings…") { SettingsFilePanel.export(model: model) }
+                    .hint(Help.exportSettings)
+                Button("Import Settings…") { SettingsFilePanel.importFile(model: model, form: form) }
+                    .hint(Help.importSettings)
+            }
         }
         .toggleStyle(.switch).controlSize(.small)
         .onAppear {
@@ -277,6 +294,18 @@ struct SystemTab: View {
             syncIdle()
         }
         .onChange(of: model.vm) { syncPickers() }
+    }
+
+    /// The typed confirmation comes first. Only then does colima-ctl.sh run
+    /// (it asks one more time).
+    private func shrinkDisk(to size: Int) {
+        let from = model.vm.diskGB
+        guard DiskShrink.isValid(size, current: from),
+            ShrinkDiskAlert.confirm(
+                profile: model.profile, from: from, to: size, usage: model.df,
+                kubernetes: model.isKubernetesEnabled)
+        else { return }
+        model.run(.diskShrink, "\(size)")
     }
 
     private func dfHelp(_ type: String) -> String {

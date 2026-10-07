@@ -360,7 +360,11 @@ final class ColimaModel {
         // The selected profile was deleted (`colima delete -p X`): fall back
         // to default, so auto-start never provisions a fresh VM under the old
         // name. profile's didSet switches over and refreshes again.
-        if profile != "default", !all.isEmpty, !all.contains(where: { ($0.name ?? "default") == profile }) {
+        // A disk shrink deletes the profile for a short time while its busy
+        // marker exists: keep the profile then.
+        if profile != "default", readBusy() == nil, !all.isEmpty,
+            !all.contains(where: { ($0.name ?? "default") == profile })
+        {
             log.notice("profile \(self.profile, privacy: .public) no longer exists; switching to default")
             profile = "default"
             return
@@ -603,11 +607,17 @@ final class ColimaModel {
         func ready() async -> Bool { await probe.get(probePath, timeout: 3)?.ok ?? false }
 
         if readBusy() == nil, await ready() { return true }
-        // A deleted profile: `colima start` would provision a new VM.
-        if p != "default", !FileManager.default.fileExists(atPath: Paths.config(p)) {
-            Notifier.shared.post("Profile \(p) doesn't exist, so it wasn't started.")
+        // A deleted profile: `colima start` would provision a new VM. A disk
+        // shrink deletes colima.yaml for a short time, so check again after
+        // the wait for a running action.
+        func profileMissing() -> Bool {
+            if p != "default", !FileManager.default.fileExists(atPath: Paths.config(p)) {
+                Notifier.shared.post("Profile \(p) doesn't exist, so it wasn't started.")
+                return true
+            }
             return false
         }
+        if readBusy() == nil, profileMissing() { return false }
         // Only the docker runtime has a docker socket to wait for.
         if !hasDockerSocket {
             log.notice(
@@ -626,6 +636,7 @@ final class ColimaModel {
             try? await Task.sleep(for: .seconds(1))
         }
         if !(await ready()) {
+            if profileMissing() { return false }
             log.notice("auto-starting profile \(p, privacy: .public)")
             setBusyNow("Starting")
             let r = await Shell.run(

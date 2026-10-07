@@ -37,6 +37,9 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `ColimaModel+Rules`: static rules, for example when to hide the icon and how often the heartbeat runs.
 - `ColimaModel+Events`: which `/events` messages cause which refresh, and which ones go to `RemovedLogKeeper`.
 - `ColimaModel+StartDetection`: finds a `colima start` that already runs, so ColimaBar does not start a second one.
+- `ColimaModel+Settings`: reads the user settings for an export, and applies imported settings through the normal setters.
+- `SettingsTransfer`: the settings file format (JSON with a format name and a version), its checks and the import plan.
+- `DiskShrink`: the rules and the warning text for a smaller disk.
 - `CtlAction`: the actions of `colima-ctl.sh`.
 - `DFGate`: allows one `/system/df` call at a time.
 - `LatestOnly`: drops results of overlapping calls that arrive out of order.
@@ -68,7 +71,7 @@ The log windows. `LogStore` holds the live state for one container. If the conta
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `System/` also has `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`) and small shared views.
 
 ### `Support/`
 
@@ -137,6 +140,8 @@ ColimaBar runs `colima list -j` only in these cases:
 ### Actions and `colima-ctl.sh`
 
 ColimaBar sends the selected profile in `COLIMABAR_PROFILE`. The script takes a lock for each profile and writes a busy marker while a VM action runs. Its stderr goes to `~/.cache/colima-bar/ctl.log`.
+
+A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
 
 The exit codes are fixed. 0 means done. 1 means failed, and the script already notified the user. 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 

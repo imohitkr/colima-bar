@@ -79,7 +79,9 @@ enum Help {
     static let k8s =
         "Run a single-node k3s Kubernetes cluster in the VM and add a kubectl context: 'colima', or 'colima-PROFILE' for other profiles. It uses about 0.5 to 1 GB of RAM. A change restarts the VM."
     static let disk =
-        "The virtual disk of the VM. It holds images, containers, volumes and build cache. It can grow but cannot shrink. The file on your Mac uses only the space that the VM uses."
+        "The virtual disk of the VM. It holds images, containers, volumes and build cache. It grows in place and keeps your data. The file on your Mac uses only the space that the VM uses."
+    static let diskShrink =
+        "Make the disk smaller. A disk cannot shrink in place, so this deletes the VM and all its containers, images, volumes and build cache. Then the VM starts again with an empty disk and the same settings. You must type the profile name to confirm."
 
     // System: disk usage
     static let dfImages = "Images that you downloaded or built. Reclaimable is the part that no container uses."
@@ -140,6 +142,10 @@ enum Help {
         "Open the last lines that ColimaBar saved before Docker removed this container. ColimaBar keeps them for 5 minutes."
     static let login =
         "Start ColimaBar when you log in. If it crashes, start it again immediately. Thus the ColimaBar socket continues to work."
+    static let exportSettings =
+        "Save the ColimaBar settings to a JSON file. Use the file to set up ColimaBar on a different Mac."
+    static let importSettings =
+        "Load ColimaBar settings from a JSON file. ColimaBar shows the changes before it applies them. A profile that does not exist on this Mac is skipped."
 
     // Footer
     static let ssh = "Open a shell in the Colima VM, in iTerm, or in Terminal when iTerm is not installed."

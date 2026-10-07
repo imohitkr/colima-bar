@@ -11,6 +11,8 @@ enum CtlAction: String, CaseIterable, Sendable {
     case rosetta
     case k8s
     case disk
+    /// Deletes the VM with all its data and starts it with a smaller disk.
+    case diskShrink = "disk-shrink"
     case autoStop = "auto-stop"
     case copyEnv = "copy-env"
     case containerRemove = "ctr-rm"
@@ -29,7 +31,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// not on the next 1 s tick, so a second click can't race it.
     var isVMAction: Bool {
         switch self {
-        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .autoStop: true
+        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop: true
         default: false
         }
     }
@@ -38,7 +40,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// or volume leaves its row and a second Remove can't fail.
     var changesDisk: Bool {
         switch self {
-        case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll: true
+        case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll, .diskShrink: true
         default: false
         }
     }
@@ -50,6 +52,7 @@ enum CtlAction: String, CaseIterable, Sendable {
         switch self {
         case .start: return "Starting"
         case .stop, .autoStop: return "Stopping"
+        case .diskShrink: return "Shrinking disk"
         default: return "Restarting"
         }
     }

@@ -2,11 +2,7 @@
 
 [Docs index](README.md)
 
-These features are planned. Only the next version has a target.
-
-## v0.5.0
-
-- **Export and import settings.** Save the ColimaBar settings to a file, and load them on a different Mac.
+These features are planned. They have no target version yet.
 
 ## Later
 
