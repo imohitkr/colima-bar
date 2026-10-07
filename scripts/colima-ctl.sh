@@ -9,6 +9,9 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 #   3. ~/.config/colima, if it exists (older ColimaBar versions made it).
 #   4. $XDG_CONFIG_HOME/colima, if XDG_CONFIG_HOME is set.
 #   5. ~/.colima, the default of Colima on macOS.
+# The streams the script started with, for messages from colima_home.
+exec 3>&1 4>&2
+
 # COLIMA_HOME as the caller set it. The rules run again before a colima call.
 CALLER_COLIMA_HOME="${COLIMA_HOME:-}"
 pick_colima_dir() {
@@ -36,10 +39,14 @@ export COLIMA_HOME="$COLIMA_DIR"
 colima_home() {
   [ -e "$COLIMA_DIR" ] && return 0
   if [ "$(pick_colima_dir)" != "$COLIMA_DIR" ]; then
-    echo "the Colima folder changed during the action; try again" >&2
+    # A caller can redirect stdout and stderr (colima status >/dev/null), so
+    # write to the streams the script started with.
+    echo "the Colima folder changed during the action: $COLIMA_DIR" >&4
+    notify "The Colima folder changed during the action of $NAMED. Try again." >&3
     exit 1
   fi
-  command -v colima >/dev/null || return 0
+  # type -P finds only a file: the colima function below would match command -v.
+  type -P colima >/dev/null || return 0
   mkdir -p "$COLIMA_DIR"
 }
 # Lima keeps its instances in LIMA_HOME if it is set, else in COLIMA_DIR/_lima.

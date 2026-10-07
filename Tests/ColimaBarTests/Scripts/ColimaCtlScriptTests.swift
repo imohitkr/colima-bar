@@ -233,6 +233,36 @@ import Testing
         #expect(!sb.calls.contains { $0.hasPrefix("colima stop") || $0.hasPrefix("colima start") })
     }
 
+    @Test func aFolderChangeTellsTheUserWhy() throws {
+        let sb = try ScriptSandbox()
+        try sb.stub(
+            "colima",
+            """
+            [ "$1" = status ] && { rm -rf "\(sb.home)/.colima"; exit 0; }
+            exit 0
+            """)
+        try sb.write(".colima/work/colima.yaml", config)
+        try sb.write(".config/colima/work/colima.yaml", config)
+        // restart runs `colima status`, which deletes ~/.colima here, then `colima stop`.
+        let result = try run(sb, ["restart"])
+        #expect(result.status == 1)
+        #expect(result.out.contains("COLIMABAR_NOTIFY:The Colima folder changed during the action of profile 'work'"))
+    }
+
+    @Test func nothingIsCreatedWhenColimaIsNotInstalled() throws {
+        let sb = try ScriptSandbox()
+        // A copy whose PATH has the stubs and the system folders only, and no colima.
+        let script = try sb.copy("colima-ctl.sh")
+        let text = try String(contentsOfFile: script, encoding: .utf8)
+        let pathLine = try #require(text.split(separator: "\n").first { $0.hasPrefix("export PATH=") })
+        try text.replacingOccurrences(
+            of: String(pathLine), with: "export PATH=\"\(sb.bin):/usr/bin:/bin:/usr/sbin:/sbin\""
+        ).write(toFile: script, atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(atPath: sb.bin + "/colima")
+        _ = try sb.bash([script, "start"], env: ["COLIMABAR_PROFILE": "work", "COLIMABAR_APP": "1"])
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
+    }
+
     @Test func theScriptKeepsTheLocale() throws {
         // A changed locale could garble non-ASCII text in dialogs. The name
         // checks use character lists, so they need no locale.
