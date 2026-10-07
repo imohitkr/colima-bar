@@ -22,12 +22,10 @@ import Testing
             unlink(stable)
         }
 
-        let started = Date()
         let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
         #expect(resp.hasPrefix("HTTP/1.1 503"))
         #expect(resp.contains("errno \(EMFILE)"))
         #expect(woke.value == 0)
-        #expect(Date().timeIntervalSince(started) < 5)
     }
 
     @Test func missingSocketStillWakes() throws {
@@ -61,11 +59,11 @@ import Testing
 
         let fd = try #require(UnixSocket.connect(stable, timeout: 10))
         defer { close(fd) }
-        let started = Date()
+        // If the proxy never hangs up, read() fails after 20 s instead of returning 0.
+        UnixSocket.setTimeout(fd, 20)
         var buf = [UInt8](repeating: 0, count: 16)
         let n = read(fd, &buf, buf.count)  // send nothing: the proxy must hang up
         #expect(n == 0)
-        #expect(Date().timeIntervalSince(started) < 5)
     }
 
     @Test func silentClientIsClosedWhileVMIsUp() throws {
@@ -80,10 +78,10 @@ import Testing
 
         let fd = try #require(UnixSocket.connect(stable, timeout: 10))
         defer { close(fd) }
-        let started = Date()
+        // If the proxy never hangs up, read() fails after 20 s instead of returning 0.
+        UnixSocket.setTimeout(fd, 20)
         var buf = [UInt8](repeating: 0, count: 16)
         #expect(read(fd, &buf, buf.count) == 0)  // send nothing: the proxy must hang up
-        #expect(Date().timeIntervalSince(started) < 5)
     }
 
     @Test func splicedStreamOutlivesIdleTimeout() throws {

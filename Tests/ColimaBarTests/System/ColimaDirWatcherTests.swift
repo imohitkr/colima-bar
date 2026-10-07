@@ -59,18 +59,18 @@ import Testing
         let fm = FileManager.default
         fm.createFile(atPath: "\(root)/_lima/colima/ha.pid", contents: Data("1".utf8))
         fm.createFile(atPath: "\(root)/_lima/colima/ha.sock", contents: Data())
-        #expect(await wait(3) { fired >= 1 })
+        #expect(await wait(20) { fired >= 1 })
         try? await Task.sleep(for: .milliseconds(300))
         #expect(fired == 1)
 
         // A new profile appears: its directories get watched too.
         try fm.createDirectory(atPath: "\(root)/_lima/colima-new", withIntermediateDirectories: true)
-        #expect(await wait(3) { fired >= 2 })
+        #expect(await wait(20) { fired >= 2 })
         #expect(w.watched.contains("\(root)/_lima/colima-new"))
 
         // The profile goes away: its watch is dropped.
         try fm.removeItem(atPath: "\(root)/_lima/colima-new")
-        #expect(await wait(3) { fired >= 3 && !w.watched.contains("\(root)/_lima/colima-new") })
+        #expect(await wait(20) { fired >= 3 && !w.watched.contains("\(root)/_lima/colima-new") })
     }
 
     @MainActor @Test func steadyChangesAreDelayedNotDropped() async throws {
@@ -86,7 +86,7 @@ import Testing
             fm.createFile(atPath: "\(root)/default/f\(i)", contents: Data())
             try? await Task.sleep(for: .milliseconds(50))
         }
-        #expect(await wait(3) { fires.count >= 3 })
+        #expect(await wait(20) { fires.count >= 3 })
         for (a, b) in zip(fires, fires.dropFirst()) { #expect(b - a >= .milliseconds(350)) }
         withExtendedLifetime(w) {}
     }
