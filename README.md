@@ -58,7 +58,7 @@ You need a Mac with Apple silicon, macOS 14 or later, and [Colima](https://githu
 brew install --cask imohitkr/tap/colima-bar
 ```
 
-Apple does not notarize ColimaBar, so macOS blocks the first launch. To allow it, open **System Settings > Privacy & Security** and click **Open Anyway**.
+Apple does not notarize ColimaBar, so macOS blocks the first launch after you install or upgrade. To allow it, open **System Settings > Privacy & Security** and click **Open Anyway**.
 
 **The installer.** Run this command in Terminal. macOS does not block this download.
 
@@ -85,7 +85,7 @@ The [Usage guide](docs/usage.md) describes the icon, each tab and each menu item
 
 ## Update
 
-If you use Homebrew, run `brew upgrade --cask colima-bar`. If you used the installer, run it again. ColimaBar checks for a new version each day and shows an **Update** button in the dashboard when one is available.
+If you use Homebrew, run `brew upgrade --cask colima-bar`. If you use the installer, run it again. ColimaBar checks for a new version each day and shows an **Update** button in the dashboard when one is available.
 
 ## Uninstall
 

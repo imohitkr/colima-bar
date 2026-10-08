@@ -135,7 +135,7 @@ ColimaBar checks GitHub for a new release one time each day. When a new version 
 
 If you use Homebrew, run `brew upgrade --cask colima-bar`.
 
-If you used [the installer](#the-installer), run it again. The installer quits ColimaBar, replaces the app in the same folder and opens it again.
+If you use [the installer](#the-installer), run it again. The installer quits ColimaBar, replaces the app in the same folder and opens it again.
 
 If you use the disk image, download it again and replace the app in Applications.
 
