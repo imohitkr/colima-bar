@@ -1123,7 +1123,7 @@ final class ColimaModel {
         Self.profileAction(
             start: true, isSelected: p == profile, state: state,
             listedRunning: profiles.first { $0.name == p }?.isRunning ?? false,
-            busy: p == profile ? busy != nil : readBusy(p) != nil)
+            busy: p == profile ? busy != nil : profileActions[p] != nil)
     }
 
     /// The profile menu offers Stop for this profile.
@@ -1131,7 +1131,7 @@ final class ColimaModel {
         Self.profileAction(
             start: false, isSelected: p == profile, state: state,
             listedRunning: profiles.first { $0.name == p }?.isRunning ?? false,
-            busy: p == profile ? busy != nil : readBusy(p) != nil)
+            busy: p == profile ? busy != nil : profileActions[p] != nil)
     }
 
     /// Creates a profile and starts its VM. The directory watcher then
