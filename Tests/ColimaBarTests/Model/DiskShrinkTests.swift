@@ -32,9 +32,11 @@ import Testing
             DFRow(type: "Images", count: 3, size: 2 * 1_073_741_824, reclaimable: 0),
             DFRow(type: "Volumes", count: 1, size: 1_073_741_824, reclaimable: 0),
         ]
-        let text = DiskShrink.warning(profile: "work", from: 100, to: 40, usage: usage, kubernetes: true)
+        let text = DiskShrink.warning(
+            profile: "work", from: 100, to: 40, usage: usage, kubernetes: true, running: true)
         #expect(text.contains("100 GB disk"))
-        #expect(text.contains("empty 40 GB disk"))
+        #expect(text.contains("starts the VM again with an empty 40 GB disk"))
+        #expect(!text.contains("stops it again"))
         #expect(text.contains("• Images: 3, 2.0 GB"))
         #expect(text.contains("• Volumes: 1, 1.0 GB"))
         #expect(text.contains("Total: 3.0 GB"))
@@ -43,9 +45,19 @@ import Testing
     }
 
     @Test func warningForAStoppedVMSaysEverythingIsDeleted() {
-        let text = DiskShrink.warning(profile: "default", from: 60, to: 20, usage: [], kubernetes: false)
+        let text = DiskShrink.warning(
+            profile: "default", from: 60, to: 20, usage: [], kubernetes: false, running: false)
         #expect(text.contains("All containers, images, volumes and build cache are deleted"))
         #expect(!text.contains("Kubernetes"))
+    }
+
+    @Test func warningForAStoppedVMSaysTheVMStopsAgain() {
+        let text = DiskShrink.warning(
+            profile: "work", from: 100, to: 40, usage: [], kubernetes: true, running: false)
+        #expect(text.contains("Colima starts the VM once to create the new 40 GB disk, then stops it again."))
+        #expect(!text.contains("starts the VM again"))
+        #expect(text.contains("Kubernetes"))
+        #expect(text.hasSuffix("type the profile name: work"))
     }
 
     /// colima-ctl.sh checks the same minimum, so the menu never offers a

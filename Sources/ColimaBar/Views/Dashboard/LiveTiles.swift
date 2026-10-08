@@ -11,7 +11,7 @@ struct LiveTiles: View {
             )
             .hint(Help.cpuTile)
             Tile(
-                title: "Memory", value: memText, detail: "of \(model.vm.memGB) GB",
+                title: "Memory", value: memText, detail: "of \(ByteFormat.gibText(model.vm.memGB)) GB",
                 history: model.memHistory, tint: .purple
             )
             .hint(Help.memTile)

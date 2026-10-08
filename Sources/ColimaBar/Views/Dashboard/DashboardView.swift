@@ -36,7 +36,7 @@ struct DashboardView: View {
                 }
                 .scrollIndicators(.automatic)
             } else {
-                StoppedView(model: model)
+                StoppedView(model: model, form: ui.system)
             }
             HintBar()
             Divider()

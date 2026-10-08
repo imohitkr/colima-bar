@@ -40,6 +40,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `ColimaModel+Settings`: reads the user settings for an export, and applies imported settings through the normal setters.
 - `SettingsTransfer`: the settings file format (JSON with a format name and a version), its checks and the import plan.
 - `DiskShrink`: the rules and the warning text for a smaller disk.
+- `VMConfig`: the VM settings in the `colima.yaml` of the selected profile (`ColimaModel.config`), and the values that the settings show (`VMConfig.shown`). For a stopped VM, `colima list` shows the values of the last start, not the file. Memory is a decimal number of GiB, as in Colima: `memory: 2.5` is 2.5 GiB. CPU and disk are whole numbers.
 - `AutoStopRule`: the idle rule for one profile, and which other profiles auto-stop checks.
 - `ProfileName`: the name rules of `colima-ctl.sh`, and the stricter rules for a new profile.
 - `NewProfileForm`: the values and checks of the New Profile form.
@@ -76,7 +77,7 @@ The log windows. `LogStore` holds the live state for one container. If the conta
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
 
 ### `Support/`
 
@@ -157,11 +158,13 @@ ColimaBar runs `colima list -j` only in these cases:
 - The dashboard opens and the last list is more than 1 minute old.
 - The last list is more than 5 minutes old (1 minute when the state is not running or stopped).
 
+The model reads the `colima.yaml` of the selected profile after each `colima list`, each time the dashboard opens, and after a config edit of a stopped VM.
+
 ### Actions and `colima-ctl.sh`
 
 ColimaBar sends the profile in `COLIMABAR_PROFILE`: the selected profile, or the profile of a profile menu action. The script takes a lock for each profile and writes a busy marker while a VM action runs. Its stderr goes to `~/.cache/colima-bar/ctl.log`. Each VM dialog of the script names the profile, for example "Grow the Colima disk of profile 'work' to 150 GB?".
 
-`with_busy` runs the action in an extra subshell, `( "$@" ) &`. Without it, bash 3.2 (the `/bin/bash` of macOS) can run the first `command colima` of the action with `exec`. Then `restart_vm` ends after `colima status`, and the VM does not restart. A test with stub tools (`ColimaCtlScriptTests`) checks this.
+`with_busy` runs the action in an extra subshell, `( "$@" ) &`. Without it, bash 3.2 (the `/bin/bash` of macOS) can run the first `command colima` of the action with `exec`. Then the action ends after that call. For example, `restart_vm` stops the VM but does not start it again. A test with stub tools (`ColimaCtlScriptTests`) checks this.
 
 `profile-create CPU MEM DISK [RUNTIME]` runs `colima start` with these values for a new profile. It checks the name with the same rules as `ProfileName.problem`. `profile-delete` refuses the name `colima` and names that start with `colima-`, because Colima reads them as a different profile: it maps `colima` to `default` and removes the `colima-` prefix. It also refuses a profile without a folder. Then it asks once more and runs `colima delete --data --force`. The app shows a typed confirmation before it.
 
@@ -177,7 +180,19 @@ Lima's folder (`Paths.limaDir`) is `LIMA_HOME` if it is set, else `_lima` in the
 
 The name checks of the script list each allowed character, not a range such as `[a-z]`. Thus they match only ASCII in every locale.
 
-A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
+`resources`, `rosetta`, `k8s` and `disk` restart a running VM after a dialog. For a stopped VM, they only change `colima.yaml`, and the values apply at the next start (`CtlAction.editsConfigWhenStopped`). They write no busy marker then, so the app shows "Saving" until the script ends. `resources`, `rosetta` and `k8s` show no dialog for a stopped VM. `disk` still asks, because the grow becomes permanent at the next start. If the VM starts or stops while that dialog is open, the script changes nothing and exits with 1. `k8s on` for a stopped VM does not switch the kubectl context. `colima start` switches to it.
+
+`resources CPU MEM` takes a whole number of CPUs and a whole or decimal number of GiB for memory, such as 2.5. Both must be 1 or more. The memory picker of the app shows a value that is not a preset, such as 2.5 GB, as an extra choice. Thus a change of the CPU only sends the same memory again (`ByteFormat.gibText`). A value below 1 GB starts the pick at 1 GB, because the script refuses less. Colima gives Lima the memory in whole MiB, so `ByteFormat.gib(bytes:)` rounds to 2 decimals. While the VM runs, the settings show the value of `colima.yaml` if it differs from the live value by less than 0.006 GiB. The MiB cut and the rounding together stay below that (`VMConfig.shown`).
+
+`run()` sends the VM state that it used for `showsDialog(running:)` in `COLIMABAR_EXPECT_RUNNING` (1 or 0), for each action whose dialog depends on the state (`CtlAction.checksExpectedState`: `resources`, `rosetta` and `k8s`). If the VM is in the other state, for example because it started outside the app, the script changes nothing and exits with 1 (`vm_state`). Thus no dialog opens behind the popover. After a config edit of a stopped VM, `execute` reads `colima.yaml` again before "Saving" ends.
+
+While a `colima start` or `colima restart` for the profile runs (`start_in_progress`), the script refuses `disk`, `disk-shrink`, and `resources`, `rosetta` and `k8s`, before any dialog. It exits with 1. A restart would run a second `colima start` during it, and a shrink would delete the VM while it starts. During a start, `colima status` still fails. Thus while a dialog is open, a start that begins counts as a running VM (`same_state`).
+
+`start_in_progress` uses the same rule as `ColimaModel.isStartInProgress`. The profile is the value of `--profile` or `-p` (also `--profile=NAME` and `-p=NAME`). Else it is the first word after `start` or `restart` that is not a flag and not the value of a flag, such as the `4` of `--cpu 4` (`ColimaModel.startValueFlags`). Else it is `default`. Colima reads `colima` as `default` and removes a `colima-` prefix. `colima start -f` does not count: it is a foreground supervisor. For `colima restart`, `-f` means `--force`, and it counts.
+
+The script reads values of `colima.yaml` in the same forms as `VMConfig.parse`: with CRLF line ends, inline comments and quotes. The script runs `colima status` in a subshell. If the Colima folder changed, the main shell exits after the subshell, without the redirect, so the notice of `cleanup` reaches the app.
+
+A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. Colima creates the new disk only at a start. Thus for a stopped VM, the script runs `colima stop` at the end. The busy marker covers the full run. That start switches the docker context. The VM runs only for a short time, so a refresh can miss it. Thus after each shrink that was not cancelled, the model runs `Routing.apply()`. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
 
 The exit codes are fixed. 0 means done. 1 means failed, and the script already notified the user. 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 
@@ -237,7 +252,7 @@ Live stats stream only while a dashboard is on screen. Saved-log streams open on
 Do not break these rules.
 
 - **Fixed popover size.** The popover is 480 x 640 points (`AppDelegate.popoverSize`). In `ColimaModel`, assign a property only when its value changes. Otherwise the popover jitters and SwiftUI redraws too much.
-- **No dialog behind the popover.** Call `model.dismissPopover()` before an alert or a file panel opens from the popover. A `colima-ctl.sh` action that asks with a dialog has `CtlAction.showsDialog`, and `run()` closes the popover for it. A test checks that list against the script.
+- **No dialog behind the popover.** Call `model.dismissPopover()` before an alert or a file panel opens from the popover. A `colima-ctl.sh` action that asks with a dialog has `CtlAction.showsDialog(running:)`, and `run()` closes the popover for it. Some actions ask only while the VM runs. A test checks the list for a running VM against the script.
 - **Proxy sockets.** The stable socket is `~/.cache/colima-bar/docker.sock` (`Paths.proxySocket`). The profile sockets are `~/.cache/colima-bar/profiles/PROFILE.sock` (`Paths.profileSocket`). Each socket has mode `0600`. Their folders have mode `0700`. Do not change the paths or relax the modes.
 - **Quit behavior.** On quit, or when auto-start is off, the stable socket path becomes a symlink to the Colima socket of the selected profile, and each profile socket path a symlink to the Colima socket of its profile (`SocketProxy.stop()`). Docker clients must keep working without ColimaBar.
 - **Docker contexts.** ColimaBar creates, updates and removes only the `colimabar` context and the `colimabar-PROFILE` contexts whose description starts with "ColimaBar". It never changes other contexts.
@@ -251,4 +266,4 @@ Do not break these rules.
 
 Tests use Swift Testing. Logic lives in small static functions, so tests can call it without a VM. `Tests/ColimaBarTests/TestSupport/` has shared fakes, for example `FakeDaemon`. Automated runs never start or stop the user's Colima VM.
 
-`Tests/ColimaBarTests/Scripts/` tests the scripts in `scripts/`. `ScriptSandbox` runs a copy of a script in a temporary HOME, with stub `osascript`, `colima`, `docker` and `kubectl` first on its PATH. Thus no dialog reaches the screen, and no VM or docker context changes. The uninstall tests source only the helper functions of `uninstall.sh`.
+`Tests/ColimaBarTests/Scripts/` tests the scripts in `scripts/`. `ScriptSandbox` runs a copy of a script in a temporary HOME, with stub `osascript`, `colima`, `docker`, `kubectl` and `pgrep` first on its PATH. Thus no dialog reaches the screen, and no VM or docker context changes. The uninstall tests source only the helper functions of `uninstall.sh`.

@@ -22,12 +22,18 @@ enum DiskShrink {
 
     /// The text of the confirmation alert. `usage` is the disk usage of
     /// the Docker data (the rows of the Disk usage section). It is empty
-    /// while the VM is stopped.
-    static func warning(profile: String, from: Int, to: Int, usage: [DFRow], kubernetes: Bool) -> String {
-        var lines = [
-            "Colima cannot shrink a disk in place. Thus ColimaBar deletes the VM of the profile \(profile) and its \(from) GB disk. Then it starts the VM again with an empty \(to) GB disk and the same settings.",
-            "",
-        ]
+    /// while the VM is stopped. `running` is the VM state: a stopped VM
+    /// starts once to create the new disk, then stops again.
+    static func warning(
+        profile: String, from: Int, to: Int, usage: [DFRow], kubernetes: Bool, running: Bool
+    ) -> String {
+        let deletes =
+            "Colima cannot shrink a disk in place. Thus ColimaBar deletes the VM of the profile \(profile) and its \(from) GB disk."
+        let then =
+            running
+            ? "Then it starts the VM again with an empty \(to) GB disk and the same settings."
+            : "Colima starts the VM once to create the new \(to) GB disk, then stops it again. The other settings stay the same."
+        var lines = ["\(deletes) \(then)", ""]
         if usage.isEmpty {
             lines.append(
                 "The VM is not running, so ColimaBar cannot show the data on the disk. All containers, images, volumes and build cache are deleted for good."

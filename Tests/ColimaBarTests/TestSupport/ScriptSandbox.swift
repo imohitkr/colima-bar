@@ -10,7 +10,9 @@ import Foundation
 /// Stub exit codes: `STUB_OSASCRIPT_EXIT` (default 0: the user clicked OK)
 /// and `STUB_COLIMA_STATUS` for `colima status` (default 1: stopped).
 /// If `STUB_DELETE_DIR` is set, `colima delete` removes that folder, like
-/// the real `colima delete` removes the profile folder.
+/// the real `colima delete` removes the profile folder. The stub `pgrep`
+/// finds no process and logs nothing, so a real `colima start` on the Mac
+/// does not change a test.
 final class ScriptSandbox {
     let root: String
     let home: String
@@ -48,6 +50,8 @@ final class ScriptSandbox {
         try stub("docker", "printf 'docker %s\\n' \"$*\" >> \"\(log)\"\nexit 0")
         // colima-ctl.sh k8s on switches the kubectl context.
         try stub("kubectl", "printf 'kubectl %s\\n' \"$*\" >> \"\(log)\"\nexit 0")
+        // colima-ctl.sh looks for a `colima start` in progress.
+        try stub("pgrep", "exit 1")
     }
 
     deinit { try? FileManager.default.removeItem(atPath: root) }

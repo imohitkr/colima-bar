@@ -6,13 +6,15 @@ import AppKit
 @MainActor
 enum ShrinkDiskAlert {
     /// True only if the user typed the profile name and clicked the
-    /// destructive button.
-    static func confirm(profile: String, from: Int, to: Int, usage: [DFRow], kubernetes: Bool) -> Bool {
+    /// destructive button. `running` is the VM state of the profile.
+    static func confirm(
+        profile: String, from: Int, to: Int, usage: [DFRow], kubernetes: Bool, running: Bool
+    ) -> Bool {
         let alert = NSAlert()
         alert.alertStyle = .critical
         alert.messageText = "Delete all Docker data and shrink the disk to \(to) GB?"
         alert.informativeText = DiskShrink.warning(
-            profile: profile, from: from, to: to, usage: usage, kubernetes: kubernetes)
+            profile: profile, from: from, to: to, usage: usage, kubernetes: kubernetes, running: running)
         let delete = alert.addButton(withTitle: "Delete Data and Shrink")
         delete.hasDestructiveAction = true
         delete.isEnabled = false

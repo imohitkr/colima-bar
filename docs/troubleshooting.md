@@ -28,7 +28,9 @@ If the notification says "Colima profile NAME didn't become ready", open the Lim
 
 ## A disk shrink fails
 
-A disk shrink runs `colima stop`, `colima delete --data --force` and `colima start`. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
+A disk shrink runs `colima stop`, `colima delete --data --force` and `colima start`. For a stopped VM, it skips the first `colima stop` and runs `colima stop` at the end. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
+
+If the notification says that the stop failed, the new disk exists and the VM runs. Click **Stop** in the profile menu, or run `colima stop -p PROFILE`.
 
 `colima delete` removes `colima.yaml`. ColimaBar saves a copy with the new disk size in `~/.cache/colima-bar/colima.PROFILE.yaml.shrink` before it deletes anything. If the delete failed, or `colima start` failed after the delete, do these steps:
 

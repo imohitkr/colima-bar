@@ -21,6 +21,20 @@ Left-click the menu bar icon to open the dashboard. To keep it open in a resizab
 
 The tabs (Containers, Images, Volumes and System) and the live tiles show only while Colima runs. If Colima is stopped, the dashboard shows the stopped screen. It has a **Start Colima** button and the **Hide menu bar icon while Colima is stopped** checkbox. If Colima is not installed, the dashboard shows the command to install it.
 
+Below the **Start Colima** button and the checkbox, the stopped screen shows the **VM resources** and **Features** of the selected profile, from its `colima.yaml`. You can change them while the VM is stopped:
+
+- A preset, **Apply**, the Rosetta switch and the Kubernetes switch save to `colima.yaml` at once, with no dialog. The VM stays stopped, and the new values apply at the next start.
+- Colima reads the memory as GiB, and it can be a decimal number such as `memory: 2.5`. If the memory is not one of the choices, the memory picker shows it as an extra choice, for example **2.5 GB**. A change of the CPU only keeps that memory.
+- A bigger disk asks first. Colima grows the disk at the next start. A disk cannot shrink in place, so a grow is permanent.
+- **Shrink…** deletes all Docker data. It starts the VM once to create the new disk, then stops it again. See [Shrink the disk](#shrink-the-disk).
+
+If the profile has no `colima.yaml`, the stopped screen tells you to start the profile once. Colima creates the file at the first start.
+
+ColimaBar refuses a change and sends a notification in these cases. Nothing changes. Try again later.
+
+- The VM started or stopped outside ColimaBar, for example from a terminal, and the dashboard did not show it yet.
+- A `colima start` or `colima restart` of the profile runs, for example in a terminal. Wait until it ends. This also applies to a running VM.
+
 ## The dashboard
 
 ### Header and live usage
@@ -53,7 +67,9 @@ These tabs show sizes and the items that containers use. You can pull the latest
 ### System tab
 
 - **VM resources**: Light, Standard and Heavy presets, or your own CPU and memory values. **Apply** restarts the VM.
-- **Features**: Rosetta, Kubernetes (k3s) and the disk size. A disk grows in place and keeps your data. To make it smaller, use **Shrink…**. See [Shrink the disk](#shrink-the-disk).
+- **Features**: Rosetta, Kubernetes (k3s) and the disk size. A change restarts the VM, and ColimaBar asks first. A disk grows in place and keeps your data. To make it smaller, use **Shrink…**. See [Shrink the disk](#shrink-the-disk).
+- Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is not `vz`, the Rosetta switch is disabled, unless Rosetta is on. A missing `vmType` counts as `vz`.
+- To change these settings while the VM is stopped, use the [stopped screen](#open-the-dashboard).
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons.
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
@@ -69,12 +85,14 @@ Colima cannot shrink a disk in place. Thus **Shrink…** deletes the VM and its 
 
 To shrink the disk:
 
-1. On the System tab, click **Shrink…** next to the disk size. Select a size: 20, 40, 60 or 80 GB. The menu shows only the sizes that are smaller than the current disk.
+1. On the System tab or the stopped screen, click **Shrink…** next to the disk size. Select a size: 20, 40, 60 or 80 GB. The menu shows only the sizes that are smaller than the current disk.
 2. Read the warning. It shows the data that the disk holds now, from the **Disk usage** section. If the VM is stopped, ColimaBar cannot show this data.
 3. Type the profile name. Then click **Delete Data and Shrink**.
 4. Colima asks one more time. Click **OK**.
 
 ColimaBar then stops the VM, runs `colima delete --data --force`, puts back `colima.yaml` with the new `disk` value and runs `colima start`. The dashboard shows "Shrinking disk to N GB" until the VM runs again.
+
+If the VM was stopped, Colima must start it once to create the new disk. Thus ColimaBar runs the same steps, and then runs `colima stop`. The dashboard shows "Shrinking disk to N GB" until the VM is stopped again. If this last stop fails, ColimaBar sends a notification. The new disk exists then, and the VM runs.
 
 `colima delete` also removes `colima.yaml`. Thus ColimaBar first saves a copy as `~/.cache/colima-bar/colima.PROFILE.yaml.shrink`. If the shrink fails, the notification names this copy. See [A disk shrink fails](troubleshooting.md#a-disk-shrink-fails).
 

@@ -20,8 +20,9 @@ final class ColimaModel {
     }
     private(set) var busy: String?
     private(set) var vm = VMInfo()
-    private(set) var isRosettaEnabled = false
-    private(set) var isKubernetesEnabled = false
+    /// The colima.yaml of the selected profile, or nil when the file is
+    /// missing. For a stopped VM, `vm` shows the last start, not this file.
+    private(set) var config: VMConfig?
     private(set) var containers: [Container] = [] {
         didSet { updateDerivedLists() }
     }
@@ -158,6 +159,8 @@ final class ColimaModel {
     private(set) var stopped: [Container] = []
     private(set) var unhealthyCount = 0
     var kubeContext: String { Paths.kubeContext(profile) }
+    var isRosettaEnabled: Bool { config?.rosetta ?? false }
+    var isKubernetesEnabled: Bool { config?.kubernetes ?? false }
 
     private(set) var api: DockerAPI
     let proxy: SocketProxy
@@ -427,7 +430,7 @@ final class ColimaModel {
             all.map {
                 ProfileRow(
                     name: $0.name ?? "default", isRunning: $0.status == "Running", cpus: $0.cpus ?? 0,
-                    memGB: Int(($0.memory ?? 0) / ByteFormat.bytesPerGiB), runtime: $0.runtime ?? "")
+                    memGB: ByteFormat.gib(bytes: $0.memory ?? 0), runtime: $0.runtime ?? "")
             })
         syncProfiles()
         // `colima start` of any profile switches the docker context to that
@@ -446,7 +449,7 @@ final class ColimaModel {
             v.arch = info.arch ?? ""
             v.runtime = info.runtime ?? ""
             v.cpus = info.cpus ?? 0
-            v.memGB = Int((info.memory ?? 0) / ByteFormat.bytesPerGiB)
+            v.memGB = ByteFormat.gib(bytes: info.memory ?? 0)
             v.diskGB = Int((info.disk ?? 0) / ByteFormat.bytesPerGiB)
             if newState == .running && (!wasRunning || v.driver.isEmpty) {
                 let s = await Shell.run(["colima", "status", "-j", "--profile", profile], timeout: 10)
@@ -458,10 +461,7 @@ final class ColimaModel {
             }
             set(\.vm, v)
         }
-        if let yaml = try? String(contentsOfFile: Paths.config(profile), encoding: .utf8) {
-            set(\.isRosettaEnabled, Parse.yaml(yaml, key: "rosetta") == "true")
-            set(\.isKubernetesEnabled, Parse.yaml(yaml, key: "enabled", section: "kubernetes") == "true")
-        }
+        reloadConfig()
         if state != newState {
             log.notice("profile \(self.profile, privacy: .public): \(String(describing: newState), privacy: .public)")
         }
@@ -485,6 +485,12 @@ final class ColimaModel {
         } else {
             clearVMData()
         }
+    }
+
+    /// Reads the colima.yaml of the selected profile. A missing file gives
+    /// nil, so no flags of an older file stay. `set` assigns only a change.
+    private func reloadConfig() {
+        set(\.config, (try? String(contentsOfFile: Paths.config(profile), encoding: .utf8)).map(VMConfig.parse))
     }
 
     private func clearVMData() {
@@ -527,6 +533,7 @@ final class ColimaModel {
         // must not change the proxy sockets.
         if !isDebug { proxy.upstream = Paths.socket(profile) }
         vm = VMInfo()
+        set(\.config, nil)
         state = .unknown
         idleSince = nil
         otherIdle = [:]
@@ -936,7 +943,9 @@ final class ColimaModel {
 
     /// Only what the open tab needs: `colima list` when the last one is over
     /// a minute old, df for the disk tabs, and routing for the System tab.
+    /// colima.yaml is a cheap read, so an edit outside the app shows at once.
     private func becameVisible() {
+        reloadConfig()
         Task {
             if Date().timeIntervalSince(lastColima) >= Self.statusMaxAgeOnOpen { await refreshStatus() }
             if state == .running {
@@ -986,7 +995,7 @@ final class ColimaModel {
         set(\.stats, latest)
         guard state == .running else { return }
         let cpu = latest.values.reduce(0) { $0 + $1.cpu } / Double(max(vm.cpus, 1))
-        let vmBytes = Double(max(vm.memGB, 1)) * Double(ByteFormat.bytesPerGiB)
+        let vmBytes = (vm.memGB > 0 ? vm.memGB : 1) * Double(ByteFormat.bytesPerGiB)
         let mem = latest.values.reduce(0) { $0 + $1.memBytes } / vmBytes * 100
         push(&cpuHistory, min(cpu, 100))
         push(&memHistory, min(mem, 100))
@@ -1067,28 +1076,31 @@ final class ColimaModel {
     /// profile to act on; nil means the selected profile.
     func run(_ action: CtlAction, _ args: String..., profile target: String? = nil) {
         let p = target ?? profile
-        if action.showsDialog { dismissPopover() }
-        let label = markBusy(action, p)
-        Task { await execute(action, args, profile: p, label: label) }
+        let running = isRunning(profile: p)
+        if action.showsDialog(running: running) { dismissPopover() }
+        let label = markBusy(action, p, running: running)
+        Task { await execute(action, args, profile: p, label: label, expectRunning: running) }
     }
 
     /// Shows the busy label at once, not on the next tick, so a second click
     /// can't race the action. The selected profile shows it in the header,
     /// another profile in the profile menu.
-    private func markBusy(_ action: CtlAction, _ p: String) -> String? {
-        guard let label = action.busyLabel else { return nil }
+    private func markBusy(_ action: CtlAction, _ p: String, running: Bool? = nil) -> String? {
+        guard let label = action.busyLabel(running: running ?? isRunning(profile: p)) else { return nil }
         if p == profile { setBusyNow(label) } else { profileActions[p] = label }
         return label
     }
 
-    /// Returns true if the script exited with 0.
+    /// Returns true if the script exited with 0. `expectRunning` is the VM
+    /// state that `run` used to decide on the popover and the busy label.
     @discardableResult
-    private func execute(_ action: CtlAction, _ args: [String], profile p: String, label: String?) async -> Bool {
+    private func execute(
+        _ action: CtlAction, _ args: [String], profile p: String, label: String?, expectRunning: Bool? = nil
+    ) async -> Bool {
         actionsInFlight[p, default: 0] += 1
         defer { actionsInFlight[p, default: 1] -= 1 }
-        let r = await Shell.run(
-            [Paths.ctl, action.rawValue] + args, timeout: 900,
-            extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
+        let env = action.environment(profile: p, expectRunning: expectRunning)
+        let r = await Shell.run([Paths.ctl, action.rawValue] + args, timeout: 900, extraEnv: env)
         // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
         // lines when ColimaBar runs it, so they arrive as native alerts.
         var notified = false
@@ -1101,12 +1113,23 @@ final class ColimaModel {
             Notifier.shared.post(
                 "\(action.rawValue) failed for profile \(p) (exit \(r.status)). See \(Paths.ctlLog).")
         }
+        // A config edit of a stopped VM wrote colima.yaml. Read it before
+        // "Saving" ends: refreshAll reads it only after a good `colima list`.
+        // Else a switch snaps back, and Apply turns on with the old pick.
+        if action.editsConfigWhenStopped, expectRunning == false, p == profile { reloadConfig() }
         // The action is over (done, failed or cancelled): drop the
         // placeholder, but only if a newer action hasn't replaced it.
         if p == profile, localBusy == label { localBusy = nil }
         if let label, profileActions[p] == label { profileActions[p] = nil }
         busy = readBusy()
         await refreshAll(urgentDF: action.changesDisk)
+        // A shrink runs `colima start`, which switches the docker context.
+        // For a stopped VM, it stops the VM again after a short time, and a
+        // refresh can miss the start. Thus apply the routes here too.
+        if action == .diskShrink, r.status != 2, !isDebug {
+            await Routing.apply()
+            if visibleCount > 0, dashboardTab == .system { await refreshRouting() }
+        }
         return r.ok
     }
 
