@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- CI no longer fails now and then on a slow runner. The tests no longer block the threads that Swift concurrency needs, and they wait up to 20 s for a result.
+
 ## [0.6.0] - 2026-10-08
 
 ### Added

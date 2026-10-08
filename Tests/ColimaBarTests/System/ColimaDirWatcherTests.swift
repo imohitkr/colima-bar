@@ -38,16 +38,6 @@ import Testing
         #expect(ColimaDirWatcher.watchPaths(root: "\(root)/missing", lima: lima).count == 3)
     }
 
-    /// Waits up to `seconds` for `cond`, letting the main queue run.
-    @MainActor private func wait(_ seconds: Double, _ cond: () -> Bool) async -> Bool {
-        let end = Date().addingTimeInterval(seconds)
-        while Date() < end {
-            if cond() { return true }
-            try? await Task.sleep(for: .milliseconds(20))
-        }
-        return cond()
-    }
-
     @MainActor @Test func instanceChangesFireOnceAndNewDirsAreWatched() async throws {
         let root = try tempRoot()
         defer { try? FileManager.default.removeItem(atPath: root) }
@@ -59,18 +49,20 @@ import Testing
         let fm = FileManager.default
         fm.createFile(atPath: "\(root)/_lima/colima/ha.pid", contents: Data("1".utf8))
         fm.createFile(atPath: "\(root)/_lima/colima/ha.sock", contents: Data())
-        #expect(await wait(20) { fired >= 1 })
+        #expect(await waitUntil { fired >= 1 })
+        // No event shows that a second callback will not come, so give it
+        // longer than the debounce to arrive.
         try? await Task.sleep(for: .milliseconds(300))
         #expect(fired == 1)
 
         // A new profile appears: its directories get watched too.
         try fm.createDirectory(atPath: "\(root)/_lima/colima-new", withIntermediateDirectories: true)
-        #expect(await wait(20) { fired >= 2 })
+        #expect(await waitUntil { fired >= 2 })
         #expect(w.watched.contains("\(root)/_lima/colima-new"))
 
         // The profile goes away: its watch is dropped.
         try fm.removeItem(atPath: "\(root)/_lima/colima-new")
-        #expect(await wait(20) { fired >= 3 && !w.watched.contains("\(root)/_lima/colima-new") })
+        #expect(await waitUntil { fired >= 3 && !w.watched.contains("\(root)/_lima/colima-new") })
     }
 
     @MainActor @Test func steadyChangesAreDelayedNotDropped() async throws {
@@ -86,7 +78,7 @@ import Testing
             fm.createFile(atPath: "\(root)/default/f\(i)", contents: Data())
             try? await Task.sleep(for: .milliseconds(50))
         }
-        #expect(await wait(20) { fires.count >= 3 })
+        #expect(await waitUntil { fires.count >= 3 })
         for (a, b) in zip(fires, fires.dropFirst()) { #expect(b - a >= .milliseconds(350)) }
         withExtendedLifetime(w) {}
     }

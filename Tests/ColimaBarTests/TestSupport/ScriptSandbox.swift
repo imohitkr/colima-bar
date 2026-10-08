@@ -78,21 +78,27 @@ final class ScriptSandbox {
     enum SandboxError: Error { case noPathLine(String) }
 
     /// Runs `bash ARGS` with HOME in the sandbox and the stub folder first
-    /// on PATH. Returns the exit status and stdout.
-    func bash(_ args: [String], env: [String: String] = [:]) throws -> (status: Int32, out: String) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/bin/bash")
-        p.arguments = args
-        p.environment = ["HOME": home, "PATH": "\(bin):/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C"]
+    /// on PATH. Returns the exit status and stdout. The process waits block,
+    /// so they run on their own thread (see onOwnThread).
+    func bash(_ args: [String], env: [String: String] = [:]) async throws -> (status: Int32, out: String) {
+        let environment = ["HOME": home, "PATH": "\(bin):/usr/bin:/bin:/usr/sbin:/sbin", "LANG": "C"]
             .merging(env) { $1 }
-        let out = Pipe()
-        p.standardOutput = out
-        p.standardError = FileHandle.nullDevice
-        p.standardInput = FileHandle.nullDevice
-        try p.run()
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return (p.terminationStatus, String(decoding: data, as: UTF8.self))
+        return try await onOwnThread { () -> Result<(status: Int32, out: String), any Error> in
+            Result {
+                let p = Process()
+                p.executableURL = URL(fileURLWithPath: "/bin/bash")
+                p.arguments = args
+                p.environment = environment
+                let out = Pipe()
+                p.standardOutput = out
+                p.standardError = FileHandle.nullDevice
+                p.standardInput = FileHandle.nullDevice
+                try p.run()
+                let data = out.fileHandleForReading.readDataToEndOfFile()
+                p.waitUntilExit()
+                return (p.terminationStatus, String(decoding: data, as: UTF8.self))
+            }
+        }.get()
     }
 
     /// The stub calls so far, one line each.

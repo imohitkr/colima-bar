@@ -1,7 +1,6 @@
 import Darwin
 import Foundation
 import Testing
-import os
 
 @testable import ColimaBar
 
@@ -10,7 +9,7 @@ import os
     let upstream = TestSocketPath.unique()
     let stable = TestSocketPath.unique()
 
-    @Test func splicesToRunningDaemon() throws {
+    @Test func splicesToRunningDaemon() async throws {
         let daemon = FakeDaemon(path: upstream)
         try daemon.start()
         defer { daemon.stop() }
@@ -21,12 +20,12 @@ import os
             unlink(stable)
         }
 
-        let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
+        let resp = await roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
         #expect(resp.hasSuffix("hello"))
         #expect(daemon.seen == ["GET /v1.54/containers/json HTTP/1.1"])
     }
 
-    @Test func answersPingWhileStoppedThenWakesOnRealRequest() throws {
+    @Test func answersPingWhileStoppedThenWakesOnRealRequest() async throws {
         unlink(upstream)
         let daemon = FakeDaemon(path: upstream)
         let p = SocketProxy(upstream: upstream, path: stable)
@@ -45,12 +44,12 @@ import os
         }
 
         // docker's preflight ping must not boot the VM...
-        let ping = roundTrip(stable, "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n", until: "\r\n\r\n")
+        let ping = await roundTrip(stable, "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n", until: "\r\n\r\n")
         #expect(ping.hasPrefix("HTTP/1.1 200 OK"))
         #expect(woke.value == 0)
 
         // ...but a real request on the same connection does, and goes through.
-        let resp = roundTrip(
+        let resp = await roundTrip(
             stable,
             "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n"
                 + "POST /v1.54/containers/create HTTP/1.1\r\nHost: docker\r\nContent-Length: 0\r\n\r\n")
@@ -59,7 +58,7 @@ import os
         #expect(daemon.seen == ["POST /v1.54/containers/create HTTP/1.1"])
     }
 
-    @Test func failedWakeReturns503() throws {
+    @Test func failedWakeReturns503() async throws {
         unlink(upstream)
         let p = SocketProxy(upstream: upstream, path: stable)
         p.wake = { false }
@@ -68,7 +67,7 @@ import os
             p.stop()
             unlink(stable)
         }
-        let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
+        let resp = await roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
         #expect(resp.hasPrefix("HTTP/1.1 503"))
         #expect(resp.contains("could not start Colima"))
     }
@@ -81,7 +80,7 @@ import os
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: stable)) == upstream)
     }
 
-    @Test func aRemovedProxyNeverTakesTheClientsOfANewOne() throws {
+    @Test func aRemovedProxyNeverTakesTheClientsOfANewOne() async throws {
         // ProfileProxies.sync removes a proxy and starts another in one call,
         // so the new listener can get the fd number that was just freed.
         let otherUpstream = TestSocketPath.unique()
@@ -100,7 +99,7 @@ import os
             a.remove()
             let b = SocketProxy(upstream: otherUpstream, path: otherPath)
             b.start()
-            let resp = roundTrip(otherPath, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
+            let resp = await roundTrip(otherPath, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
             b.remove()
             #expect(resp.hasSuffix("new"))
         }
@@ -116,7 +115,7 @@ import os
         #expect(!FileManager.default.fileExists(atPath: stable + ".lnk"))
     }
 
-    @Test func requestsWaitWhileAWakeIsInProgress() throws {
+    @Test func requestsWaitWhileAWakeIsInProgress() async throws {
         // While wake() runs, even with the upstream socket accepting, a new
         // request must not be spliced straight through (the daemon may be
         // restarting). It goes through after wake() reports ready.
@@ -143,30 +142,18 @@ import os
             unlink(stable)
         }
 
-        let first = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
-            _ = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: d\r\n\r\n")
-            first.signal()
-        }
-        #expect(waitUntil { woke.value == 1 }, "the first request did not start a wake")
-        let second = DispatchSemaphore(value: 0)
-        let secondReply = OSAllocatedUnfairLock(initialState: "")
-        DispatchQueue.global().async {
-            let reply = roundTrip(stable, "GET /v1.54/info HTTP/1.1\r\nHost: d\r\n\r\n")
-            secondReply.withLock { $0 = reply }
-            second.signal()
-        }
-        // Nothing signals that the proxy holds the second request, so give it
-        // time to reach the daemon if it were spliced too early.
-        Thread.sleep(forTimeInterval: 0.5)
+        async let first = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: d\r\n\r\n")
+        #expect(await waitUntil { woke.value == 1 }, "the first request did not start a wake")
+        async let second = roundTrip(stable, "GET /v1.54/info HTTP/1.1\r\nHost: d\r\n\r\n")
+        // Both requests wait for the wake: the second one reached the proxy.
+        #expect(await waitUntil { px.wakeWaiters == 2 }, "the second request did not wait for the wake")
         #expect(!daemon.seen.contains { $0.contains("/info") }, "request reached the daemon before wake finished")
         release.signal()
-        #expect(first.wait(timeout: .now() + 20) == .success)
-        #expect(second.wait(timeout: .now() + 20) == .success)
-        #expect(secondReply.withLock { $0 }.contains("hello"))
+        #expect(await first.contains("hello"))
+        #expect(await second.contains("hello"))
     }
 
-    @Test func proxiesOfOneUpstreamWaitForTheSameWake() throws {
+    @Test func proxiesOfOneUpstreamWaitForTheSameWake() async throws {
         // The stable socket and the profile socket of the selected profile
         // have one upstream. A wake that one of them starts holds the other
         // one too, as ColimaModel.wakeForProxy does. Its requests wait for
@@ -204,25 +191,14 @@ import os
             unlink(other)
         }
 
-        let first = DispatchSemaphore(value: 0)
-        DispatchQueue.global().async {
-            _ = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: d\r\n\r\n")
-            first.signal()
-        }
-        #expect(waitUntil { woke.value == 1 }, "the first request did not start a wake")
-        let second = DispatchSemaphore(value: 0)
-        let secondReply = OSAllocatedUnfairLock(initialState: "")
-        DispatchQueue.global().async {
-            let reply = roundTrip(other, "GET /v1.54/info HTTP/1.1\r\nHost: d\r\n\r\n")
-            secondReply.withLock { $0 = reply }
-            second.signal()
-        }
-        #expect(waitUntil { wake.joined == 1 }, "the other proxy did not wait for the wake")
+        async let first = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: d\r\n\r\n")
+        #expect(await waitUntil { woke.value == 1 }, "the first request did not start a wake")
+        async let second = roundTrip(other, "GET /v1.54/info HTTP/1.1\r\nHost: d\r\n\r\n")
+        #expect(await waitUntil { wake.joined == 1 }, "the other proxy did not wait for the wake")
         #expect(!daemon.seen.contains { $0.contains("/info") }, "request reached the daemon before wake finished")
         release.signal()
-        #expect(first.wait(timeout: .now() + 20) == .success)
-        #expect(second.wait(timeout: .now() + 20) == .success)
-        #expect(secondReply.withLock { $0 }.contains("hello"))
+        #expect(await first.contains("hello"))
+        #expect(await second.contains("hello"))
         #expect(woke.value == 1)
     }
 }
