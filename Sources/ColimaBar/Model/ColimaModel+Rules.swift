@@ -75,6 +75,18 @@ extension ColimaModel {
         busyMarker != nil || actionsInFlight > 0
     }
 
+    /// Whether the profile menu offers Start (`start`) or Stop for a profile.
+    /// The selected profile uses its live state; another profile uses its
+    /// row in the last `colima list`. A profile with an action that runs
+    /// gets neither.
+    nonisolated static func profileAction(
+        start: Bool, isSelected: Bool, state: VMState, listedRunning: Bool, busy: Bool
+    ) -> Bool {
+        guard !busy else { return false }
+        guard isSelected else { return start != listedRunning }
+        return start ? state == .stopped : state == .running
+    }
+
     /// The proxies to hold while wakes run (see SocketProxy.holdForWake).
     /// `waking` holds the profiles whose wake runs now. The stable proxy
     /// follows the selected profile. Each profile proxy follows its own

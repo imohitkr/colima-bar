@@ -6,6 +6,11 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- **Start** and **Stop** in the profile menu now list the selected profile too. Before, with only one profile, both submenus were empty but still opened, so a click did nothing. An empty submenu is now left out.
+- The popover closes when you click in another app. Before, after you opened ColimaBar from Spotlight, macOS could leave another app active, and the popover stayed open.
+
 ## [0.5.0] - 2026-10-07
 
 ### Added

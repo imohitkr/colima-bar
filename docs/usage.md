@@ -184,7 +184,7 @@ When you turn the option off, ColimaBar closes the log streams and drops all sav
 Each Colima profile is a separate VM with its own containers, images and settings. The profile menu in the header shows the selected profile. Click it to see these items:
 
 - **Show**: all profiles with their state. Select a profile to show it in the dashboard.
-- **Start** and **Stop**: start or stop the VM of a different profile. The selected profile uses the buttons in the header.
+- **Start** and **Stop**: start or stop the VM of any profile, also the selected one. Each submenu lists only the profiles that it can act on now. If no profile qualifies, the menu leaves out that submenu.
 - **New Profile…**: create a profile. See [Create a profile](#create-a-profile).
 - **Delete Profile**: delete a profile with all its data. See [Delete a profile](#delete-a-profile).
 

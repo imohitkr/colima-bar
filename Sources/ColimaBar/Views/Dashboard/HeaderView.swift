@@ -87,19 +87,23 @@ struct ProfileMenu: View {
                 if model.profiles.isEmpty && pendingNew.isEmpty { Text("No profiles yet") }
             }
             Divider()
-            let others = model.profiles.filter { $0.name != model.profile && model.profileActions[$0.name] == nil }
-            Menu("Start") {
-                ForEach(others.filter { !$0.isRunning }) { p in
-                    Button(p.name) { model.startProfile(p.name) }
+            // A disabled submenu still opens on macOS, so leave out an empty one.
+            let startable = model.profiles.filter { model.canStart(profile: $0.name) }
+            let stoppable = model.profiles.filter { model.canStop(profile: $0.name) }
+            if !startable.isEmpty {
+                Menu("Start") {
+                    ForEach(startable) { p in
+                        Button(p.name) { model.startProfile(p.name) }
+                    }
                 }
             }
-            .disabled(!others.contains { !$0.isRunning })
-            Menu("Stop") {
-                ForEach(others.filter(\.isRunning)) { p in
-                    Button(p.name) { model.stopProfile(p.name) }
+            if !stoppable.isEmpty {
+                Menu("Stop") {
+                    ForEach(stoppable) { p in
+                        Button(p.name) { model.stopProfile(p.name) }
+                    }
                 }
             }
-            .disabled(!others.contains(where: \.isRunning))
             Divider()
             Button("New Profile…") {
                 let defaults = NewProfileForm.defaults(from: model.vm)
