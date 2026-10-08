@@ -66,8 +66,7 @@ struct HeaderView: View {
 }
 
 /// Header chip that shows the selected profile. Its menu switches between
-/// profiles, starts and stops the other profiles, and creates and deletes
-/// profiles.
+/// profiles, starts and stops profiles, and creates and deletes profiles.
 struct ProfileMenu: View {
     let model: ColimaModel
 
@@ -112,20 +111,22 @@ struct ProfileMenu: View {
                     model.createProfile(form)
                 }
             }
-            Menu("Delete Profile") {
-                ForEach(deletable) { p in
-                    let running = model.isRunning(profile: p.name)
-                    let refusal = ProfileDelete.refusal(profile: p.name, selected: model.profile, isRunning: running)
-                    Button(refusal == nil ? "\(p.name)…" : "\(p.name) (stop it first)") {
-                        model.dismissPopover()
-                        if DeleteProfileAlert.confirm(profile: p.name, isRunning: running) {
-                            model.deleteProfile(p.name)
+            if !deletable.isEmpty {
+                Menu("Delete Profile") {
+                    ForEach(deletable) { p in
+                        let running = model.isRunning(profile: p.name)
+                        let refusal = ProfileDelete.refusal(
+                            profile: p.name, selected: model.profile, isRunning: running)
+                        Button(refusal == nil ? "\(p.name)…" : "\(p.name) (stop it first)") {
+                            model.dismissPopover()
+                            if DeleteProfileAlert.confirm(profile: p.name, isRunning: running) {
+                                model.deleteProfile(p.name)
+                            }
                         }
+                        .disabled(refusal != nil)
                     }
-                    .disabled(refusal != nil)
                 }
             }
-            .disabled(deletable.isEmpty)
         } label: {
             HStack(spacing: 2) {
                 Text(model.profile)
@@ -140,7 +141,12 @@ struct ProfileMenu: View {
     }
 
     /// "running", "stopped", or the action that runs for the profile.
+    /// The selected profile uses its live state, like Start and Stop.
     private func status(_ p: ProfileRow) -> String {
+        if p.name == model.profile {
+            if let busy = model.busy { return busy.lowercased() + "…" }
+            return model.state == .running ? "running" : "stopped"
+        }
         if let action = model.profileActions[p.name] { return action.lowercased() + "…" }
         return p.isRunning ? "running" : "stopped"
     }
