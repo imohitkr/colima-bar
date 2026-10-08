@@ -158,7 +158,7 @@ ColimaBar runs `colima list -j` only in these cases:
 - The dashboard opens and the last list is more than 1 minute old.
 - The last list is more than 5 minutes old (1 minute when the state is not running or stopped).
 
-The model reads the `colima.yaml` of the selected profile after each `colima list`, each time the dashboard opens, and after a config edit of a stopped VM.
+The model reads the `colima.yaml` of the selected profile after each `colima list` that succeeds, each time the dashboard opens, and after a config edit of a stopped VM.
 
 ### Actions and `colima-ctl.sh`
 

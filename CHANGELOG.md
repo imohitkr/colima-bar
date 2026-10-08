@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-08
+
 ### Added
 
 - Change the settings of a stopped profile. The stopped screen now shows the VM resources and features from `colima.yaml`: CPU, memory, disk, Rosetta and Kubernetes. A change of CPU, memory, disk size, Rosetta or Kubernetes only edits `colima.yaml`. The VM stays stopped, and the new values apply at the next start. A bigger disk asks first. **Shrink…** of a stopped VM starts the VM once to create the new disk, then stops it again. See [Open the dashboard](docs/usage.md#open-the-dashboard).
@@ -13,13 +15,14 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Changed
 
 - The Rosetta switch is disabled when `vmType` in `colima.yaml` is not `vz`, unless Rosetta is on. Rosetta needs the `vz` VM type.
-- ColimaBar refuses a change of the VM resources, Rosetta, Kubernetes or the disk while a `colima start` or `colima restart` of the profile runs, for example in a terminal. It also refuses the change when the VM started or stopped outside ColimaBar and the dashboard did not show it yet. Nothing changes, and a notification tells you to try again.
+- When you turn on Kubernetes and the VM has less than 4 GB of memory, the dialog shows the memory and says that Kubernetes uses about 0.5 to 1 GB of it.
+- ColimaBar refuses a change of the VM resources, Rosetta, Kubernetes or the disk while a `colima start` or `colima restart` of the profile runs, for example in a terminal. It also refuses a change of the VM resources, Rosetta or Kubernetes when the VM started or stopped outside ColimaBar and the dashboard did not show it yet. Nothing changes, and a notification tells you to try again.
 
 ### Fixed
 
 - A decimal memory in `colima.yaml`, such as `memory: 2.5`, shows as 2.5 GB, and a change of the CPU only keeps it. Colima reads the memory as GiB. The header, the live tiles and the profile list also show a decimal memory.
-- ColimaBar finds the profile of a `colima start` in progress with flags before the name, for example `colima start --cpu 4 work`, `colima start -p=work` and `colima start colima-work`.
-- **Start** and **Stop** in the profile menu now list the selected profile too. Before, with only one profile, both submenus were empty but still opened, so a click did nothing. An empty submenu is now left out.
+- ColimaBar finds the profile of a `colima start` in progress with flags before the name, for example `colima start --cpu 4 work`, `colima start -p=work` and `colima start colima-work`. `colima restart -f` also counts. For `restart`, `-f` means `--force`.
+- **Start** and **Stop** in the profile menu now list the selected profile too. Before, with only one profile, both submenus were empty but still opened, so a click did nothing. An empty **Start**, **Stop** or **Delete Profile** submenu is now left out. The profile list shows the live state of the selected profile, and the action that runs for it.
 - The popover closes when you click in another app. Before, after you opened ColimaBar from Spotlight, macOS could leave another app active, and the popover stayed open.
 
 ## [0.5.0] - 2026-10-07
@@ -143,7 +146,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/imohitkr/colima-bar/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/imohitkr/colima-bar/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/imohitkr/colima-bar/compare/v0.3.0...v0.3.1

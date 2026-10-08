@@ -32,7 +32,7 @@ If the profile has no `colima.yaml`, the stopped screen tells you to start the p
 
 ColimaBar refuses a change and sends a notification in these cases. Nothing changes. Try again later.
 
-- The VM started or stopped outside ColimaBar, for example from a terminal, and the dashboard did not show it yet.
+- You change the VM resources, Rosetta or Kubernetes, and the VM started or stopped outside ColimaBar, for example from a terminal. The dashboard did not show it yet.
 - A `colima start` or `colima restart` of the profile runs, for example in a terminal. Wait until it ends. This also applies to a running VM.
 
 ## The dashboard
@@ -206,7 +206,7 @@ Each Colima profile is a separate VM with its own containers, images and setting
 - **New Profile…**: create a profile. See [Create a profile](#create-a-profile).
 - **Delete Profile**: delete a profile with all its data. See [Delete a profile](#delete-a-profile).
 
-While an action runs for a different profile, the menu shows it next to the profile name, for example "work · starting…".
+While an action runs for a profile, the menu shows it next to the profile name, for example "work · starting…".
 
 The dashboard and its actions apply to the selected profile. The ColimaBar socket follows the selected profile. Each docker profile also has its own socket and docker context, for example `colimabar-work`. See [Profile sockets](auto-start.md#profile-sockets). Auto-stop checks each running profile. See [Auto-stop](auto-stop.md).
 
@@ -219,7 +219,7 @@ If the selected profile no longer exists, ColimaBar switches to `default`.
 3. Select the CPU, memory, disk and runtime. The form starts with the values of the selected profile. The runtime is docker by default. Only a docker profile gets auto-start, auto-stop, a profile socket and a docker context.
 4. Click **Create**.
 
-ColimaBar runs `colima start --profile NAME --cpu CPU --memory MEMORY --disk DISK --runtime RUNTIME`. The first start of a new profile can take some minutes. The dashboard keeps showing the selected profile.
+The form offers whole GB, so a profile with 2.5 GB starts the form at 2 GB. ColimaBar runs `colima start --profile NAME --cpu CPU --memory MEMORY --disk DISK --runtime RUNTIME`. The first start of a new profile can take some minutes. The dashboard keeps showing the selected profile.
 
 ### Delete a profile
 
@@ -228,7 +228,7 @@ ColimaBar runs `colima start --profile NAME --cpu CPU --memory MEMORY --disk DIS
 
 1. If the profile is the selected profile and its VM runs, stop it first. The menu shows "(stop it first)" for it.
    While an action runs for a profile, **Delete Profile** does not show it. If an action starts while the confirmation is open, ColimaBar refuses the delete. Wait until the action ends, then try again.
-2. In the profile menu, choose **Delete Profile**, then the profile.
+2. In the profile menu, choose **Delete Profile**, then the profile. If an action runs for each profile, the menu leaves out **Delete Profile**.
 3. Read the warning. Type the profile name. Then click **Delete Profile**.
 4. Colima asks one more time. Click **OK**.
 
