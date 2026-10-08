@@ -96,7 +96,7 @@ struct VMSettingsSection: View {
                 GridRow {
                     Text("Memory").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: $form.mem) {
-                        ForEach(Self.options(Self.memOpts, shown.memGB, form.mem), id: \.self) {
+                        ForEach(Self.options(Self.memOpts, max(1, shown.memGB), form.mem), id: \.self) {
                             Text("\(ByteFormat.gibText($0)) GB").tag($0)
                         }
                     }
@@ -185,6 +185,7 @@ struct VMSettingsSection: View {
     private func syncPickers() {
         let s = shown
         form.cpu = s.cpus
-        form.mem = s.memGB
+        // The script refuses memory below 1 GB, so start the pick at 1.
+        form.mem = max(1, s.memGB)
     }
 }

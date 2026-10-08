@@ -430,7 +430,9 @@ case "$1" in
   resources)
     cpu="$2"; mem="$3"
     # The whole part of a decimal is 1 or more only for a value of 1 or more.
-    if ! is_num "$cpu" || ! is_decimal "$mem" || [ "$cpu" -lt 1 ] || [ "${mem%%.*}" -lt 1 ]; then
+    # The length limits keep [ -lt ] away from numbers too big for it.
+    if ! is_num "$cpu" || ! is_decimal "$mem" || [ ${#cpu} -gt 4 ] || [ ${#mem} -gt 12 ] \
+      || [ "$cpu" -lt 1 ] || [ "${mem%%.*}" -lt 1 ]; then
       notify "Invalid CPU/memory for $NAMED: $cpu / $mem. Use at least 1 CPU and 1 GB of memory."
       exit 1
     fi

@@ -4,11 +4,11 @@ enum ByteFormat {
     /// Bytes in one GiB. Colima and the UI say "GB" for this unit.
     static let bytesPerGiB: Int64 = 1 << 30
 
-    /// A size in bytes as a decimal number of GiB, rounded to 3 decimals.
-    /// Colima stores a decimal memory such as 0.3 GiB with a small error in
-    /// bytes, and the rounding removes it.
+    /// A size in bytes as a decimal number of GiB, rounded to 2 decimals.
+    /// Colima gives Lima the memory in whole MiB, so 2.7 GiB comes back as
+    /// 2.699. The rounding removes that error.
     static func gib(bytes: Int64) -> Double {
-        (Double(bytes) / Double(bytesPerGiB) * 1000).rounded() / 1000
+        (Double(bytes) / Double(bytesPerGiB) * 100).rounded() / 100
     }
 
     /// A decimal number of GiB as Colima writes it: "2.5", or "8" with no

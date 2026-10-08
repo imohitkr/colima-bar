@@ -24,6 +24,8 @@ import Testing
         #expect(ByteFormat.gib(bytes: 5 << 29) == 2.5)
         // 0.3 GiB as whole MiB (307 MiB) reads as 0.3.
         #expect(ByteFormat.gib(bytes: 307 << 20) == 0.3)
+        // Colima gives Lima 2.7 GiB as 2764 MiB.
+        #expect(ByteFormat.gib(bytes: 2764 << 20) == 2.7)
         #expect(ByteFormat.gib(bytes: 0) == 0)
     }
 }

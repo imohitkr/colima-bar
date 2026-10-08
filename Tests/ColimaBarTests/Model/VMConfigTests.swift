@@ -109,6 +109,14 @@ import Testing
         #expect(s == VMConfig.Shown(cpus: 8, memGB: 16, diskGB: 200, rosetta: true))
     }
 
+    @Test func aRunningVMShowsTheExactMemoryOfColimaYAMLWithinOneMiB() {
+        // Colima runs `memory: 2.7` as 2764 MiB, which reads as 2.699 GiB.
+        let vm = VMInfo(cpus: 2, memGB: 2764.0 / 1024, diskGB: 60)
+        #expect(VMConfig.shown(running: true, vm: vm, config: VMConfig(memGB: 2.7)).memGB == 2.7)
+        // A value that differs more is a real change: show the live value.
+        #expect(VMConfig.shown(running: true, vm: vm, config: VMConfig(memGB: 4)).memGB == 2764.0 / 1024)
+    }
+
     @Test func bothStatesShowADecimalMemory() {
         let vm = VMInfo(cpus: 2, memGB: 2.5, diskGB: 60)
         #expect(VMConfig.shown(running: true, vm: vm, config: VMConfig(memGB: 8)).memGB == 2.5)
