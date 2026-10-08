@@ -48,7 +48,7 @@ import Testing
         #expect(woke.value == 1)
     }
 
-    @Test func idleClientIsClosedWhileVMIsDown() throws {
+    @Test func idleClientIsClosedWhileVMIsDown() async throws {
         unlink(upstream)
         let p = SocketProxy(upstream: upstream, path: stable, idleTimeout: 1)
         p.start()
@@ -60,12 +60,10 @@ import Testing
         // If the proxy never hangs up, read() fails after 20 s instead of returning 0.
         let fd = try #require(UnixSocket.connect(stable, timeout: 20))
         defer { close(fd) }
-        var buf = [UInt8](repeating: 0, count: 16)
-        let n = read(fd, &buf, buf.count)  // send nothing: the proxy must hang up
-        #expect(n == 0)
+        #expect(await readOnce(fd) == 0)  // send nothing: the proxy must hang up
     }
 
-    @Test func silentClientIsClosedWhileVMIsUp() throws {
+    @Test func silentClientIsClosedWhileVMIsUp() async throws {
         let up = try BusyUpstream(path: upstream)
         let px = SocketProxy(upstream: upstream, path: stable, idleTimeout: 1)
         px.start()
@@ -78,8 +76,7 @@ import Testing
         // If the proxy never hangs up, read() fails after 20 s instead of returning 0.
         let fd = try #require(UnixSocket.connect(stable, timeout: 20))
         defer { close(fd) }
-        var buf = [UInt8](repeating: 0, count: 16)
-        #expect(read(fd, &buf, buf.count) == 0)  // send nothing: the proxy must hang up
+        #expect(await readOnce(fd) == 0)  // send nothing: the proxy must hang up
     }
 
     @Test func splicedStreamOutlivesIdleTimeout() async throws {
@@ -137,7 +134,7 @@ import Testing
         #expect(woke.value == 0)
     }
 
-    @Test func headEndSplitAcrossReadsIsFound() throws {
+    @Test func headEndSplitAcrossReadsIsFound() async throws {
         // "\r\n\r\n" arrives in two reads: the search must cover the seam.
         unlink(upstream)
         let px = SocketProxy(upstream: upstream, path: stable)
@@ -151,10 +148,21 @@ import Testing
         let fd = try #require(UnixSocket.connect(stable, timeout: 20))
         defer { close(fd) }
         _ = UnixSocket.writeAll(fd, Data("GET /_ping HTTP/1.1\r\nHost: d\r".utf8))
-        Thread.sleep(forTimeInterval: 0.2)
+        try await Task.sleep(for: .milliseconds(200))
         _ = UnixSocket.writeAll(fd, Data("\n\r\n".utf8))
-        var buf = [UInt8](repeating: 0, count: 1024)
-        let n = read(fd, &buf, buf.count)
-        #expect(n > 0 && String(decoding: buf[0..<max(n, 0)], as: UTF8.self).hasPrefix("HTTP/1.1 200 OK"))
+        let reply = await onOwnThread { () -> String in
+            var buf = [UInt8](repeating: 0, count: 1024)
+            let n = read(fd, &buf, buf.count)
+            return String(decoding: buf[0..<max(n, 0)], as: UTF8.self)
+        }
+        #expect(reply.hasPrefix("HTTP/1.1 200 OK"))
+    }
+
+    /// One read() of `fd` on its own thread (see onOwnThread). Returns its result.
+    private func readOnce(_ fd: Int32) async -> Int {
+        await onOwnThread {
+            var buf = [UInt8](repeating: 0, count: 16)
+            return read(fd, &buf, buf.count)
+        }
     }
 }

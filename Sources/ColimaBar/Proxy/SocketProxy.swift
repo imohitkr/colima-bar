@@ -417,6 +417,10 @@ final class SocketProxy: @unchecked Sendable {
         return Data((parts[0] == "HEAD" ? head : head + "OK").utf8)
     }
 
+    /// The number of requests that wait for the current wake. Tests use it
+    /// to know that the proxy holds a request, instead of a fixed sleep.
+    var wakeWaiters: Int { lock.withLock { waiters.count } }
+
     /// One wake per burst: the first caller starts Colima, the rest wait on it.
     private func waitForWake() -> Bool {
         let sem = DispatchSemaphore(value: 0)

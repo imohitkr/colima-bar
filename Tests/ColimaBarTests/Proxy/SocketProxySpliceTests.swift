@@ -145,9 +145,8 @@ import Testing
         async let first = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: d\r\n\r\n")
         #expect(await waitUntil { woke.value == 1 }, "the first request did not start a wake")
         async let second = roundTrip(stable, "GET /v1.54/info HTTP/1.1\r\nHost: d\r\n\r\n")
-        // Nothing signals that the proxy holds the second request, so give it
-        // time to reach the daemon if it were spliced too early.
-        try await Task.sleep(for: .milliseconds(500))
+        // Both requests wait for the wake: the second one reached the proxy.
+        #expect(await waitUntil { px.wakeWaiters == 2 }, "the second request did not wait for the wake")
         #expect(!daemon.seen.contains { $0.contains("/info") }, "request reached the daemon before wake finished")
         release.signal()
         #expect(await first.contains("hello"))

@@ -22,21 +22,21 @@ import Testing
         return path
     }
 
-    private func call(_ sb: ScriptSandbox, _ code: String) throws -> (status: Int32, out: String) {
+    private func call(_ sb: ScriptSandbox, _ code: String) async throws -> (status: Int32, out: String) {
         let h = try helpers(sb)
-        return try sb.bash([
+        return try await sb.bash([
             "-c", "set -uo pipefail; PROFILES_DIR=\"$HOME/.cache/colima-bar/profiles\"; . '\(h)'; \(code)",
         ])
     }
 
-    @Test func theHelperBlockOnlyDefinesFunctions() throws {
+    @Test func theHelperBlockOnlyDefinesFunctions() async throws {
         let sb = try ScriptSandbox()
-        let r = try call(sb, "true")
+        let r = try await call(sb, "true")
         #expect(r.status == 0 && r.out.isEmpty)
         #expect(sb.calls.isEmpty)  // sourcing ran no tool
     }
 
-    @Test func contextsAreTheColimabarProfileContextsOfColimaBar() throws {
+    @Test func contextsAreTheColimabarProfileContextsOfColimaBar() async throws {
         // The same rule as ProfileContexts.isOurs: the description starts with "ColimaBar".
         let sb = try ScriptSandbox()
         let rows = [
@@ -57,15 +57,15 @@ import Testing
             printf 'docker %s\\n' "$*" >> "\(sb.log)"
             printf '\(rows.joined(separator: "\\n"))\\n'
             """)
-        let r = try call(sb, "colimabar_contexts")
+        let r = try await call(sb, "colimabar_contexts")
         #expect(r.out.split(separator: "\n") == ["colimabar-work", "colimabar-a.b"])
         #expect(sb.calls == ["docker context ls --format {{.Name}}\\t{{.Description}}"])
         // No docker CLI: no contexts, no error.
         try FileManager.default.removeItem(atPath: sb.bin + "/docker")
-        #expect(try call(sb, "colimabar_contexts").out.isEmpty)
+        #expect(try await call(sb, "colimabar_contexts").out.isEmpty)
     }
 
-    @Test func profileSocketsAreFoundAndLinkedToTheirProfiles() throws {
+    @Test func profileSocketsAreFoundAndLinkedToTheirProfiles() async throws {
         let sb = try ScriptSandbox()
         let dir = sb.home + "/.cache/colima-bar/profiles"
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -73,41 +73,41 @@ import Testing
         symlink("/nonexistent", dir + "/b.sock")
         FileManager.default.createFile(atPath: dir + "/x.sock.tmp", contents: nil)
         FileManager.default.createFile(atPath: dir + "/notes.txt", contents: nil)
-        let names = try call(sb, "profile_socket_names").out.split(separator: "\n")
+        let names = try await call(sb, "profile_socket_names").out.split(separator: "\n")
         #expect(names == ["b", "work"])
 
         try FileManager.default.removeItem(atPath: sb.home + "/.cache/colima-bar")
         try FileManager.default.createDirectory(atPath: sb.home + "/.config/colima", withIntermediateDirectories: true)
-        #expect(try call(sb, "link_profile_sockets work b").status == 0)
+        #expect(try await call(sb, "link_profile_sockets work b").status == 0)
         let fm = FileManager.default
         #expect(
             try fm.destinationOfSymbolicLink(atPath: dir + "/work.sock") == sb.home + "/.config/colima/work/docker.sock"
         )
         #expect(try fm.destinationOfSymbolicLink(atPath: dir + "/b.sock") == sb.home + "/.config/colima/b/docker.sock")
-        #expect(try call(sb, "link_profile_sockets").status == 0)  // no profiles: nothing to do
+        #expect(try await call(sb, "link_profile_sockets").status == 0)  // no profiles: nothing to do
     }
 
-    @Test func colimaDirUsesTheRulesOfTheApp() throws {
+    @Test func colimaDirUsesTheRulesOfTheApp() async throws {
         // The same cases as PathsTests.colimaDirUsesTheFirstRuleThatApplies.
         let sb = try ScriptSandbox()
         let fm = FileManager.default
-        func dir(_ env: String = "") throws -> String {
-            try call(sb, "\(env) colima_dir").out.trimmingCharacters(in: .newlines)
+        func dir(_ env: String = "") async throws -> String {
+            try await call(sb, "\(env) colima_dir").out.trimmingCharacters(in: .newlines)
         }
         let xdg = "XDG_CONFIG_HOME='\(sb.home)/xdg'"
         // 5. Nothing exists: ~/.colima. 4. XDG_CONFIG_HOME is set: its colima folder.
-        #expect(try dir() == sb.home + "/.colima")
-        #expect(try dir(xdg) == sb.home + "/xdg/colima")
+        #expect(try await dir() == sb.home + "/.colima")
+        #expect(try await dir(xdg) == sb.home + "/xdg/colima")
         // 3. ~/.config/colima exists.
         try fm.createDirectory(atPath: sb.home + "/.config/colima", withIntermediateDirectories: true)
-        #expect(try dir(xdg) == sb.home + "/.config/colima")
+        #expect(try await dir(xdg) == sb.home + "/.config/colima")
         // 2. ~/.colima exists.
         try fm.createDirectory(atPath: sb.home + "/.colima", withIntermediateDirectories: true)
-        #expect(try dir(xdg) == sb.home + "/.colima")
+        #expect(try await dir(xdg) == sb.home + "/.colima")
         // 1. COLIMA_HOME exists. A missing one is ignored.
         try fm.createDirectory(atPath: sb.home + "/custom", withIntermediateDirectories: true)
-        #expect(try dir("COLIMA_HOME='\(sb.home)/custom'") == sb.home + "/custom")
-        #expect(try dir("COLIMA_HOME='\(sb.home)/missing'") == sb.home + "/.colima")
+        #expect(try await dir("COLIMA_HOME='\(sb.home)/custom'") == sb.home + "/custom")
+        #expect(try await dir("COLIMA_HOME='\(sb.home)/missing'") == sb.home + "/.colima")
     }
 
     @Test(arguments: [
@@ -120,7 +120,7 @@ import Testing
     ])
     func leavingAContextPrefersTheContextOfColimaForItsProfile(
         current: String, existing: [String], expected: String
-    ) throws {
+    ) async throws {
         let sb = try ScriptSandbox()
         // A stub docker that knows only the `existing` contexts and default.
         let known = (existing + ["default"]).joined(separator: " ")
@@ -131,7 +131,7 @@ import Testing
             for c in \(known); do [ "$3" = "$c" ] && exit 0; done
             exit 1
             """)
-        #expect(try call(sb, "leave_context \(current)").status == 0)
+        #expect(try await call(sb, "leave_context \(current)").status == 0)
         #expect(sb.calls.last == "docker context use \(expected)")
     }
 

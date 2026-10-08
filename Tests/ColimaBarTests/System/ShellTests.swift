@@ -54,10 +54,11 @@ import Testing
     }
 
     @Test func orphanHoldingThePipeDoesNotHang() async throws {
-        // The orphan keeps the pipe open for 30 s. run() must return while it
-        // still lives, so it did not wait for the orphan's EOF. The timeout is
-        // longer than the orphan, so a wait cannot end early and pass.
-        let r = await Shell.run(["sh", "-c", "sleep 30 & echo $!"], timeout: 120)
+        // The orphan keeps the pipe open for 300 s. run() must return while it
+        // still lives, so it did not wait for the orphan's EOF. A correct run()
+        // returns in about 0.5 s, so a slow runner cannot outlast the orphan.
+        // The timeout is longer than the orphan, so a wait cannot end early and pass.
+        let r = await Shell.run(["sh", "-c", "sleep 300 & echo $!"], timeout: 600)
         #expect(r.ok)
         let pid = try #require(pid_t(r.out.trimmingCharacters(in: .whitespacesAndNewlines)))
         defer { kill(pid, SIGKILL) }
