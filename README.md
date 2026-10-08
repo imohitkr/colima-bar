@@ -52,15 +52,21 @@
 
 You need a Mac with Apple silicon, macOS 14 or later, and [Colima](https://github.com/abiosoft/colima) (`brew install colima docker`).
 
-**The installer (recommended).** Run this command in Terminal:
+**Homebrew (recommended).** Run this command in Terminal:
+
+```sh
+brew install --cask imohitkr/tap/colima-bar
+```
+
+Apple does not notarize ColimaBar, so macOS blocks the first launch after you install or upgrade. To allow it, open **System Settings > Privacy & Security** and click **Open Anyway**.
+
+**The installer.** Run this command in Terminal. macOS does not block this download.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | bash
 ```
 
-**Homebrew.** Run `brew install --cask imohitkr/tap/colima-bar`. Allow the first launch as described for the disk image below.
-
-**The disk image.** Download [ColimaBar.dmg](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.dmg) and drag ColimaBar into Applications. Apple does not notarize ColimaBar, so macOS blocks the first launch. To allow it, open **System Settings > Privacy & Security** and click **Open Anyway**.
+**The disk image.** Download [ColimaBar.dmg](https://github.com/imohitkr/colima-bar/releases/latest/download/ColimaBar.dmg) and drag ColimaBar into Applications. Allow the first launch as described for Homebrew above.
 
 The [Install guide](docs/install.md) has the full steps, the download check and the build from source.
 
@@ -79,7 +85,7 @@ The [Usage guide](docs/usage.md) describes the icon, each tab and each menu item
 
 ## Update
 
-Run the installer again. If you use Homebrew, run `brew upgrade --cask colima-bar`. ColimaBar checks for a new version each day and shows an **Update** button in the dashboard when one is available.
+If you use Homebrew, run `brew upgrade --cask colima-bar`. If you use the installer, run it again. ColimaBar checks for a new version each day and shows an **Update** button in the dashboard when one is available.
 
 ## Uninstall
 
