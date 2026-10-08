@@ -76,6 +76,14 @@ enum CtlAction: String, CaseIterable, Sendable {
         }
     }
 
+    /// The script asks with a dialog only in one VM state. ColimaBar sends
+    /// the state that it expects in `COLIMABAR_EXPECT_RUNNING`. If the VM
+    /// is in the other state, the script changes nothing and exits with 1.
+    /// Thus no dialog opens behind the popover.
+    var checksExpectedState: Bool {
+        showsDialog(running: true) != showsDialog(running: false)
+    }
+
     /// The busy text the UI shows for a VM action until the script writes
     /// its own marker. A config edit of a stopped VM writes no marker, so
     /// "Saving" shows until the script ends.

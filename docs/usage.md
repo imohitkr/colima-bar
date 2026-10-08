@@ -21,11 +21,11 @@ Left-click the menu bar icon to open the dashboard. To keep it open in a resizab
 
 The tabs (Containers, Images, Volumes and System) and the live tiles show only while Colima runs. If Colima is stopped, the dashboard shows the stopped screen. It has a **Start Colima** button and the **Hide menu bar icon while Colima is stopped** checkbox. If Colima is not installed, the dashboard shows the command to install it.
 
-Below the Start button, the stopped screen shows the **VM resources** and **Features** of the selected profile, from its `colima.yaml`. You can change them while the VM is stopped. The VM stays stopped, and the new values apply at the next start:
+Below the **Start Colima** button and the checkbox, the stopped screen shows the **VM resources** and **Features** of the selected profile, from its `colima.yaml`. You can change them while the VM is stopped:
 
-- A preset, **Apply**, the Rosetta switch and the Kubernetes switch save to `colima.yaml` at once, with no dialog.
+- A preset, **Apply**, the Rosetta switch and the Kubernetes switch save to `colima.yaml` at once, with no dialog. The VM stays stopped, and the new values apply at the next start.
 - A bigger disk asks first. Colima grows the disk at the next start. A disk cannot shrink in place, so a grow is permanent.
-- **Shrink…** works as on the System tab. See [Shrink the disk](#shrink-the-disk).
+- **Shrink…** deletes all Docker data. It starts the VM once to create the new disk, then stops it again. See [Shrink the disk](#shrink-the-disk).
 
 If the profile has no `colima.yaml`, the stopped screen tells you to start the profile once. Colima creates the file at the first start.
 
@@ -62,7 +62,7 @@ These tabs show sizes and the items that containers use. You can pull the latest
 
 - **VM resources**: Light, Standard and Heavy presets, or your own CPU and memory values. **Apply** restarts the VM.
 - **Features**: Rosetta, Kubernetes (k3s) and the disk size. A change restarts the VM, and ColimaBar asks first. A disk grows in place and keeps your data. To make it smaller, use **Shrink…**. See [Shrink the disk](#shrink-the-disk).
-- Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is `qemu`, the Rosetta switch is disabled.
+- Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is not `vz`, the Rosetta switch is disabled, unless Rosetta is on. A missing `vmType` counts as `vz`.
 - To change these settings while the VM is stopped, use the [stopped screen](#open-the-dashboard).
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons.
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md).

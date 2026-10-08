@@ -73,7 +73,7 @@ enum Help {
         "Maximum RAM for the VM. All containers share it. If it is too low, containers get OOM-killed. If it is too high, macOS has less memory under load."
     static let apply = "Write the new CPU and memory values to colima.yaml and restart the VM. Running containers stop."
     static let presetsWhenStopped =
-        "Quick sizes. Light: a few small services. Standard: a typical dev stack with a database, some services and builds. Heavy: large builds, Kubernetes or many containers. A click saves the size to colima.yaml. The VM stays stopped."
+        "Quick sizes. Light: a few small services. Standard: a typical dev stack with a database, some services and builds. Heavy: large builds, Kubernetes or many containers. A click saves the size to colima.yaml. The VM stays stopped. It applies at the next start."
     static let applyWhenStopped =
         "Write the new CPU and memory values to colima.yaml. The VM stays stopped. The new values apply at the next start."
 
@@ -91,7 +91,7 @@ enum Help {
     static let k8sWhenStopped =
         "Run a single-node k3s Kubernetes cluster in the VM and add a kubectl context: 'colima', or 'colima-PROFILE' for other profiles. It uses about 0.5 to 1 GB of RAM. A change saves to colima.yaml at once. It applies at the next start."
     static let diskWhenStopped =
-        "The virtual disk of the VM. It holds images, containers, volumes and build cache. A bigger size goes to colima.yaml, and Colima grows the disk at the next start. Your data stays. ColimaBar asks first."
+        "The virtual disk of the VM. It holds images, containers, volumes and build cache. ColimaBar saves a bigger size to colima.yaml. Colima grows the disk at the next start. Your data stays. ColimaBar asks first."
     static let diskShrinkWhenStopped =
         "Make the disk smaller. A disk cannot shrink in place, so this deletes the VM and all its containers, images, volumes and build cache. Colima starts the VM once to create the new disk, then stops it again. You must type the profile name to confirm."
     static let rosettaNeedsVZ =

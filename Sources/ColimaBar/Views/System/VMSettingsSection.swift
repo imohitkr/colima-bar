@@ -107,7 +107,8 @@ struct VMSettingsSection: View {
             Toggle(isOn: Binding(get: { shown.rosetta }, set: { model.run(.rosetta, $0 ? "on" : "off") })) {
                 Label("Rosetta (amd64 emulation)", systemImage: "cpu")
             }
-            .disabled(!shown.rosettaSupported)
+            // A switch that is on stays usable, so you can turn Rosetta off.
+            .disabled(!shown.rosettaSupported && !shown.rosetta)
             .hint(shown.rosettaSupported ? (running ? Help.rosetta : Help.rosettaWhenStopped) : Help.rosettaNeedsVZ)
             if !shown.rosettaSupported {
                 Text("Rosetta needs the vz VM type.")
@@ -145,9 +146,10 @@ struct VMSettingsSection: View {
         }
         .toggleStyle(.switch).controlSize(.small)
         .onAppear { syncPickers() }
-        // Only when the shown values change: a VM fact such as the driver
-        // must not undo a value that you picked.
-        .onChange(of: shown) { syncPickers() }
+        // Only when the shown CPU or memory changes: a VM fact such as the
+        // driver, or a change of Rosetta, Kubernetes or the disk, must not
+        // undo a value that you picked.
+        .onChange(of: [shown.cpus, shown.memGB]) { syncPickers() }
     }
 
     /// The typed confirmation comes first. Only then does colima-ctl.sh run

@@ -461,8 +461,7 @@ final class ColimaModel {
             }
             set(\.vm, v)
         }
-        // A missing file gives nil, so no flags of an older file stay.
-        set(\.config, (try? String(contentsOfFile: Paths.config(profile), encoding: .utf8)).map(VMConfig.parse))
+        reloadConfig()
         if state != newState {
             log.notice("profile \(self.profile, privacy: .public): \(String(describing: newState), privacy: .public)")
         }
@@ -486,6 +485,12 @@ final class ColimaModel {
         } else {
             clearVMData()
         }
+    }
+
+    /// Reads the colima.yaml of the selected profile. A missing file gives
+    /// nil, so no flags of an older file stay. `set` assigns only a change.
+    private func reloadConfig() {
+        set(\.config, (try? String(contentsOfFile: Paths.config(profile), encoding: .utf8)).map(VMConfig.parse))
     }
 
     private func clearVMData() {
@@ -938,7 +943,9 @@ final class ColimaModel {
 
     /// Only what the open tab needs: `colima list` when the last one is over
     /// a minute old, df for the disk tabs, and routing for the System tab.
+    /// colima.yaml is a cheap read, so an edit outside the app shows at once.
     private func becameVisible() {
+        reloadConfig()
         Task {
             if Date().timeIntervalSince(lastColima) >= Self.statusMaxAgeOnOpen { await refreshStatus() }
             if state == .running {
@@ -1069,28 +1076,34 @@ final class ColimaModel {
     /// profile to act on; nil means the selected profile.
     func run(_ action: CtlAction, _ args: String..., profile target: String? = nil) {
         let p = target ?? profile
-        if action.showsDialog(running: isRunning(profile: p)) { dismissPopover() }
-        let label = markBusy(action, p)
-        Task { await execute(action, args, profile: p, label: label) }
+        let running = isRunning(profile: p)
+        if action.showsDialog(running: running) { dismissPopover() }
+        let label = markBusy(action, p, running: running)
+        Task { await execute(action, args, profile: p, label: label, expectRunning: running) }
     }
 
     /// Shows the busy label at once, not on the next tick, so a second click
     /// can't race the action. The selected profile shows it in the header,
     /// another profile in the profile menu.
-    private func markBusy(_ action: CtlAction, _ p: String) -> String? {
-        guard let label = action.busyLabel(running: isRunning(profile: p)) else { return nil }
+    private func markBusy(_ action: CtlAction, _ p: String, running: Bool? = nil) -> String? {
+        guard let label = action.busyLabel(running: running ?? isRunning(profile: p)) else { return nil }
         if p == profile { setBusyNow(label) } else { profileActions[p] = label }
         return label
     }
 
-    /// Returns true if the script exited with 0.
+    /// Returns true if the script exited with 0. `expectRunning` is the VM
+    /// state that `run` used to decide on the popover and the busy label.
     @discardableResult
-    private func execute(_ action: CtlAction, _ args: [String], profile p: String, label: String?) async -> Bool {
+    private func execute(
+        _ action: CtlAction, _ args: [String], profile p: String, label: String?, expectRunning: Bool? = nil
+    ) async -> Bool {
         actionsInFlight[p, default: 0] += 1
         defer { actionsInFlight[p, default: 1] -= 1 }
-        let r = await Shell.run(
-            [Paths.ctl, action.rawValue] + args, timeout: 900,
-            extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
+        var env = ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"]
+        if let expectRunning, action.checksExpectedState {
+            env["COLIMABAR_EXPECT_RUNNING"] = expectRunning ? "1" : "0"
+        }
+        let r = await Shell.run([Paths.ctl, action.rawValue] + args, timeout: 900, extraEnv: env)
         // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
         // lines when ColimaBar runs it, so they arrive as native alerts.
         var notified = false
@@ -1103,6 +1116,10 @@ final class ColimaModel {
             Notifier.shared.post(
                 "\(action.rawValue) failed for profile \(p) (exit \(r.status)). See \(Paths.ctlLog).")
         }
+        // A config edit of a stopped VM wrote colima.yaml. Read it before
+        // "Saving" ends: refreshAll reads it only after a good `colima list`.
+        // Else a switch snaps back, and Apply turns on with the old pick.
+        if action.editsConfigWhenStopped, expectRunning == false, p == profile { reloadConfig() }
         // The action is over (done, failed or cancelled): drop the
         // placeholder, but only if a newer action hasn't replaced it.
         if p == profile, localBusy == label { localBusy = nil }

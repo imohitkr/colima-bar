@@ -125,9 +125,9 @@ import Testing
     /// Runs disk-shrink 50 for a colima.yaml in `dir` (relative to HOME), with
     /// a stub `colima delete` that removes the profile folder.
     private func shrink(
-        _ sb: ScriptSandbox, configIn dir: String, env: [String: String] = [:]
+        _ sb: ScriptSandbox, configIn dir: String, text: String? = nil, env: [String: String] = [:]
     ) throws -> (status: Int32, out: String) {
-        try sb.write("\(dir)/work/colima.yaml", config)
+        try sb.write("\(dir)/work/colima.yaml", text ?? config)
         return try run(
             sb, ["disk-shrink", "50"], env: ["STUB_DELETE_DIR": "\(sb.home)/\(dir)/work"].merging(env) { $1 })
     }
@@ -254,11 +254,12 @@ import Testing
         #expect(!state.contains { $0.hasPrefix("folder-changed.") })
     }
 
-    @Test func aFolderChangeUnderARedirectStopsAndLogsTheReason() throws {
-        // resources checks `colima status >/dev/null 2>&1` in the main shell.
+    @Test(arguments: [["resources", "2", "4"], ["k8s", "on"], ["disk", "200"]])
+    func aFolderChangeBeforeTheFirstStatusCheckTellsTheUser(args: [String]) throws {
+        // The first `colima status` runs in the main shell, under a redirect.
         // The stub mkdir deletes ~/.colima when lock_vm takes the lock, before
-        // that check. Bash 3.2 can keep that redirect while the EXIT trap runs,
-        // so ctl.log holds the reason; ColimaBar points to it for exit 1.
+        // that check. Bash 3.2 can keep a redirect while the EXIT trap runs,
+        // so the status runs in a subshell, and the notice still reaches the app.
         let sb = try ScriptSandbox()
         try sb.stub(
             "mkdir",
@@ -268,8 +269,11 @@ import Testing
             """)
         try sb.write(".colima/work/colima.yaml", config)
         try sb.write(".config/colima/work/colima.yaml", config)
-        let result = try run(sb, ["resources", "2", "4"])
+        let result = try run(sb, args)
         #expect(result.status == 1)
+        let notices = result.out.split(separator: "\n").filter { $0.hasPrefix("COLIMABAR_NOTIFY:") }
+        #expect(
+            notices == ["COLIMABAR_NOTIFY:The Colima folder changed during the action of profile 'work'. Try again."])
         let log = (try? String(contentsOfFile: sb.home + "/.cache/colima-bar/ctl.log", encoding: .utf8)) ?? ""
         #expect(log.contains("the Colima folder changed during the action"))
         #expect(!FileManager.default.fileExists(atPath: sb.home + "/.colima"))
@@ -398,7 +402,7 @@ import Testing
     func aStoppedVMSavesSettingsWithNoDialogAndNoStart(args: [String], lines: [String]) throws {
         let sb = try ScriptSandbox()
         try sb.write(yamlPath, config)
-        let r = try run(sb, args)
+        let r = try run(sb, args, env: ["COLIMABAR_EXPECT_RUNNING": "0"])
         #expect(r.status == 0)
         #expect(!r.out.contains("COLIMABAR_NOTIFY:"))
         let file = yaml(sb).split(separator: "\n").map(String.init)
@@ -419,7 +423,8 @@ import Testing
     @Test func aRunningVMStillAsksThenRestarts() throws {
         let sb = try ScriptSandbox()
         try sb.write(yamlPath, config)
-        let r = try run(sb, ["resources", "4", "8"], env: ["STUB_COLIMA_STATUS": "0"])
+        let r = try run(
+            sb, ["resources", "4", "8"], env: ["STUB_COLIMA_STATUS": "0", "COLIMABAR_EXPECT_RUNNING": "1"])
         #expect(r.status == 0)
         #expect(dialogs(sb).contains("Restart the Colima VM of profile 'work' with 4 CPU / 8 GB RAM?"))
         #expect(vmCalls(sb) == ["colima stop --profile work", "colima start --profile work"])
@@ -476,6 +481,116 @@ import Testing
         #expect(vmCalls(sb).isEmpty)
     }
 
+    private let stateNotice =
+        "COLIMABAR_NOTIFY:The VM of profile 'work' started or stopped while the dialog was open. Nothing changed. Try again."
+
+    @Test(arguments: [
+        (["resources", "4", "8"], "0", "0"), (["rosetta", "on"], "0", "0"), (["k8s", "on"], "0", "0"),
+        (["resources", "4", "8"], "1", "1"), (["rosetta", "on"], "1", "1"), (["k8s", "on"], "1", "1"),
+    ])
+    func aStateThatDiffersFromTheExpectedStateChangesNothing(args: [String], expect: String, status: String) throws {
+        // The app expects the other state: the VM started or stopped outside
+        // the app. A dialog would open behind the popover.
+        let sb = try ScriptSandbox()
+        try sb.write(yamlPath, config)
+        let r = try run(sb, args, env: ["COLIMABAR_EXPECT_RUNNING": expect, "STUB_COLIMA_STATUS": status])
+        #expect(r.status == 1)
+        #expect(r.out.split(separator: "\n").map(String.init) == [stateNotice])
+        #expect(dialogs(sb).isEmpty)
+        #expect(yaml(sb) == config)
+        #expect(vmCalls(sb).isEmpty)
+    }
+
+    /// A stub `pgrep` that finds one process of this user, and a stub `ps`
+    /// that prints `command` as its command line.
+    private func stubStartProcess(_ sb: ScriptSandbox, command: String) throws {
+        try sb.stub(
+            "pgrep",
+            """
+            [ "$1" = -U ] && [ "$2" = "$(id -u)" ] && [ "$3" = -f ] && { echo 4242; exit 0; }
+            exit 1
+            """)
+        try sb.stub("ps", "[ \"$*\" = '-o command= -p 4242' ] && echo '\(command)'")
+    }
+
+    @Test(arguments: [
+        ("/opt/homebrew/bin/colima start --profile work", true),
+        ("colima restart -p work", true),
+        ("colima start work", true),
+        ("colima start --profile=work --cpu 4", true),
+        ("colima start -f --profile work", false),
+        ("colima start --profile other", false),
+        ("colima start", false),
+    ])
+    func aColimaStartInProgressCountsAsRunning(command: String, counts: Bool) throws {
+        // `colima status` still fails while the VM starts.
+        let sb = try ScriptSandbox()
+        try stubStartProcess(sb, command: command)
+        try sb.write(yamlPath, config)
+        let r = try run(sb, ["rosetta", "on"], env: ["COLIMABAR_EXPECT_RUNNING": "0"])
+        if counts {
+            #expect(r.status == 1)
+            #expect(r.out.contains(stateNotice))
+            #expect(yaml(sb) == config)
+        } else {
+            #expect(r.status == 0)
+            #expect(yaml(sb).contains("rosetta: true\n"))
+        }
+        #expect(dialogs(sb).isEmpty)
+    }
+
+    @Test func aStateChangeDuringTheShrinkDialogDeletesNothing() throws {
+        // The VM is stopped, and it starts while the dialog is open.
+        let sb = try ScriptSandbox()
+        let started = sb.root + "/started"
+        try sb.stub(
+            "osascript",
+            """
+            printf 'osascript %s\\n' "$*" >> "\(sb.log)"
+            touch "\(started)"
+            exit 0
+            """)
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && { [ -e "\(started)" ] && exit 0; exit 1; }
+            [ "$1" = delete ] && rm -rf "$STUB_DELETE_DIR"
+            exit 0
+            """)
+        let r = try shrink(sb, configIn: ".config/colima")
+        #expect(r.status == 1)
+        #expect(r.out.contains(stateNotice))
+        #expect(dialogs(sb).contains("Delete all Docker data of profile 'work'"))
+        #expect(vmCalls(sb).isEmpty)  // no stop, no delete, no start
+        #expect(yaml(sb) == config)
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.cache/colima-bar/colima.work.yaml.shrink"))
+    }
+
+    @Test(arguments: ["disk: 100 # GiB", "disk: \"100\"", "disk: '100' # GiB", "disk: 100.0", "disk:100"])
+    func diskShrinkReadsTheSameDiskFormsAsTheApp(line: String) throws {
+        let text = config.replacingOccurrences(of: "disk: 100", with: line)
+        #expect(VMConfig.parse(text).diskGB == 100)
+        let sb = try ScriptSandbox()
+        let r = try shrink(sb, configIn: ".config/colima", text: text)
+        #expect(r.status == 0, "\(r.out)")
+        #expect(dialogs(sb).contains("shrink its disk from 100 GB to 50 GB?"))
+        #expect(yaml(sb) == config.replacingOccurrences(of: "disk: 100", with: "disk: 50"))
+    }
+
+    @Test func diskShrinkReadsACRLFFile() throws {
+        let text = config.replacingOccurrences(of: "\n", with: "\r\n")
+        #expect(VMConfig.parse(text).diskGB == 100)
+        #expect(VMConfig.parse(text).kubernetes == false)
+        let sb = try ScriptSandbox()
+        let r = try shrink(sb, configIn: ".config/colima", text: text.replacingOccurrences(of: "false", with: "true"))
+        #expect(r.status == 0, "\(r.out)")
+        let said = dialogs(sb)
+        #expect(said.contains("shrink its disk from 100 GB to 50 GB?"))
+        #expect(said.contains("The Kubernetes cluster and its data are also deleted."))
+        #expect(yaml(sb).contains("disk: 50\n"))
+    }
+
     @Test func kubernetesOnWithLittleMemoryNotesTheMemoryUse() throws {
         let sb = try ScriptSandbox()
         try sb.write(yamlPath, config)  // memory: 2
@@ -488,6 +603,23 @@ import Testing
         #expect(try run(big, ["k8s", "on"], env: ["STUB_COLIMA_STATUS": "0"]).status == 0)
         #expect(dialogs(big).contains("Turn Kubernetes (k3s) on"))
         #expect(!dialogs(big).contains("GB of memory"))
+    }
+
+    @Test(arguments: ["2.5", "0.5", "\"3\" # GiB"])
+    func theMemoryNoteShowsTheValueOfColimaYAML(memory: String) throws {
+        let sb = try ScriptSandbox()
+        try sb.write(yamlPath, config.replacingOccurrences(of: "memory: 2", with: "memory: \(memory)"))
+        #expect(try run(sb, ["k8s", "on"], env: ["STUB_COLIMA_STATUS": "0"]).status == 0)
+        let shown = memory.hasPrefix("\"") ? "3" : memory
+        #expect(dialogs(sb).contains("The VM has \(shown) GB of memory."))
+    }
+
+    @Test func kubernetesOffShowsNoMemoryNote() throws {
+        let sb = try ScriptSandbox()
+        try sb.write(yamlPath, config)  // memory: 2
+        #expect(try run(sb, ["k8s", "off"], env: ["STUB_COLIMA_STATUS": "0"]).status == 0)
+        #expect(dialogs(sb).contains("Turn Kubernetes (k3s) off"))
+        #expect(!dialogs(sb).contains("GB of memory"))
     }
 
     @Test func aStoppedShrinkStartsOnceThenStopsAgain() throws {
@@ -537,5 +669,7 @@ import Testing
             notices.first?.hasPrefix("COLIMABAR_NOTIFY:The disk of profile 'work' is now 50 GB, but the stop failed")
                 == true)
         #expect(yaml(sb).contains("disk: 50\n"))
+        // The new colima.yaml is in place, so the copy is not needed.
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/.cache/colima-bar/colima.work.yaml.shrink"))
     }
 }

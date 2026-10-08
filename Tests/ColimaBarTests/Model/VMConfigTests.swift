@@ -62,10 +62,21 @@ import Testing
         #expect(!VMConfig.parse(after).kubernetes)
     }
 
-    @Test func roundsFractionalMemoryToTheNearestGB() {
-        #expect(VMConfig.parse("memory: 2.5\n").memGB == 3)
-        #expect(VMConfig.parse("memory: 3.4\n").memGB == 3)
+    @Test func cutsOffAFractionOfMemory() {
+        // Colima and colima-ctl.sh also cut it off.
+        #expect(VMConfig.parse("memory: 2.5\n").memGB == 2)
+        #expect(VMConfig.parse("memory: 3.9\n").memGB == 3)
+        #expect(VMConfig.parse("memory: 0.5\n").memGB == 0)
         #expect(VMConfig.parse("memory: -1\n").memGB == nil)
+        #expect(VMConfig.parse("memory: 1e300\n").memGB == nil)
+    }
+
+    @Test func readsACRLFFile() {
+        let c = VMConfig.parse("cpu: 4\r\ndisk: \"100\" # GiB\r\nkubernetes:\r\n  enabled: true\r\nvmType: qemu\r\n")
+        #expect(c.cpus == 4)
+        #expect(c.diskGB == 100)
+        #expect(c.kubernetes)
+        #expect(c.vmType == "qemu")
     }
 
     @Test func rosettaNeedsTheVZVMType() {

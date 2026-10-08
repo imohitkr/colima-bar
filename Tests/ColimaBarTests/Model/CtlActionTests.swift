@@ -81,6 +81,11 @@ import Testing
         #expect(!CtlAction.start.showsDialog(running: false))
     }
 
+    @Test func onlyActionsWithAStateDependentDialogSendTheExpectedState() {
+        let checks = Set(CtlAction.allCases.filter(\.checksExpectedState))
+        #expect(checks == [.resources, .rosetta, .k8s])
+    }
+
     @Test func diskActionsAreUrgent() {
         let disk: Set<CtlAction> = [
             .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,

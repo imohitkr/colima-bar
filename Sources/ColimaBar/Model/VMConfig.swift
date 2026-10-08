@@ -25,8 +25,12 @@ struct VMConfig: Equatable, Sendable {
     }
 
     /// Reads the settings from the text of colima.yaml. A missing or bad
-    /// key gives nil or the default.
-    static func parse(_ yaml: String) -> VMConfig {
+    /// key gives nil or the default. colima-ctl.sh reads the same forms
+    /// (`yaml_value`): CRLF line ends, inline comments and quotes.
+    static func parse(_ text: String) -> VMConfig {
+        // Swift reads "\r\n" as one character, so a CRLF file has no "\n"
+        // to split at.
+        let yaml = text.replacingOccurrences(of: "\r", with: "")
         func value(_ key: String, section: String? = nil) -> String? {
             guard var v = Parse.yaml(yaml, key: key, section: section) else { return nil }
             // An inline comment: "cpu: 4 # four cores".
@@ -37,9 +41,10 @@ struct VMConfig: Equatable, Sendable {
             }
             return v
         }
+        // A fraction is cut off, as Colima and colima-ctl.sh do: 2.5 GB is 2.
         func whole(_ key: String) -> Int? {
-            guard let v = value(key), let d = Double(v), d.isFinite, d >= 0 else { return nil }
-            return Int(d.rounded())
+            guard let v = value(key), let d = Double(v), d.isFinite, d >= 0, d < Double(Int.max) else { return nil }
+            return Int(d)
         }
         return VMConfig(
             cpus: whole("cpu"),

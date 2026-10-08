@@ -158,6 +158,8 @@ ColimaBar runs `colima list -j` only in these cases:
 - The dashboard opens and the last list is more than 1 minute old.
 - The last list is more than 5 minutes old (1 minute when the state is not running or stopped).
 
+The model reads the `colima.yaml` of the selected profile after each `colima list`, each time the dashboard opens, and after a config edit of a stopped VM.
+
 ### Actions and `colima-ctl.sh`
 
 ColimaBar sends the profile in `COLIMABAR_PROFILE`: the selected profile, or the profile of a profile menu action. The script takes a lock for each profile and writes a busy marker while a VM action runs. Its stderr goes to `~/.cache/colima-bar/ctl.log`. Each VM dialog of the script names the profile, for example "Grow the Colima disk of profile 'work' to 150 GB?".
@@ -178,9 +180,13 @@ Lima's folder (`Paths.limaDir`) is `LIMA_HOME` if it is set, else `_lima` in the
 
 The name checks of the script list each allowed character, not a range such as `[a-z]`. Thus they match only ASCII in every locale.
 
-`resources`, `rosetta`, `k8s` and `disk` restart a running VM after a dialog. For a stopped VM, they only change `colima.yaml`, and the values apply at the next start (`CtlAction.editsConfigWhenStopped`). They write no busy marker then, so the app shows "Saving" until the script ends. `resources`, `rosetta` and `k8s` show no dialog for a stopped VM. `disk` still asks, because the grow becomes permanent at the next start. If the VM starts or stops while that dialog is open, the script changes nothing and exits with 1. `k8s on` for a stopped VM does not switch the kubectl context: the context does not exist yet, and `colima start` switches to it.
+`resources`, `rosetta`, `k8s` and `disk` restart a running VM after a dialog. For a stopped VM, they only change `colima.yaml`, and the values apply at the next start (`CtlAction.editsConfigWhenStopped`). They write no busy marker then, so the app shows "Saving" until the script ends. `resources`, `rosetta` and `k8s` show no dialog for a stopped VM. `disk` still asks, because the grow becomes permanent at the next start. If the VM starts or stops while that dialog is open, the script changes nothing and exits with 1. `k8s on` for a stopped VM does not switch the kubectl context. `colima start` switches to it.
 
-A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. Colima creates the new disk only at a start. Thus for a stopped VM, the script runs `colima stop` at the end. The busy marker covers the full run. That start switches the docker context, and a refresh can miss the short run, so the model runs `Routing.apply()` after each shrink. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
+`run()` sends the VM state that it used for `showsDialog(running:)` in `COLIMABAR_EXPECT_RUNNING` (1 or 0), for each action whose dialog depends on the state (`CtlAction.checksExpectedState`: `resources`, `rosetta` and `k8s`). If the VM is in the other state, for example because it started outside the app, the script changes nothing and exits with 1 (`state_changed`). Thus no dialog opens behind the popover. After a config edit of a stopped VM, `execute` reads `colima.yaml` again before "Saving" ends.
+
+For these checks, a VM counts as running while `colima status` succeeds, or while a `colima start` or `colima restart` for the profile runs (`start_in_progress`, the same rule as `ColimaModel.isStartInProgress`). `colima start -f` does not count: it is a foreground supervisor. The script reads values of `colima.yaml` in the same forms as `VMConfig.parse`: with CRLF line ends, inline comments and quotes. A fraction is cut off, so `memory: 2.5` is 2 GB in both. The script runs `colima status` in a subshell. If the Colima folder changed, the main shell exits after the subshell, without the redirect, so the notice of `cleanup` reaches the app.
+
+A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. Colima creates the new disk only at a start. Thus for a stopped VM, the script runs `colima stop` at the end. The busy marker covers the full run. That start switches the docker context. The VM runs only for a short time, so a refresh can miss it. Thus after each shrink that was not cancelled, the model runs `Routing.apply()`. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
 
 The exit codes are fixed. 0 means done. 1 means failed, and the script already notified the user. 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 
@@ -254,4 +260,4 @@ Do not break these rules.
 
 Tests use Swift Testing. Logic lives in small static functions, so tests can call it without a VM. `Tests/ColimaBarTests/TestSupport/` has shared fakes, for example `FakeDaemon`. Automated runs never start or stop the user's Colima VM.
 
-`Tests/ColimaBarTests/Scripts/` tests the scripts in `scripts/`. `ScriptSandbox` runs a copy of a script in a temporary HOME, with stub `osascript`, `colima`, `docker` and `kubectl` first on its PATH. Thus no dialog reaches the screen, and no VM or docker context changes. The uninstall tests source only the helper functions of `uninstall.sh`.
+`Tests/ColimaBarTests/Scripts/` tests the scripts in `scripts/`. `ScriptSandbox` runs a copy of a script in a temporary HOME, with stub `osascript`, `colima`, `docker`, `kubectl` and `pgrep` first on its PATH. Thus no dialog reaches the screen, and no VM or docker context changes. The uninstall tests source only the helper functions of `uninstall.sh`.
