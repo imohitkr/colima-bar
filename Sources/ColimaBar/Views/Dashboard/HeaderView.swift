@@ -57,7 +57,7 @@ struct HeaderView: View {
     private var subtitle: String {
         guard model.state == .running else { return "profile: \(model.profile)" }
         let v = model.vm
-        var parts = ["\(v.cpus) CPU", "\(v.memGB) GB", "\(v.diskGB) GB disk", v.arch]
+        var parts = ["\(v.cpus) CPU", "\(ByteFormat.gibText(v.memGB)) GB", "\(v.diskGB) GB disk", v.arch]
         if !v.mountType.isEmpty { parts.append(v.mountType) }
         if model.isRosettaEnabled { parts.append("rosetta") }
         if model.isKubernetesEnabled { parts.append("k3s") }

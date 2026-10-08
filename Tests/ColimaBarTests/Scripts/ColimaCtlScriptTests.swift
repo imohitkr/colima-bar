@@ -365,7 +365,7 @@ import Testing
     }
 
     @Test func restartStopsAndStartsARunningVM() throws {
-        // bash 3.2 must not end the action after `colima status` (see with_busy).
+        // bash 3.2 must not end the action after its first colima call (see with_busy).
         let sb = try ScriptSandbox()
         #expect(try run(sb, ["restart"], env: ["STUB_COLIMA_STATUS": "0"]).status == 0)
         #expect(
@@ -431,6 +431,36 @@ import Testing
         #expect(yaml(sb).contains("cpu: 4\n"))
     }
 
+    @Test(arguments: ["2.5", "1", "1.25", "16"])
+    func resourcesSavesAWholeOrDecimalMemory(memory: String) throws {
+        // Colima reads the memory as GiB: `memory: 2.5` runs with 2.5 GiB.
+        let sb = try ScriptSandbox()
+        try sb.write(yamlPath, config)
+        let r = try run(sb, ["resources", "4", memory], env: ["COLIMABAR_EXPECT_RUNNING": "0"])
+        #expect(r.status == 0, "\(r.out)")
+        let file = yaml(sb).split(separator: "\n").map(String.init)
+        #expect(file.contains("cpu: 4"))
+        #expect(file.contains("memory: \(memory)"))
+        #expect(VMConfig.parse(yaml(sb)).memGB == Double(memory))
+    }
+
+    @Test(arguments: [
+        ("4", "0"), ("4", "0.5"), ("4", "00.9"), ("4", ".5"), ("4", "2."), ("4", "1.2.3"), ("4", "-2"), ("4", "2,5"),
+        ("4", ""), ("0", "4"), ("2.5", "4"), ("x", "4"),
+    ])
+    func resourcesRefusesABadValue(cpu: String, memory: String) throws {
+        let sb = try ScriptSandbox()
+        try sb.write(yamlPath, config)
+        let r = try run(sb, ["resources", cpu, memory], env: ["COLIMABAR_EXPECT_RUNNING": "0"])
+        #expect(r.status == 1)
+        #expect(
+            r.out.contains(
+                "COLIMABAR_NOTIFY:Invalid CPU/memory for profile 'work': \(cpu) / \(memory). Use at least 1 CPU and 1 GB of memory."
+            ))
+        #expect(yaml(sb) == config)
+        #expect(sb.calls.isEmpty)
+    }
+
     @Test func aStoppedDiskGrowAsksThenSavesTheSize() throws {
         let sb = try ScriptSandbox()
         try sb.write(yamlPath, config)
@@ -451,6 +481,10 @@ import Testing
         #expect(dialogs(sb).contains("Set the disk of profile 'work' to 200 GB?"))
         #expect(yaml(sb) == config)
     }
+
+    /// The VM started or stopped while a dialog was open.
+    private let dialogStateNotice =
+        "COLIMABAR_NOTIFY:The VM of profile 'work' started or stopped while the dialog was open. Nothing changed. Try again."
 
     @Test func aStateChangeDuringTheDiskDialogChangesNothing() throws {
         // The VM starts while the dialog is open.
@@ -473,16 +507,16 @@ import Testing
         try sb.write(yamlPath, config)
         let r = try run(sb, ["disk", "200"])
         #expect(r.status == 1)
-        #expect(
-            r.out.contains(
-                "COLIMABAR_NOTIFY:The VM of profile 'work' started or stopped while the dialog was open. Nothing changed. Try again."
-            ))
+        #expect(r.out.contains(dialogStateNotice))
         #expect(yaml(sb) == config)
         #expect(vmCalls(sb).isEmpty)
     }
 
+    /// The VM is not in the state that the app sent. No dialog was open.
     private let stateNotice =
-        "COLIMABAR_NOTIFY:The VM of profile 'work' started or stopped while the dialog was open. Nothing changed. Try again."
+        "COLIMABAR_NOTIFY:The VM of profile 'work' started or stopped. Nothing changed. Try again."
+
+    private let startNotice = "COLIMABAR_NOTIFY:A start of profile 'work' runs now. Try again when it ends."
 
     @Test(arguments: [
         (["resources", "4", "8"], "0", "0"), (["rosetta", "on"], "0", "0"), (["k8s", "on"], "0", "0"),
@@ -501,42 +535,101 @@ import Testing
         #expect(vmCalls(sb).isEmpty)
     }
 
-    /// A stub `pgrep` that finds one process of this user, and a stub `ps`
-    /// that prints `command` as its command line.
+    /// A stub `pgrep` that finds one process of this user when its `-f`
+    /// pattern matches `command`, and a stub `ps` that prints `command` as
+    /// the command line of that process.
     private func stubStartProcess(_ sb: ScriptSandbox, command: String) throws {
+        try sb.write("start-command", command)
         try sb.stub(
             "pgrep",
             """
-            [ "$1" = -U ] && [ "$2" = "$(id -u)" ] && [ "$3" = -f ] && { echo 4242; exit 0; }
+            [ "$1" = -U ] && [ "$2" = "$(id -u)" ] && [ "$3" = -f ] || exit 1
+            /usr/bin/grep -qE -- "$4" "\(sb.home)/start-command" && { echo 4242; exit 0; }
             exit 1
             """)
-        try sb.stub("ps", "[ \"$*\" = '-o command= -p 4242' ] && echo '\(command)'")
+        try sb.stub("ps", "[ \"$*\" = '-o command= -p 4242' ] && cat '\(sb.home)/start-command'")
     }
 
     @Test(arguments: [
         ("/opt/homebrew/bin/colima start --profile work", true),
         ("colima restart -p work", true),
+        ("colima restart -f work", true),
         ("colima start work", true),
         ("colima start --profile=work --cpu 4", true),
+        ("colima start -p=work", true),
+        ("colima start --cpu 4 work", true),
+        ("colima start -c 4 work", true),
+        ("colima start --memory 2.5 --mount-type virtiofs work", true),
+        ("colima start --kubernetes work", true),
+        ("colima start colima-work", true),
+        ("colima start --profile colima-work", true),
         ("colima start -f --profile work", false),
+        ("colima start --foreground work", false),
         ("colima start --profile other", false),
+        ("colima start --cpu 4 other", false),
+        ("colima start work --profile other", false),
         ("colima start", false),
+        ("colima start colima", false),
+        ("colima status work", false),
     ])
-    func aColimaStartInProgressCountsAsRunning(command: String, counts: Bool) throws {
+    func aColimaStartInProgressRefusesTheChange(command: String, counts: Bool) throws {
         // `colima status` still fails while the VM starts.
         let sb = try ScriptSandbox()
         try stubStartProcess(sb, command: command)
         try sb.write(yamlPath, config)
         let r = try run(sb, ["rosetta", "on"], env: ["COLIMABAR_EXPECT_RUNNING": "0"])
+        #expect(ColimaModel.isStartInProgress(command: command, profile: "work") == counts)
         if counts {
             #expect(r.status == 1)
-            #expect(r.out.contains(stateNotice))
+            #expect(r.out.split(separator: "\n").map(String.init) == [startNotice])
             #expect(yaml(sb) == config)
         } else {
             #expect(r.status == 0)
             #expect(yaml(sb).contains("rosetta: true\n"))
         }
         #expect(dialogs(sb).isEmpty)
+    }
+
+    @Test func colimaStartMeansTheDefaultProfile() throws {
+        let sb = try ScriptSandbox()
+        try stubStartProcess(sb, command: "colima start colima")
+        try sb.write(".config/colima/default/colima.yaml", config)
+        let r = try run(sb, ["rosetta", "on"], profile: "default", env: ["COLIMABAR_EXPECT_RUNNING": "0"])
+        #expect(r.status == 1)
+        #expect(r.out.contains("COLIMABAR_NOTIFY:A start of profile 'default' runs now."))
+    }
+
+    @Test(arguments: [
+        (["resources", "4", "8"], "1"), (["rosetta", "on"], "1"), (["k8s", "on"], "1"), (["disk", "200"], ""),
+        (["disk-shrink", "50"], ""),
+    ])
+    func aRunningVMWithAStartInProgressRefusesBeforeAnyDialog(args: [String], expect: String) throws {
+        // `colima status` succeeds, and a `colima restart` runs in a terminal.
+        // A restart or a shrink now would run a second start, or delete the VM.
+        let sb = try ScriptSandbox()
+        try stubStartProcess(sb, command: "colima restart --profile work")
+        try sb.write(yamlPath, config)
+        var env = ["STUB_COLIMA_STATUS": "0"]
+        if !expect.isEmpty { env["COLIMABAR_EXPECT_RUNNING"] = expect }
+        let r = try run(sb, args, env: env)
+        #expect(r.status == 1)
+        #expect(r.out.split(separator: "\n").map(String.init) == [startNotice])
+        #expect(dialogs(sb).isEmpty)
+        #expect(vmCalls(sb).isEmpty)
+        #expect(yaml(sb) == config)
+    }
+
+    @Test(arguments: [["disk", "200"], ["disk-shrink", "50"]])
+    func aStoppedVMWithAStartInProgressRefusesADiskChange(args: [String]) throws {
+        let sb = try ScriptSandbox()
+        try stubStartProcess(sb, command: "colima start work")
+        try sb.write(yamlPath, config)
+        let r = try run(sb, args)
+        #expect(r.status == 1)
+        #expect(r.out.split(separator: "\n").map(String.init) == [startNotice])
+        #expect(dialogs(sb).isEmpty)
+        #expect(vmCalls(sb).isEmpty)
+        #expect(yaml(sb) == config)
     }
 
     @Test func aStateChangeDuringTheShrinkDialogDeletesNothing() throws {
@@ -560,7 +653,7 @@ import Testing
             """)
         let r = try shrink(sb, configIn: ".config/colima")
         #expect(r.status == 1)
-        #expect(r.out.contains(stateNotice))
+        #expect(r.out.contains(dialogStateNotice))
         #expect(dialogs(sb).contains("Delete all Docker data of profile 'work'"))
         #expect(vmCalls(sb).isEmpty)  // no stop, no delete, no start
         #expect(yaml(sb) == config)

@@ -14,6 +14,14 @@ import Testing
         #expect(form.name.isEmpty)
     }
 
+    @Test func aDecimalMemoryStartsTheFormAtItsWholePart() {
+        var vm = VMInfo()
+        vm.memGB = 2.5
+        #expect(NewProfileForm.defaults(from: vm).memGB == 2)
+        vm.memGB = 0.5
+        #expect(NewProfileForm.defaults(from: vm).memGB == NewProfileForm.colimaDefaults.memGB)
+    }
+
     @Test func unknownValuesUseColimaDefaults() {
         let form = NewProfileForm.defaults(from: VMInfo())
         #expect(form.cpus == 2 && form.memGB == 2 && form.diskGB == 100)

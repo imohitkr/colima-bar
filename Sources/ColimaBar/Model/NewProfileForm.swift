@@ -20,7 +20,8 @@ struct NewProfileForm: Equatable {
     static func defaults(from vm: VMInfo) -> NewProfileForm {
         NewProfileForm(
             cpus: vm.cpus > 0 ? vm.cpus : colimaDefaults.cpus,
-            memGB: vm.memGB > 0 ? vm.memGB : colimaDefaults.memGB,
+            // The form offers whole GB. A VM with 2.5 GB starts the form at 2.
+            memGB: vm.memGB >= 1 ? Int(vm.memGB) : colimaDefaults.memGB,
             diskGB: vm.diskGB > 0 ? vm.diskGB : colimaDefaults.diskGB)
     }
 

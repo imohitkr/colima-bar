@@ -86,6 +86,20 @@ import Testing
         #expect(checks == [.resources, .rosetta, .k8s])
     }
 
+    @Test func theEnvironmentHasTheExpectedStateOnlyWhenTheActionChecksIt() {
+        let base = ["COLIMABAR_PROFILE": "work", "COLIMABAR_APP": "1"]
+        #expect(
+            CtlAction.resources.environment(profile: "work", expectRunning: true)
+                == base.merging(["COLIMABAR_EXPECT_RUNNING": "1"]) { $1 })
+        #expect(
+            CtlAction.rosetta.environment(profile: "work", expectRunning: false)
+                == base.merging(["COLIMABAR_EXPECT_RUNNING": "0"]) { $1 })
+        #expect(CtlAction.k8s.environment(profile: "work", expectRunning: nil) == base)
+        // A disk change asks in both states, so the state does not matter.
+        #expect(CtlAction.disk.environment(profile: "work", expectRunning: false) == base)
+        #expect(CtlAction.start.environment(profile: "work", expectRunning: true) == base)
+    }
+
     @Test func diskActionsAreUrgent() {
         let disk: Set<CtlAction> = [
             .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,

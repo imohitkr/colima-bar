@@ -5,7 +5,8 @@ import Foundation
 /// settings of a stopped VM come from here.
 struct VMConfig: Equatable, Sendable {
     var cpus: Int?
-    var memGB: Int?
+    /// GiB, a decimal number as in Colima: `memory: 2.5` is 2.5 GiB.
+    var memGB: Double?
     var diskGB: Int?
     var rosetta = false
     var kubernetes = false
@@ -17,11 +18,15 @@ struct VMConfig: Equatable, Sendable {
     /// The values that the VM settings show.
     struct Shown: Equatable {
         var cpus = 0
-        var memGB = 0
+        var memGB = 0.0
         var diskGB = 0
         var rosetta = false
         var kubernetes = false
         var rosettaSupported = true
+
+        /// Rosetta needs the vz VM type. A switch that is on stays usable,
+        /// so you can turn Rosetta off.
+        var rosettaToggleDisabled: Bool { !rosettaSupported && !rosetta }
     }
 
     /// Reads the settings from the text of colima.yaml. A missing or bad
@@ -41,14 +46,16 @@ struct VMConfig: Equatable, Sendable {
             }
             return v
         }
-        // A fraction is cut off, as Colima and colima-ctl.sh do: 2.5 GB is 2.
-        func whole(_ key: String) -> Int? {
+        func number(_ key: String) -> Double? {
             guard let v = value(key), let d = Double(v), d.isFinite, d >= 0, d < Double(Int.max) else { return nil }
-            return Int(d)
+            return d
         }
+        // Colima reads CPU and disk as whole numbers. A fraction is cut off,
+        // as colima-ctl.sh does: `disk: 100.0` is 100.
+        func whole(_ key: String) -> Int? { number(key).map { Int($0) } }
         return VMConfig(
             cpus: whole("cpu"),
-            memGB: whole("memory"),
+            memGB: number("memory"),
             diskGB: whole("disk"),
             rosetta: value("rosetta") == "true",
             kubernetes: value("enabled", section: "kubernetes") == "true",

@@ -5,7 +5,8 @@ import Observation
 @MainActor @Observable
 final class SystemForm {
     var cpu = 0
-    var mem = 0
+    /// GiB, the exact value: a CPU-only Apply sends the memory unchanged.
+    var mem = 0.0
     var loginEnabled = LoginItem.isEnabled
     var loginNeedsApproval = false  // filled in off the main thread (runs launchctl)
     var isLinking = false

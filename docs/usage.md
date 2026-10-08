@@ -24,10 +24,16 @@ The tabs (Containers, Images, Volumes and System) and the live tiles show only w
 Below the **Start Colima** button and the checkbox, the stopped screen shows the **VM resources** and **Features** of the selected profile, from its `colima.yaml`. You can change them while the VM is stopped:
 
 - A preset, **Apply**, the Rosetta switch and the Kubernetes switch save to `colima.yaml` at once, with no dialog. The VM stays stopped, and the new values apply at the next start.
+- Colima reads the memory as GiB, and it can be a decimal number such as `memory: 2.5`. If the memory is not one of the choices, the memory picker shows it as an extra choice, for example **2.5 GB**. A change of the CPU only keeps that memory.
 - A bigger disk asks first. Colima grows the disk at the next start. A disk cannot shrink in place, so a grow is permanent.
 - **Shrink…** deletes all Docker data. It starts the VM once to create the new disk, then stops it again. See [Shrink the disk](#shrink-the-disk).
 
 If the profile has no `colima.yaml`, the stopped screen tells you to start the profile once. Colima creates the file at the first start.
+
+ColimaBar refuses a change and sends a notification in these cases. Nothing changes. Try again later.
+
+- The VM started or stopped outside ColimaBar, for example from a terminal, and the dashboard did not show it yet.
+- A `colima start` or `colima restart` of the profile runs, for example in a terminal. Wait until it ends. This also applies to a running VM.
 
 ## The dashboard
 

@@ -430,7 +430,7 @@ final class ColimaModel {
             all.map {
                 ProfileRow(
                     name: $0.name ?? "default", isRunning: $0.status == "Running", cpus: $0.cpus ?? 0,
-                    memGB: Int(($0.memory ?? 0) / ByteFormat.bytesPerGiB), runtime: $0.runtime ?? "")
+                    memGB: ByteFormat.gib(bytes: $0.memory ?? 0), runtime: $0.runtime ?? "")
             })
         syncProfiles()
         // `colima start` of any profile switches the docker context to that
@@ -449,7 +449,7 @@ final class ColimaModel {
             v.arch = info.arch ?? ""
             v.runtime = info.runtime ?? ""
             v.cpus = info.cpus ?? 0
-            v.memGB = Int((info.memory ?? 0) / ByteFormat.bytesPerGiB)
+            v.memGB = ByteFormat.gib(bytes: info.memory ?? 0)
             v.diskGB = Int((info.disk ?? 0) / ByteFormat.bytesPerGiB)
             if newState == .running && (!wasRunning || v.driver.isEmpty) {
                 let s = await Shell.run(["colima", "status", "-j", "--profile", profile], timeout: 10)
@@ -995,7 +995,7 @@ final class ColimaModel {
         set(\.stats, latest)
         guard state == .running else { return }
         let cpu = latest.values.reduce(0) { $0 + $1.cpu } / Double(max(vm.cpus, 1))
-        let vmBytes = Double(max(vm.memGB, 1)) * Double(ByteFormat.bytesPerGiB)
+        let vmBytes = (vm.memGB > 0 ? vm.memGB : 1) * Double(ByteFormat.bytesPerGiB)
         let mem = latest.values.reduce(0) { $0 + $1.memBytes } / vmBytes * 100
         push(&cpuHistory, min(cpu, 100))
         push(&memHistory, min(mem, 100))
@@ -1099,10 +1099,7 @@ final class ColimaModel {
     ) async -> Bool {
         actionsInFlight[p, default: 0] += 1
         defer { actionsInFlight[p, default: 1] -= 1 }
-        var env = ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"]
-        if let expectRunning, action.checksExpectedState {
-            env["COLIMABAR_EXPECT_RUNNING"] = expectRunning ? "1" : "0"
-        }
+        let env = action.environment(profile: p, expectRunning: expectRunning)
         let r = await Shell.run([Paths.ctl, action.rawValue] + args, timeout: 900, extraEnv: env)
         // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
         // lines when ColimaBar runs it, so they arrive as native alerts.

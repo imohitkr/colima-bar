@@ -129,7 +129,8 @@ struct SystemTab: View {
                     HStack(spacing: 8) {
                         Circle().fill(p.isRunning ? Color.green : .secondary.opacity(0.5)).frame(width: 7, height: 7)
                         Text(p.name).font(.system(size: 12, weight: p.name == model.profile ? .semibold : .regular))
-                        Text("\(p.cpus) CPU · \(p.memGB) GB").font(.caption).foregroundStyle(.secondary)
+                        Text("\(p.cpus) CPU · \(ByteFormat.gibText(p.memGB)) GB").font(.caption).foregroundStyle(
+                            .secondary)
                         Spacer()
                         if p.name != model.profile {
                             Button("Show") { model.profile = p.name }.controlSize(.mini)

@@ -14,7 +14,7 @@ struct VMSettingsSection: View {
     private struct ResourcePreset {
         let name: String
         let cpus: Int
-        let memGB: Int
+        let memGB: Double
     }
 
     private let presets = [
@@ -23,16 +23,32 @@ struct VMSettingsSection: View {
         ResourcePreset(name: "Heavy", cpus: 8, memGB: 16),
     ]
     static let cpuOpts = [2, 4, 6, 8, 10, 12]
-    static let memOpts = [4, 8, 12, 16, 24, 32]
+    /// GiB. Colima reads memory as a decimal number, so a VM can have 2.5 GB.
+    static let memOpts: [Double] = [4, 8, 12, 16, 24, 32]
 
     /// The fixed choices, plus the VM's value and the picked value when they
-    /// are not among them (Colima's default VM has 2 GB). The VM's value stays
-    /// after you pick another one, so you can pick it again, and the picker
-    /// always has a selection.
-    static func options(_ fixed: [Int], _ extra: Int...) -> [Int] {
+    /// are not among them (Colima's default VM has 2 GB, and colima.yaml can
+    /// have 2.5). The VM's value stays after you pick another one, so you can
+    /// pick it again, and the picker always has a selection.
+    static func options<T: Comparable & AdditiveArithmetic>(_ fixed: [T], _ extra: T...) -> [T] {
         var out = fixed
-        for v in extra where v > 0 && !out.contains(v) { out.append(v) }
+        for v in extra where v > .zero && !out.contains(v) { out.append(v) }
         return out.count == fixed.count ? fixed : out.sorted()
+    }
+
+    /// What resets the CPU and memory picks to the shown values.
+    struct PickerKey: Equatable {
+        let profile: String
+        let cpus: Int
+        let memGB: Double
+    }
+
+    /// Only another profile, or another shown CPU or memory, resets the
+    /// picks. A VM fact such as the driver, or a change of Rosetta,
+    /// Kubernetes or the disk, must not undo a value that you picked. An
+    /// unsaved pick must not stay for another profile with equal values.
+    static func pickerKey(profile: String, shown: VMConfig.Shown) -> PickerKey {
+        PickerKey(profile: profile, cpus: shown.cpus, memGB: shown.memGB)
     }
 
     /// The values that the controls show: live for a running VM, else
@@ -48,11 +64,12 @@ struct VMSettingsSection: View {
                 ForEach(presets, id: \.name) { p in
                     let active = p.cpus == shown.cpus && p.memGB == shown.memGB
                     Button {
-                        model.run(.resources, "\(p.cpus)", "\(p.memGB)")
+                        model.run(.resources, "\(p.cpus)", ByteFormat.gibText(p.memGB))
                     } label: {
                         VStack(spacing: 1) {
                             Text(p.name).font(.system(size: 11, weight: .semibold))
-                            Text("\(p.cpus) CPU · \(p.memGB) GB").font(.system(size: 10)).foregroundStyle(.secondary)
+                            Text("\(p.cpus) CPU · \(ByteFormat.gibText(p.memGB)) GB").font(.system(size: 10))
+                                .foregroundStyle(.secondary)
                         }
                         .frame(maxWidth: .infinity).padding(.vertical, 5)
                         .background(
@@ -80,7 +97,7 @@ struct VMSettingsSection: View {
                     Text("Memory").font(.caption).foregroundStyle(.secondary)
                     Picker("", selection: $form.mem) {
                         ForEach(Self.options(Self.memOpts, shown.memGB, form.mem), id: \.self) {
-                            Text("\($0) GB").tag($0)
+                            Text("\(ByteFormat.gibText($0)) GB").tag($0)
                         }
                     }
                     .pickerStyle(.segmented).labelsHidden()
@@ -95,7 +112,8 @@ struct VMSettingsSection: View {
                 )
                 .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
-                Button("Apply") { model.run(.resources, "\(form.cpu)", "\(form.mem)") }
+                // The exact memory: a CPU-only change keeps 2.5 GB as 2.5.
+                Button("Apply") { model.run(.resources, "\(form.cpu)", ByteFormat.gibText(form.mem)) }
                     .disabled(form.cpu == shown.cpus && form.mem == shown.memGB)
                     .hint(running ? Help.apply : Help.applyWhenStopped)
             }
@@ -107,8 +125,7 @@ struct VMSettingsSection: View {
             Toggle(isOn: Binding(get: { shown.rosetta }, set: { model.run(.rosetta, $0 ? "on" : "off") })) {
                 Label("Rosetta (amd64 emulation)", systemImage: "cpu")
             }
-            // A switch that is on stays usable, so you can turn Rosetta off.
-            .disabled(!shown.rosettaSupported && !shown.rosetta)
+            .disabled(shown.rosettaToggleDisabled)
             .hint(shown.rosettaSupported ? (running ? Help.rosetta : Help.rosettaWhenStopped) : Help.rosettaNeedsVZ)
             if !shown.rosettaSupported {
                 Text("Rosetta needs the vz VM type.")
@@ -146,10 +163,7 @@ struct VMSettingsSection: View {
         }
         .toggleStyle(.switch).controlSize(.small)
         .onAppear { syncPickers() }
-        // Only when the shown CPU or memory changes: a VM fact such as the
-        // driver, or a change of Rosetta, Kubernetes or the disk, must not
-        // undo a value that you picked.
-        .onChange(of: [shown.cpus, shown.memGB]) { syncPickers() }
+        .onChange(of: Self.pickerKey(profile: model.profile, shown: shown)) { syncPickers() }
     }
 
     /// The typed confirmation comes first. Only then does colima-ctl.sh run

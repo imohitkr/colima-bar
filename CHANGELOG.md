@@ -13,9 +13,12 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Changed
 
 - The Rosetta switch is disabled when `vmType` in `colima.yaml` is not `vz`, unless Rosetta is on. Rosetta needs the `vz` VM type.
+- ColimaBar refuses a change of the VM resources, Rosetta, Kubernetes or the disk while a `colima start` or `colima restart` of the profile runs, for example in a terminal. It also refuses the change when the VM started or stopped outside ColimaBar and the dashboard did not show it yet. Nothing changes, and a notification tells you to try again.
 
 ### Fixed
 
+- A decimal memory in `colima.yaml`, such as `memory: 2.5`, shows as 2.5 GB, and a change of the CPU only keeps it. Colima reads the memory as GiB. The header, the live tiles and the profile list also show a decimal memory.
+- ColimaBar finds the profile of a `colima start` in progress with flags before the name, for example `colima start --cpu 4 work`, `colima start -p=work` and `colima start colima-work`.
 - **Start** and **Stop** in the profile menu now list the selected profile too. Before, with only one profile, both submenus were empty but still opened, so a click did nothing. An empty submenu is now left out.
 - The popover closes when you click in another app. Before, after you opened ColimaBar from Spotlight, macOS could leave another app active, and the popover stayed open.
 

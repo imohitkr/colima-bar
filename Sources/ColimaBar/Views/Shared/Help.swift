@@ -95,7 +95,7 @@ enum Help {
     static let diskShrinkWhenStopped =
         "Make the disk smaller. A disk cannot shrink in place, so this deletes the VM and all its containers, images, volumes and build cache. Colima starts the VM once to create the new disk, then stops it again. You must type the profile name to confirm."
     static let rosettaNeedsVZ =
-        "Rosetta needs the vz VM type. This profile uses a different VM type (vmType in colima.yaml)."
+        "Rosetta needs the vz VM type. This profile uses a different VM type (vmType in colima.yaml). If Rosetta is on, you can still turn it off."
 
     // System: disk usage
     static let dfImages = "Images that you downloaded or built. Reclaimable is the part that no container uses."

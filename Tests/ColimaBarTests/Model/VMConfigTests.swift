@@ -62,13 +62,21 @@ import Testing
         #expect(!VMConfig.parse(after).kubernetes)
     }
 
-    @Test func cutsOffAFractionOfMemory() {
-        // Colima and colima-ctl.sh also cut it off.
-        #expect(VMConfig.parse("memory: 2.5\n").memGB == 2)
-        #expect(VMConfig.parse("memory: 3.9\n").memGB == 3)
-        #expect(VMConfig.parse("memory: 0.5\n").memGB == 0)
+    @Test func readsMemoryAsADecimalNumberOfGiB() {
+        // Colima runs `memory: 2.5` with 2.5 GiB.
+        #expect(VMConfig.parse("memory: 2.5\n").memGB == 2.5)
+        #expect(VMConfig.parse("memory: 0.5\n").memGB == 0.5)
+        #expect(VMConfig.parse("memory: \"3.25\" # GiB\n").memGB == 3.25)
+        #expect(VMConfig.parse("memory: 8\n").memGB == 8)
         #expect(VMConfig.parse("memory: -1\n").memGB == nil)
         #expect(VMConfig.parse("memory: 1e300\n").memGB == nil)
+    }
+
+    @Test func cutsOffAFractionOfCPUAndDisk() {
+        // Colima reads them as whole numbers. colima-ctl.sh also cuts it off.
+        let c = VMConfig.parse("cpu: 2.5\ndisk: 100.0\n")
+        #expect(c.cpus == 2)
+        #expect(c.diskGB == 100)
     }
 
     @Test func readsACRLFFile() {
@@ -99,6 +107,21 @@ import Testing
         let config = VMConfig(cpus: 8, memGB: 16, diskGB: 200, rosetta: true)
         let s = VMConfig.shown(running: false, vm: vm, config: config)
         #expect(s == VMConfig.Shown(cpus: 8, memGB: 16, diskGB: 200, rosetta: true))
+    }
+
+    @Test func bothStatesShowADecimalMemory() {
+        let vm = VMInfo(cpus: 2, memGB: 2.5, diskGB: 60)
+        #expect(VMConfig.shown(running: true, vm: vm, config: VMConfig(memGB: 8)).memGB == 2.5)
+        #expect(VMConfig.shown(running: false, vm: vm, config: VMConfig(memGB: 0.5)).memGB == 0.5)
+        #expect(VMConfig.shown(running: false, vm: vm, config: VMConfig()).memGB == 2.5)
+    }
+
+    @Test func theRosettaSwitchIsDisabledOnlyWhenItCannotBeTurnedOn() {
+        #expect(!VMConfig.Shown(rosetta: false, rosettaSupported: true).rosettaToggleDisabled)
+        #expect(!VMConfig.Shown(rosetta: true, rosettaSupported: true).rosettaToggleDisabled)
+        #expect(VMConfig.Shown(rosetta: false, rosettaSupported: false).rosettaToggleDisabled)
+        // A switch that is on stays usable, so you can turn Rosetta off.
+        #expect(!VMConfig.Shown(rosetta: true, rosettaSupported: false).rosettaToggleDisabled)
     }
 
     @Test func aStoppedVMFallsBackToTheListForAMissingKey() {

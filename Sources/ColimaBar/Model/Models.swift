@@ -4,7 +4,8 @@ struct VMInfo: Equatable {
     var arch = ""
     var runtime = ""
     var cpus = 0
-    var memGB = 0
+    /// GiB, a decimal number as in Colima, for example 2.5.
+    var memGB = 0.0
     var diskGB = 0
     var driver = ""
     var mountType = ""
@@ -54,7 +55,8 @@ struct ProfileRow: Identifiable, Equatable {
     let name: String
     let isRunning: Bool
     let cpus: Int
-    let memGB: Int
+    /// GiB, a decimal number as in Colima, for example 2.5.
+    let memGB: Double
     /// "docker", "containerd" or "" when unknown.
     var runtime = ""
 }

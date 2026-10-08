@@ -84,6 +84,17 @@ enum CtlAction: String, CaseIterable, Sendable {
         showsDialog(running: true) != showsDialog(running: false)
     }
 
+    /// The environment that ColimaBar gives the script. `expectRunning` is
+    /// the VM state that `run` used for `showsDialog(running:)`. It goes in
+    /// `COLIMABAR_EXPECT_RUNNING` (1 or 0) only for an action that checks it.
+    func environment(profile: String, expectRunning: Bool?) -> [String: String] {
+        var env = ["COLIMABAR_PROFILE": profile, "COLIMABAR_APP": "1"]
+        if let expectRunning, checksExpectedState {
+            env["COLIMABAR_EXPECT_RUNNING"] = expectRunning ? "1" : "0"
+        }
+        return env
+    }
+
     /// The busy text the UI shows for a VM action until the script writes
     /// its own marker. A config edit of a stopped VM writes no marker, so
     /// "Saving" shows until the script ends.

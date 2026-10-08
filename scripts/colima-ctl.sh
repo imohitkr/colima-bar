@@ -171,7 +171,8 @@ with_busy() {
   WROTE_BUSY=1
   # The extra subshell is needed. In a plain "$@" & bash 3.2 (macOS) can run
   # the first `command colima` of a function with exec. Then the action ends
-  # after the `colima status` in restart_vm, and the VM does not restart.
+  # after that call. For example, restart_vm then stops the VM (its `colima
+  # status` runs in the subshell of vm_up), but does not start it again.
   ( "$@" ) &
   CHILD=$!
   wait "$CHILD"
@@ -195,7 +196,8 @@ set_key() {
   local file="${3:-$CONFIG}"
   [ -f "$file" ] || { notify "$file not found."; exit 1; }
   sed -i '' -E "s/^$1:.*/$1: $2/" "$file"
-  grep -qE "^$1: $2\$" "$file" || { notify "Couldn't set $1 in colima.yaml (key not found)."; exit 1; }
+  # A "." in the value (memory: 2.5) must match only a ".".
+  grep -qE "^$1: ${2//./\\.}\$" "$file" || { notify "Couldn't set $1 in colima.yaml (key not found)."; exit 1; }
 }
 
 # set_k8s true|false -> sets kubernetes.enabled in colima.yaml and checks it took.
@@ -262,6 +264,12 @@ is_num() {
   case "$1" in *[!0123456789]*|"") return 1 ;; esac
 }
 
+# is_decimal VALUE -> true for a whole or decimal number, such as 2 or 2.5.
+# Colima reads the memory as a decimal number of GiB.
+is_decimal() {
+  case "$1" in ""|.*|*.|*.*.*|*[!0123456789.]*) return 1 ;; esac
+}
+
 # vm_up -> true if `colima status` succeeds. The status runs in a subshell.
 # If the Colima folder changed, colima_home exits that subshell. Then this
 # function exits the main shell, without the redirect: bash 3.2 can keep a
@@ -276,28 +284,38 @@ vm_up() {
 
 # start_words WORD... -> true if the words of a command line are a
 # `colima start` or `colima restart` in progress for PROFILE. The rules
-# match ColimaModel.isStartInProgress in ColimaBar. `colima start -f` is a
-# long-lived foreground supervisor, not a start in progress.
+# match ColimaModel.isStartInProgress in ColimaBar:
+#   - `colima start -f` is a long-lived foreground supervisor, not a start
+#     in progress. For `colima restart`, -f means --force and counts.
+#   - The profile is the value of --profile or -p (also --profile=NAME and
+#     -p=NAME). Else it is the first word after start or restart that is not
+#     a flag and not the value of a flag. Else it is default.
+#   - Colima reads "colima" as default and removes a "colima-" prefix.
 start_words() {
-  local words=("$@") n=$# i at=-1 named="" has_name=""
+  local words=("$@") n=$# i at=-1 verb w named="" first=""
   for ((i = 0; i < n; i++)); do
     case "${words[i]}" in colima|*/colima) at=$i; break ;; esac
   done
   [ "$at" -ge 0 ] && [ $((at + 1)) -lt "$n" ] || return 1
-  case "${words[at + 1]}" in start|restart) ;; *) return 1 ;; esac
-  for ((i = 0; i < n; i++)); do
-    case "${words[i]}" in
-      -f|--foreground) return 1 ;;
-      --profile|-p)
-        if [ $((i + 1)) -lt "$n" ]; then named="${words[i + 1]}"; has_name=1; fi ;;
-      --profile=*) named="${words[i]#--profile=}"; has_name=1 ;;
+  verb="${words[at + 1]}"
+  case "$verb" in start|restart) ;; *) return 1 ;; esac
+  for ((i = at + 2; i < n; i++)); do
+    w="${words[i]}"
+    case "$w" in
+      -f|--foreground) [ "$verb" = start ] && return 1 ;;
+      --profile|-p) i=$((i + 1)); [ "$i" -lt "$n" ] && named="${words[i]}" ;;
+      --profile=*) named="${w#--profile=}" ;;
+      -p=*) named="${w#-p=}" ;;
+      # The flags of `colima start` that take a value in the next word.
+      -a|--arch|--cpu-type|-c|--cpu|--cpus|-d|--disk|-i|--disk-image|-n|--dns|--dns-host|--downloader|--editor|--env|--gateway-address|--hostname|--k3s-arg|--k3s-listen-port|--kubernetes-version|-m|--memory|--model-runner|-V|--mount|--mount-type|--network-interface|--network-mode|--port-forwarder|--root-disk|-r|--runtime|--ssh-port|-t|--vm-type)
+        i=$((i + 1)) ;;
+      -*) ;;
+      *) [ -n "$first" ] || first="$w" ;;
     esac
   done
-  # `colima start NAME` also selects a profile.
-  if [ -z "$has_name" ] && [ $((at + 2)) -lt "$n" ]; then
-    case "${words[at + 2]}" in -*) ;; *) named="${words[at + 2]}"; has_name=1 ;; esac
-  fi
-  [ -n "$has_name" ] || named=default
+  named="${named:-${first:-default}}"
+  [ "$named" = colima ] && named=default
+  named="${named#colima-}"
   [ "$named" = "$PROFILE" ]
 }
 
@@ -319,6 +337,16 @@ vm_running() {
   vm_up || start_in_progress
 }
 
+# no_start_in_progress -> exits with 1 while a `colima start` or `colima
+# restart` runs for PROFILE. A restart would run a second `colima start`
+# during it, and a disk shrink would delete the VM while it starts. Call it
+# before a dialog opens.
+no_start_in_progress() {
+  start_in_progress || return 0
+  notify "A start of $NAMED runs now. Try again when it ends."
+  exit 1
+}
+
 # same_state WAS -> true if the VM state is still WAS (1 running, 0 stopped).
 # A dialog can stay open for minutes, and the VM can start or stop meanwhile.
 same_state() {
@@ -327,21 +355,25 @@ same_state() {
   [ "$now" = "$1" ]
 }
 
-# vm_state -> sets VM_UP to 1 if the VM runs or starts, else to 0. If
-# ColimaBar sent the state that it expects in COLIMABAR_EXPECT_RUNNING (1 or
-# 0) and the VM is in the other state, it calls state_changed. ColimaBar
-# uses the expected state to decide if it closes its popover for a dialog.
-# If the VM started or stopped outside the app, a dialog could open behind
-# the popover. Run it in the main shell: state_changed must exit the script.
+# vm_state -> sets VM_UP to 1 if the VM runs, else to 0. While a start runs,
+# it stops the script (no_start_in_progress). If ColimaBar sent the state
+# that it expects in COLIMABAR_EXPECT_RUNNING (1 or 0) and the VM is in the
+# other state, it stops the script too. ColimaBar uses the expected state to
+# decide if it closes its popover for a dialog. If the VM started or stopped
+# outside the app, a dialog could open behind the popover. Run it in the main
+# shell: it must exit the script.
 vm_state() {
+  no_start_in_progress
   VM_UP=0
-  vm_running && VM_UP=1
+  vm_up && VM_UP=1
   if [ -n "${COLIMABAR_EXPECT_RUNNING:-}" ] && [ "$COLIMABAR_EXPECT_RUNNING" != "$VM_UP" ]; then
-    state_changed
+    notify "The VM of $NAMED started or stopped. Nothing changed. Try again."
+    exit 1
   fi
 }
 
-# state_changed -> tells the user that the VM state changed during the dialog.
+# state_changed -> tells the user that the VM state changed while a dialog
+# was open.
 state_changed() {
   notify "The VM of $NAMED started or stopped while the dialog was open. Nothing changed. Try again."
   exit 1
@@ -364,7 +396,7 @@ yaml_value() {
 }
 
 # whole VALUE -> the whole part of a number such as 2 or 2.5, or nothing for
-# a value that is not a number. A fraction is cut off, as Colima does.
+# a value that is not a number. A fraction is cut off: 2.5 gives 2.
 whole() {
   local w
   case "$1" in ""|.|*.*.*|*[!0123456789.]*) return 0 ;; esac
@@ -390,12 +422,18 @@ case "$1" in
     lock_vm
     with_busy "Restarting" restart_vm || { notify "Restart of $NAMED failed - $SEE_LOG"; exit 1; } ;;
 
-  # resources CPU MEM_GB. A stopped VM only gets the new values in
-  # colima.yaml, with no dialog. They apply at the next start. This and
-  # rosetta and k8s read COLIMABAR_EXPECT_RUNNING (see vm_state).
+  # resources CPU MEM_GB. CPU is a whole number. MEM_GB is a whole or
+  # decimal number of GiB, such as 2.5, as in Colima. Both must be 1 or
+  # more. A stopped VM only gets the new values in colima.yaml, with no
+  # dialog. They apply at the next start. This and rosetta and k8s read
+  # COLIMABAR_EXPECT_RUNNING (see vm_state).
   resources)
     cpu="$2"; mem="$3"
-    case "$cpu$mem" in *[!0123456789]*|"") notify "Invalid CPU/memory: $cpu / $mem"; exit 1 ;; esac
+    # The whole part of a decimal is 1 or more only for a value of 1 or more.
+    if ! is_num "$cpu" || ! is_decimal "$mem" || [ "$cpu" -lt 1 ] || [ "${mem%%.*}" -lt 1 ]; then
+      notify "Invalid CPU/memory for $NAMED: $cpu / $mem. Use at least 1 CPU and 1 GB of memory."
+      exit 1
+    fi
     lock_vm
     vm_state
     if [ "$VM_UP" = 1 ]; then
@@ -457,7 +495,8 @@ case "$1" in
   disk)
     case "$2" in *[!0123456789]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
     lock_vm
-    if vm_running; then
+    no_start_in_progress
+    if vm_up; then
       confirm "Grow the Colima disk of $NAMED to $2 GB? A disk cannot shrink in place: to make it smaller later, all Docker data must be deleted. Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
       set_key disk "$2"
       with_busy "Growing disk to $2 GB" restart_vm || { notify "Disk resize of $NAMED failed - $SEE_LOG"; exit 1; }
@@ -489,7 +528,8 @@ case "$1" in
     was_up=0
     restop=""
     after="Then Colima starts the VM again with an empty $size GB disk and the same settings."
-    if vm_running; then
+    no_start_in_progress
+    if vm_up; then
       was_up=1
     else
       restop=1
