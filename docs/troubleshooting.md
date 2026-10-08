@@ -95,7 +95,7 @@ ColimaBar reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launch
 
 ## macOS blocks the first launch
 
-Apple does not notarize ColimaBar. If you use the disk image, follow the [Open Anyway steps](install.md#the-disk-image). As an alternative, use [the installer](install.md#the-installer-recommended). macOS does not block its download.
+Apple does not notarize ColimaBar. If you use the disk image, follow the [Open Anyway steps](install.md#the-disk-image). As an alternative, use [the installer](install.md#the-installer). macOS does not block its download.
 
 ## ColimaBar does not start when you log in
 
