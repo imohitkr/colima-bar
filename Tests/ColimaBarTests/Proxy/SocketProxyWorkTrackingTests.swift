@@ -26,7 +26,7 @@ import Testing
             up.stop()
             unlink(stable)
         }
-        let fd = try #require(UnixSocket.connect(stable, timeout: 5))
+        let fd = try #require(UnixSocket.connect(stable, timeout: 20))
         defer { close(fd) }
         var sent = 0
         try body(px) { chunk in

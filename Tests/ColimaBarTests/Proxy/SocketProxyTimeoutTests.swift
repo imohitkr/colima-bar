@@ -9,7 +9,7 @@ import Testing
     let upstream = TestSocketPath.unique()
     let stable = TestSocketPath.unique()
 
-    @Test func outOfFdsAnswers503WithoutWake() throws {
+    @Test func outOfFdsAnswers503WithoutWake() async throws {
         let p = SocketProxy(upstream: upstream, path: stable, connectUpstream: { _ in .failure(.socket(EMFILE)) })
         let woke = Counter()
         p.wake = {
@@ -22,13 +22,13 @@ import Testing
             unlink(stable)
         }
 
-        let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
+        let resp = await roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
         #expect(resp.hasPrefix("HTTP/1.1 503"))
         #expect(resp.contains("errno \(EMFILE)"))
         #expect(woke.value == 0)
     }
 
-    @Test func missingSocketStillWakes() throws {
+    @Test func missingSocketStillWakes() async throws {
         unlink(upstream)
         let p = SocketProxy(upstream: upstream, path: stable)
         let woke = Counter()
@@ -42,7 +42,7 @@ import Testing
             unlink(stable)
         }
 
-        let resp = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
+        let resp = await roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nHost: docker\r\n\r\n")
         #expect(resp.hasPrefix("HTTP/1.1 503"))
         #expect(resp.contains("could not start Colima"))
         #expect(woke.value == 1)
@@ -57,10 +57,9 @@ import Testing
             unlink(stable)
         }
 
-        let fd = try #require(UnixSocket.connect(stable, timeout: 10))
-        defer { close(fd) }
         // If the proxy never hangs up, read() fails after 20 s instead of returning 0.
-        UnixSocket.setTimeout(fd, 20)
+        let fd = try #require(UnixSocket.connect(stable, timeout: 20))
+        defer { close(fd) }
         var buf = [UInt8](repeating: 0, count: 16)
         let n = read(fd, &buf, buf.count)  // send nothing: the proxy must hang up
         #expect(n == 0)
@@ -76,15 +75,14 @@ import Testing
             unlink(stable)
         }
 
-        let fd = try #require(UnixSocket.connect(stable, timeout: 10))
-        defer { close(fd) }
         // If the proxy never hangs up, read() fails after 20 s instead of returning 0.
-        UnixSocket.setTimeout(fd, 20)
+        let fd = try #require(UnixSocket.connect(stable, timeout: 20))
+        defer { close(fd) }
         var buf = [UInt8](repeating: 0, count: 16)
         #expect(read(fd, &buf, buf.count) == 0)  // send nothing: the proxy must hang up
     }
 
-    @Test func splicedStreamOutlivesIdleTimeout() throws {
+    @Test func splicedStreamOutlivesIdleTimeout() async throws {
         // VM up: the first read has a timeout, and splice() must remove it.
         let daemon = SilentDaemon(path: upstream)
         try daemon.start(silence: 3)
@@ -96,12 +94,12 @@ import Testing
             unlink(stable)
         }
 
-        let reply = roundTrip(stable, "GET /v1.54/containers/x/attach?stream=1 HTTP/1.1\r\nHost: d\r\n\r\n")
+        let reply = await roundTrip(stable, "GET /v1.54/containers/x/attach?stream=1 HTTP/1.1\r\nHost: d\r\n\r\n")
         #expect(reply.hasSuffix("late"))
         #expect(daemon.sawEOF == false, "the proxy dropped the client during a silent stream")
     }
 
-    @Test func streamAfterWakeOutlivesIdleTimeout() throws {
+    @Test func streamAfterWakeOutlivesIdleTimeout() async throws {
         // VM down: the client waits with a timeout, then the wake splices it.
         unlink(upstream)
         let daemon = SilentDaemon(path: upstream)
@@ -114,12 +112,12 @@ import Testing
             unlink(stable)
         }
 
-        let reply = roundTrip(stable, "GET /v1.54/events HTTP/1.1\r\nHost: d\r\n\r\n")
+        let reply = await roundTrip(stable, "GET /v1.54/events HTTP/1.1\r\nHost: d\r\n\r\n")
         #expect(reply.hasSuffix("late"))
         #expect(daemon.sawEOF == false, "the proxy dropped the client during a silent stream")
     }
 
-    @Test func oversizedRequestHeadGets431WithoutWake() throws {
+    @Test func oversizedRequestHeadGets431WithoutWake() async throws {
         unlink(upstream)
         let px = SocketProxy(upstream: upstream, path: stable)
         let woke = Counter()
@@ -134,7 +132,7 @@ import Testing
         }
 
         let pad = String(repeating: "a", count: SocketProxy.maxHead + 2048)
-        let reply = roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nX-Pad: \(pad)\r\n")
+        let reply = await roundTrip(stable, "GET /v1.54/containers/json HTTP/1.1\r\nX-Pad: \(pad)\r\n")
         #expect(reply.hasPrefix("HTTP/1.1 431"))
         #expect(woke.value == 0)
     }
@@ -150,7 +148,7 @@ import Testing
             unlink(stable)
         }
 
-        let fd = try #require(UnixSocket.connect(stable, timeout: 5))
+        let fd = try #require(UnixSocket.connect(stable, timeout: 20))
         defer { close(fd) }
         _ = UnixSocket.writeAll(fd, Data("GET /_ping HTTP/1.1\r\nHost: d\r".utf8))
         Thread.sleep(forTimeInterval: 0.2)

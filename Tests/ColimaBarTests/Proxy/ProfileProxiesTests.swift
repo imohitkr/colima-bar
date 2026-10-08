@@ -39,11 +39,6 @@ private final class WakeLog: @unchecked Sendable {
         try await body(proxies, daemons, woke, dir)
     }
 
-    /// roundTrip blocks, so it runs off the main actor.
-    nonisolated private func send(_ path: String, _ request: String, until: String? = nil) async -> String {
-        await Task.detached { roundTrip(path, request, until: until) }.value
-    }
-
     @Test func eachSocketWakesItsOwnProfile() async throws {
         try await withTwoProfiles { proxies, daemons, woke, _ in
             proxies.sync(wanted: ["a", "b"])
@@ -51,13 +46,13 @@ private final class WakeLog: @unchecked Sendable {
             let a = try #require(proxies.path(for: "a"))
             let b = try #require(proxies.path(for: "b"))
 
-            let ra = await send(a, request)
+            let ra = await roundTrip(a, request)
             #expect(ra.hasSuffix("hello"))
             #expect(woke.all == ["a"])
             #expect(daemons["a"]?.seen == ["GET /v1.54/containers/json HTTP/1.1"])
             #expect(daemons["b"]?.seen == [])
 
-            let rb = await send(b, request)
+            let rb = await roundTrip(b, request)
             #expect(rb.hasSuffix("hello"))
             #expect(woke.all == ["a", "b"])
             #expect(daemons["b"]?.seen == ["GET /v1.54/containers/json HTTP/1.1"])
@@ -85,12 +80,12 @@ private final class WakeLog: @unchecked Sendable {
         proxies.sync(wanted: ["a"])
         proxies.setListening(true)
         let a = try #require(proxies.path(for: "a"))
-        #expect(await send(a, request).hasSuffix("hello"))
+        #expect(await roundTrip(a, request).hasSuffix("hello"))
         #expect(woke.all == ["a"])
 
         // The wake ended: requests go straight to the daemon.
         proxies.holdForWake([])
-        #expect(await send(a, request).hasSuffix("hello"))
+        #expect(await roundTrip(a, request).hasSuffix("hello"))
         #expect(woke.all == ["a"])
     }
 
@@ -100,7 +95,7 @@ private final class WakeLog: @unchecked Sendable {
             proxies.setListening(true)
             let a = try #require(proxies.path(for: "a"))
             // The proxy keeps the connection open after a ping.
-            let r = await send(a, "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n", until: "\r\n\r\n")
+            let r = await roundTrip(a, "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n", until: "\r\n\r\n")
             #expect(r.hasPrefix("HTTP/1.1 200 OK"))
             #expect(woke.all.isEmpty)
         }

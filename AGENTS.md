@@ -45,6 +45,7 @@ Do not break the rules in [ARCHITECTURE.md](ARCHITECTURE.md#invariants). In shor
 - Put shared fakes and helpers in `Tests/ColimaBarTests/TestSupport/`, for example `FakeDaemon`, `BusyUpstream`, `waitUntil` and `TestSocketPath`. Do not copy them into test files.
 - Get each test socket path from `TestSocketPath.unique()`. Suites run in parallel, so a fixed path can collide.
 - If a test must wait for a condition, poll it with `waitUntil`. Do not use a fixed sleep before a check.
+- Do not block a Swift concurrency thread in a test that waits for async code, such as the Task that runs a wake. Make the test `async`, then use `await roundTrip`, `await waitUntil` or `onOwnThread` for each blocking call. The pool has one thread for each core, so blocked tests can stop the code under test.
 - Do not name files, suites or tests after review rounds or fixes. Name them after the behavior that they check.
 - If you change logic, add or update tests.
 - Do not write tests that depend on exact timing. Put wall-clock bounds only in a benchmark test marked `@Test(.benchmark)`. CI does not run benchmarks; run them with `make perf`.
