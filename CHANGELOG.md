@@ -15,7 +15,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Changed
 
 - The Rosetta switch is disabled when `vmType` in `colima.yaml` is not `vz`, unless Rosetta is on. Rosetta needs the `vz` VM type.
-- When you turn on Kubernetes and the VM has less than 4 GB of memory, the dialog shows the memory and says that Kubernetes uses about 0.5 to 1 GB of it.
+- When you turn on Kubernetes for a running VM with less than 4 GB of memory, the dialog shows the memory and says that Kubernetes uses about 0.5 to 1 GB of it.
 - ColimaBar refuses a change of the VM resources, Rosetta, Kubernetes or the disk while a `colima start` or `colima restart` of the profile runs, for example in a terminal. It also refuses a change of the VM resources, Rosetta or Kubernetes when the VM started or stopped outside ColimaBar and the dashboard did not show it yet. Nothing changes, and a notification tells you to try again.
 
 ### Fixed
