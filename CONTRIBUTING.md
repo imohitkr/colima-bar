@@ -78,7 +78,7 @@ Each source file holds one type, or one type and its small private helpers. The 
 - Name each test file `<TypeOrFeature>Tests.swift`, with one file and one suite for each unit. Give the suite the same name as the file.
 - Put shared fakes and helpers in `Tests/ColimaBarTests/TestSupport/`. Do not copy them into test files. Get each test socket path from `TestSocketPath.unique()`.
 - If a test must wait for a condition, poll it with `waitUntil`. Do not use a fixed sleep before a check.
-- Do not block a Swift concurrency thread in a test, for example in a socket read, a process wait or a semaphore wait. Suites run in parallel, so a blocked test can stall async code in another test, such as the Task that runs a wake. Make the test `async`, then use `await roundTrip`, `await waitUntil` or `onOwnThread` for each blocking call.
+- Do not block a Swift concurrency thread in a test, for example in a socket read, a process wait or a semaphore wait. Suites run in parallel, so a blocked test can stall async code in another test, such as the Task that runs a wake. Make the test `async`. Run each blocking call through `onOwnThread`, or through a helper that uses it, such as `roundTrip` or `ScriptSandbox.bash`. Poll with `await waitUntil`.
 - Do not name files, suites or tests after review rounds or fixes. Name them after the behavior that they check.
 - Put a `///` doc comment on each type and on each non-obvious function. Explain why the code does something, not only what it does.
 - Keep inline comments short, for example `// retry on 503`.
