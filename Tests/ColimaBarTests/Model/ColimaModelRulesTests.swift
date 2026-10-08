@@ -160,4 +160,24 @@ import Testing
         // A prune that waits for its dialog writes no busy marker.
         #expect(ColimaModel.blocksAutoStop(busyMarker: nil, actionsInFlight: 1))
     }
+
+    @Test func profileMenuOffersStartAndStopAlsoForTheSelectedProfile() {
+        func offers(_ start: Bool, selected: Bool, _ state: VMState, listed: Bool = false, busy: Bool = false) -> Bool {
+            ColimaModel.profileAction(
+                start: start, isSelected: selected, state: state, listedRunning: listed, busy: busy)
+        }
+        // The selected profile follows its live state.
+        #expect(offers(true, selected: true, .stopped))
+        #expect(!offers(false, selected: true, .stopped))
+        #expect(offers(false, selected: true, .running))
+        #expect(!offers(true, selected: true, .running))
+        #expect(!offers(true, selected: true, .unknown) && !offers(false, selected: true, .unknown))
+        #expect(!offers(true, selected: true, .notInstalled))
+        // Another profile follows its row in `colima list`.
+        #expect(offers(true, selected: false, .running, listed: false))
+        #expect(offers(false, selected: false, .stopped, listed: true))
+        // A running action hides both.
+        #expect(!offers(true, selected: true, .stopped, busy: true))
+        #expect(!offers(false, selected: false, .stopped, listed: true, busy: true))
+    }
 }

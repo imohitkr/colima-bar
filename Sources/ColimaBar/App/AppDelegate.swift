@@ -38,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private var window: NSWindow?
     private var windowCounted = false  // dashboard window counted in model.visibleCount
     private var appliedHidden: Bool?  // last icon visibility we set
+    /// Watches clicks in other apps while the popover is open (see popoverDidShow).
+    private var outsideClickMonitor: Any?
     private var sigterm: DispatchSourceSignal?
     private let log = Logger(category: "app")
 
@@ -504,7 +506,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         model.visibleCount += 1
         Task { await Notifier.shared.refreshPermission() }
     }
-    func popoverDidClose(_ n: Notification) { model.visibleCount -= 1 }
+    /// A transient popover closes on an outside click only while ColimaBar
+    /// is the active app. After a reveal from Spotlight, macOS can leave
+    /// another app active, and the popover then stays open. A click in any
+    /// other app closes it.
+    func popoverDidShow(_ n: Notification) {
+        guard outsideClickMonitor == nil else { return }
+        outsideClickMonitor = NSEvent.addGlobalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown]) {
+            [weak self] _ in
+            MainActor.assumeIsolated { self?.popover.performClose(nil) }
+        }
+    }
+    func popoverDidClose(_ n: Notification) {
+        if let m = outsideClickMonitor {
+            NSEvent.removeMonitor(m)
+            outsideClickMonitor = nil
+        }
+        model.visibleCount -= 1
+    }
 
     // MARK: - Detached window
 

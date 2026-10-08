@@ -1112,11 +1112,27 @@ final class ColimaModel {
 
     // MARK: - Profiles
 
-    /// Starts the VM of a profile that is not selected.
+    /// Starts the VM of a profile, also of the selected one.
     func startProfile(_ p: String) { run(.start, profile: p) }
 
-    /// Stops the VM of a profile that is not selected.
+    /// Stops the VM of a profile, also of the selected one.
     func stopProfile(_ p: String) { run(.stop, profile: p) }
+
+    /// The profile menu offers Start for this profile.
+    func canStart(profile p: String) -> Bool {
+        Self.profileAction(
+            start: true, isSelected: p == profile, state: state,
+            listedRunning: profiles.first { $0.name == p }?.isRunning ?? false,
+            busy: p == profile ? busy != nil : profileActions[p] != nil)
+    }
+
+    /// The profile menu offers Stop for this profile.
+    func canStop(profile p: String) -> Bool {
+        Self.profileAction(
+            start: false, isSelected: p == profile, state: state,
+            listedRunning: profiles.first { $0.name == p }?.isRunning ?? false,
+            busy: p == profile ? busy != nil : profileActions[p] != nil)
+    }
 
     /// Creates a profile and starts its VM. The directory watcher then
     /// lists it, and it gets its proxy and its docker context.

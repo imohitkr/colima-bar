@@ -66,8 +66,7 @@ struct HeaderView: View {
 }
 
 /// Header chip that shows the selected profile. Its menu switches between
-/// profiles, starts and stops the other profiles, and creates and deletes
-/// profiles.
+/// profiles, starts and stops profiles, and creates and deletes profiles.
 struct ProfileMenu: View {
     let model: ColimaModel
 
@@ -87,19 +86,23 @@ struct ProfileMenu: View {
                 if model.profiles.isEmpty && pendingNew.isEmpty { Text("No profiles yet") }
             }
             Divider()
-            let others = model.profiles.filter { $0.name != model.profile && model.profileActions[$0.name] == nil }
-            Menu("Start") {
-                ForEach(others.filter { !$0.isRunning }) { p in
-                    Button(p.name) { model.startProfile(p.name) }
+            // A disabled submenu still opens on macOS, so leave out an empty one.
+            let startable = model.profiles.filter { model.canStart(profile: $0.name) }
+            let stoppable = model.profiles.filter { model.canStop(profile: $0.name) }
+            if !startable.isEmpty {
+                Menu("Start") {
+                    ForEach(startable) { p in
+                        Button(p.name) { model.startProfile(p.name) }
+                    }
                 }
             }
-            .disabled(!others.contains { !$0.isRunning })
-            Menu("Stop") {
-                ForEach(others.filter(\.isRunning)) { p in
-                    Button(p.name) { model.stopProfile(p.name) }
+            if !stoppable.isEmpty {
+                Menu("Stop") {
+                    ForEach(stoppable) { p in
+                        Button(p.name) { model.stopProfile(p.name) }
+                    }
                 }
             }
-            .disabled(!others.contains(where: \.isRunning))
             Divider()
             Button("New Profile…") {
                 let defaults = NewProfileForm.defaults(from: model.vm)
@@ -108,20 +111,22 @@ struct ProfileMenu: View {
                     model.createProfile(form)
                 }
             }
-            Menu("Delete Profile") {
-                ForEach(deletable) { p in
-                    let running = model.isRunning(profile: p.name)
-                    let refusal = ProfileDelete.refusal(profile: p.name, selected: model.profile, isRunning: running)
-                    Button(refusal == nil ? "\(p.name)…" : "\(p.name) (stop it first)") {
-                        model.dismissPopover()
-                        if DeleteProfileAlert.confirm(profile: p.name, isRunning: running) {
-                            model.deleteProfile(p.name)
+            if !deletable.isEmpty {
+                Menu("Delete Profile") {
+                    ForEach(deletable) { p in
+                        let running = model.isRunning(profile: p.name)
+                        let refusal = ProfileDelete.refusal(
+                            profile: p.name, selected: model.profile, isRunning: running)
+                        Button(refusal == nil ? "\(p.name)…" : "\(p.name) (stop it first)") {
+                            model.dismissPopover()
+                            if DeleteProfileAlert.confirm(profile: p.name, isRunning: running) {
+                                model.deleteProfile(p.name)
+                            }
                         }
+                        .disabled(refusal != nil)
                     }
-                    .disabled(refusal != nil)
                 }
             }
-            .disabled(deletable.isEmpty)
         } label: {
             HStack(spacing: 2) {
                 Text(model.profile)
@@ -136,7 +141,12 @@ struct ProfileMenu: View {
     }
 
     /// "running", "stopped", or the action that runs for the profile.
+    /// The selected profile uses its live state, like Start and Stop.
     private func status(_ p: ProfileRow) -> String {
+        if p.name == model.profile {
+            if let busy = model.busy { return busy.lowercased() + "…" }
+            return model.state == .running ? "running" : "stopped"
+        }
         if let action = model.profileActions[p.name] { return action.lowercased() + "…" }
         return p.isRunning ? "running" : "stopped"
     }
