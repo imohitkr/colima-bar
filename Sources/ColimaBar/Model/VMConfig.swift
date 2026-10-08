@@ -73,11 +73,12 @@ struct VMConfig: Equatable, Sendable {
     /// and Kubernetes always come from colima.yaml.
     static func shown(running: Bool, vm: VMInfo, config: VMConfig?) -> Shown {
         let file = running ? nil : config
-        // A running VM reports memory in whole MiB. If colima.yaml holds the
-        // same value within 1 MiB, show the exact value of the file, so a
+        // A running VM reports memory in whole MiB, and ByteFormat.gib rounds
+        // it to 2 decimals. If colima.yaml holds the same value within that
+        // error (1 MiB + 0.005), show the exact value of the file, so a
         // CPU-only Apply does not write the cut value back.
         var mem = file?.memGB ?? vm.memGB
-        if running, let exact = config?.memGB, abs(exact - vm.memGB) <= 1.0 / 1024 { mem = exact }
+        if running, let exact = config?.memGB, abs(exact - vm.memGB) < 0.01 { mem = exact }
         return Shown(
             cpus: file?.cpus ?? vm.cpus,
             memGB: mem,

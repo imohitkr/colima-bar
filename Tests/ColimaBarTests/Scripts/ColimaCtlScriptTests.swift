@@ -447,6 +447,8 @@ import Testing
     @Test(arguments: [
         ("4", "0"), ("4", "0.5"), ("4", "00.9"), ("4", ".5"), ("4", "2."), ("4", "1.2.3"), ("4", "-2"), ("4", "2,5"),
         ("4", ""), ("0", "4"), ("2.5", "4"), ("x", "4"),
+        // Numbers too long for the checks of the script.
+        ("12345", "4"), ("4", "1234567"), ("99999999999999999999", "4"),
     ])
     func resourcesRefusesABadValue(cpu: String, memory: String) throws {
         let sb = try ScriptSandbox()

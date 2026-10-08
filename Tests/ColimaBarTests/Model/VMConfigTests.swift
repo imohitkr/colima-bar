@@ -113,6 +113,9 @@ import Testing
         // Colima runs `memory: 2.7` as 2764 MiB, which reads as 2.699 GiB.
         let vm = VMInfo(cpus: 2, memGB: 2764.0 / 1024, diskGB: 60)
         #expect(VMConfig.shown(running: true, vm: vm, config: VMConfig(memGB: 2.7)).memGB == 2.7)
+        // `memory: 2.125` runs as 2176 MiB and reads back rounded as 2.13.
+        let rounded = VMInfo(cpus: 2, memGB: ByteFormat.gib(bytes: 2176 << 20), diskGB: 60)
+        #expect(VMConfig.shown(running: true, vm: rounded, config: VMConfig(memGB: 2.125)).memGB == 2.125)
         // A value that differs more is a real change: show the live value.
         #expect(VMConfig.shown(running: true, vm: vm, config: VMConfig(memGB: 4)).memGB == 2764.0 / 1024)
     }

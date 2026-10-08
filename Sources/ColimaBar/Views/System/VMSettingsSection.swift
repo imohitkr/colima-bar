@@ -106,9 +106,10 @@ struct VMSettingsSection: View {
             }
             HStack {
                 Text(
-                    running
+                    (running
                         ? "Applying restarts the VM; running containers stop."
-                        : "The VM stays stopped. Changes apply at the next start."
+                        : "The VM stays stopped. Changes apply at the next start.")
+                        + (shown.memGB < 1 ? " The minimum memory is 1 GB." : "")
                 )
                 .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
