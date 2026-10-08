@@ -51,23 +51,37 @@ enum CtlAction: String, CaseIterable, Sendable {
         }
     }
 
+    /// While the VM is stopped, the script only writes the new value to
+    /// colima.yaml. It does not start the VM. The value applies at the
+    /// next start.
+    var editsConfigWhenStopped: Bool {
+        switch self {
+        case .resources, .rosetta, .k8s, .disk: true
+        default: false
+        }
+    }
+
     /// The script asks the user with a dialog first. The dialog comes from
     /// another process, so ColimaBar closes the popover before it runs:
-    /// the popover would cover the dialog. A test checks this list against
-    /// the script.
-    var showsDialog: Bool {
+    /// the popover would cover the dialog. `running` is the VM state of the
+    /// profile. A stopped VM saves CPU, memory, Rosetta and Kubernetes with
+    /// no dialog. A disk change still asks: a grow becomes permanent at the
+    /// next start. A test checks the running list against the script.
+    func showsDialog(running: Bool) -> Bool {
         switch self {
-        case .resources, .rosetta, .k8s, .disk, .diskShrink, .profileDelete, .containerRemove, .imageRemove,
-            .volumeRemove, .stopAll, .prune:
+        case .resources, .rosetta, .k8s: running
+        case .disk, .diskShrink, .profileDelete, .containerRemove, .imageRemove, .volumeRemove, .stopAll, .prune:
             true
         default: false
         }
     }
 
     /// The busy text the UI shows for a VM action until the script writes
-    /// its own marker.
-    var busyLabel: String? {
+    /// its own marker. A config edit of a stopped VM writes no marker, so
+    /// "Saving" shows until the script ends.
+    func busyLabel(running: Bool) -> String? {
         guard isVMAction else { return nil }
+        if !running, editsConfigWhenStopped { return "Saving" }
         switch self {
         case .start: return "Starting"
         case .stop, .autoStop: return "Stopping"

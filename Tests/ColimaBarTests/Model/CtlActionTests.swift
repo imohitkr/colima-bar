@@ -58,11 +58,27 @@ import Testing
         return found
     }
 
+    /// Each script case with a dialog asks while the VM runs. Some ask only
+    /// then, so the running list must equal the script list.
     @Test func actionsWithADialogMatchTheScript() throws {
         let script = try scriptActionsWithADialog()
         #expect(script.contains("prune"))  // the parser found the dialogs
-        let app = Set(CtlAction.allCases.filter(\.showsDialog).map(\.rawValue))
-        #expect(app == script)
+        let running = Set(CtlAction.allCases.filter { $0.showsDialog(running: true) }.map(\.rawValue))
+        #expect(running == script)
+        let stopped = Set(CtlAction.allCases.filter { $0.showsDialog(running: false) }.map(\.rawValue))
+        #expect(stopped.isSubset(of: script))
+    }
+
+    @Test func aStoppedVMSavesSettingsWithNoDialog() {
+        for a in [CtlAction.resources, .rosetta, .k8s] {
+            #expect(a.showsDialog(running: true), "\(a.rawValue)")
+            #expect(!a.showsDialog(running: false), "\(a.rawValue)")
+        }
+        // A grow becomes permanent at the next start, and a shrink deletes data.
+        for a in [CtlAction.disk, .diskShrink, .profileDelete, .prune] {
+            #expect(a.showsDialog(running: false), "\(a.rawValue)")
+        }
+        #expect(!CtlAction.start.showsDialog(running: false))
     }
 
     @Test func diskActionsAreUrgent() {
@@ -79,14 +95,25 @@ import Testing
         ]
         for a in CtlAction.allCases {
             #expect(a.isVMAction == vm.contains(a), "\(a.rawValue)")
-            #expect((a.busyLabel != nil) == vm.contains(a), "\(a.rawValue)")
+            #expect((a.busyLabel(running: true) != nil) == vm.contains(a), "\(a.rawValue)")
+            #expect((a.busyLabel(running: false) != nil) == vm.contains(a), "\(a.rawValue)")
         }
-        #expect(CtlAction.start.busyLabel == "Starting")
-        #expect(CtlAction.autoStop.busyLabel == "Stopping")
-        #expect(CtlAction.disk.busyLabel == "Restarting")
-        #expect(CtlAction.diskShrink.busyLabel == "Shrinking disk")
-        #expect(CtlAction.profileCreate.busyLabel == "Creating")
-        #expect(CtlAction.profileDelete.busyLabel == "Deleting")
+        #expect(CtlAction.start.busyLabel(running: false) == "Starting")
+        #expect(CtlAction.autoStop.busyLabel(running: true) == "Stopping")
+        #expect(CtlAction.disk.busyLabel(running: true) == "Restarting")
+        #expect(CtlAction.diskShrink.busyLabel(running: true) == "Shrinking disk")
+        #expect(CtlAction.diskShrink.busyLabel(running: false) == "Shrinking disk")
+        #expect(CtlAction.profileCreate.busyLabel(running: false) == "Creating")
+        #expect(CtlAction.profileDelete.busyLabel(running: false) == "Deleting")
+    }
+
+    @Test func aConfigEditOfAStoppedVMShowsSaving() {
+        for a in [CtlAction.resources, .rosetta, .k8s, .disk] {
+            #expect(a.editsConfigWhenStopped, "\(a.rawValue)")
+            #expect(a.busyLabel(running: false) == "Saving", "\(a.rawValue)")
+            #expect(a.busyLabel(running: true) == "Restarting", "\(a.rawValue)")
+        }
+        #expect(!CtlAction.diskShrink.editsConfigWhenStopped)
     }
 
     @Test func profileActionsMatchTheScriptLabels() throws {

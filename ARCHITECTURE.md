@@ -40,6 +40,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `ColimaModel+Settings`: reads the user settings for an export, and applies imported settings through the normal setters.
 - `SettingsTransfer`: the settings file format (JSON with a format name and a version), its checks and the import plan.
 - `DiskShrink`: the rules and the warning text for a smaller disk.
+- `VMConfig`: the VM settings in the `colima.yaml` of the selected profile (`ColimaModel.config`), and the values that the settings show (`VMConfig.shown`). For a stopped VM, `colima list` shows the values of the last start, not the file.
 - `AutoStopRule`: the idle rule for one profile, and which other profiles auto-stop checks.
 - `ProfileName`: the name rules of `colima-ctl.sh`, and the stricter rules for a new profile.
 - `NewProfileForm`: the values and checks of the New Profile form.
@@ -76,7 +77,7 @@ The log windows. `LogStore` holds the live state for one container. If the conta
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
 
 ### `Support/`
 
@@ -177,7 +178,9 @@ Lima's folder (`Paths.limaDir`) is `LIMA_HOME` if it is set, else `_lima` in the
 
 The name checks of the script list each allowed character, not a range such as `[a-z]`. Thus they match only ASCII in every locale.
 
-A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
+`resources`, `rosetta`, `k8s` and `disk` restart a running VM after a dialog. For a stopped VM, they only change `colima.yaml`, and the values apply at the next start (`CtlAction.editsConfigWhenStopped`). They write no busy marker then, so the app shows "Saving" until the script ends. `resources`, `rosetta` and `k8s` show no dialog for a stopped VM. `disk` still asks, because the grow becomes permanent at the next start. If the VM starts or stops while that dialog is open, the script changes nothing and exits with 1. `k8s on` for a stopped VM does not switch the kubectl context: the context does not exist yet, and `colima start` switches to it.
+
+A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. Colima creates the new disk only at a start. Thus for a stopped VM, the script runs `colima stop` at the end. The busy marker covers the full run. That start switches the docker context, and a refresh can miss the short run, so the model runs `Routing.apply()` after each shrink. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
 
 The exit codes are fixed. 0 means done. 1 means failed, and the script already notified the user. 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 
@@ -237,7 +240,7 @@ Live stats stream only while a dashboard is on screen. Saved-log streams open on
 Do not break these rules.
 
 - **Fixed popover size.** The popover is 480 x 640 points (`AppDelegate.popoverSize`). In `ColimaModel`, assign a property only when its value changes. Otherwise the popover jitters and SwiftUI redraws too much.
-- **No dialog behind the popover.** Call `model.dismissPopover()` before an alert or a file panel opens from the popover. A `colima-ctl.sh` action that asks with a dialog has `CtlAction.showsDialog`, and `run()` closes the popover for it. A test checks that list against the script.
+- **No dialog behind the popover.** Call `model.dismissPopover()` before an alert or a file panel opens from the popover. A `colima-ctl.sh` action that asks with a dialog has `CtlAction.showsDialog(running:)`, and `run()` closes the popover for it. Some actions ask only while the VM runs. A test checks the list for a running VM against the script.
 - **Proxy sockets.** The stable socket is `~/.cache/colima-bar/docker.sock` (`Paths.proxySocket`). The profile sockets are `~/.cache/colima-bar/profiles/PROFILE.sock` (`Paths.profileSocket`). Each socket has mode `0600`. Their folders have mode `0700`. Do not change the paths or relax the modes.
 - **Quit behavior.** On quit, or when auto-start is off, the stable socket path becomes a symlink to the Colima socket of the selected profile, and each profile socket path a symlink to the Colima socket of its profile (`SocketProxy.stop()`). Docker clients must keep working without ColimaBar.
 - **Docker contexts.** ColimaBar creates, updates and removes only the `colimabar` context and the `colimabar-PROFILE` contexts whose description starts with "ColimaBar". It never changes other contexts.

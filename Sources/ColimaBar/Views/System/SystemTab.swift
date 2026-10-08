@@ -6,116 +6,9 @@ struct SystemTab: View {
     @Bindable var form: SystemForm
     @FocusState private var minutesFocused: Bool
 
-    /// A one-click VM size.
-    private struct ResourcePreset {
-        let name: String
-        let cpus: Int
-        let memGB: Int
-    }
-
-    private let presets = [
-        ResourcePreset(name: "Light", cpus: 2, memGB: 4),
-        ResourcePreset(name: "Standard", cpus: 4, memGB: 8),
-        ResourcePreset(name: "Heavy", cpus: 8, memGB: 16),
-    ]
-    static let cpuOpts = [2, 4, 6, 8, 10, 12]
-    static let memOpts = [4, 8, 12, 16, 24, 32]
-
-    /// The fixed choices, plus the VM's value and the picked value when they
-    /// are not among them (Colima's default VM has 2 GB). The VM's value stays
-    /// after you pick another one, so you can pick it again, and the picker
-    /// always has a selection.
-    static func options(_ fixed: [Int], _ extra: Int...) -> [Int] {
-        var out = fixed
-        for v in extra where v > 0 && !out.contains(v) { out.append(v) }
-        return out.count == fixed.count ? fixed : out.sorted()
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            SectionHeader(title: "VM resources")
-            HStack(spacing: 6) {
-                ForEach(presets, id: \.name) { p in
-                    let active = p.cpus == model.vm.cpus && p.memGB == model.vm.memGB
-                    Button {
-                        model.run(.resources, "\(p.cpus)", "\(p.memGB)")
-                    } label: {
-                        VStack(spacing: 1) {
-                            Text(p.name).font(.system(size: 11, weight: .semibold))
-                            Text("\(p.cpus) CPU · \(p.memGB) GB").font(.system(size: 10)).foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: .infinity).padding(.vertical, 5)
-                        .background(
-                            active ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.08),
-                            in: RoundedRectangle(cornerRadius: 6)
-                        )
-                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(active ? Color.accentColor : .clear))
-                    }
-                    .buttonStyle(.plain).disabled(active)
-                    .hint(Help.presets)
-                }
-            }
-            Grid(alignment: .leading, horizontalSpacing: 8, verticalSpacing: 6) {
-                GridRow {
-                    Text("CPU").font(.caption).foregroundStyle(.secondary)
-                    Picker("", selection: $form.cpu) {
-                        ForEach(Self.options(Self.cpuOpts, model.vm.cpus, form.cpu), id: \.self) {
-                            Text("\($0)").tag($0)
-                        }
-                    }
-                    .pickerStyle(.segmented).labelsHidden()
-                    .hint(Help.cpu)
-                }
-                GridRow {
-                    Text("Memory").font(.caption).foregroundStyle(.secondary)
-                    Picker("", selection: $form.mem) {
-                        ForEach(Self.options(Self.memOpts, model.vm.memGB, form.mem), id: \.self) {
-                            Text("\($0) GB").tag($0)
-                        }
-                    }
-                    .pickerStyle(.segmented).labelsHidden()
-                    .hint(Help.memory)
-                }
-            }
-            HStack {
-                Text("Applying restarts the VM; running containers stop.")
-                    .font(.caption2).foregroundStyle(.secondary)
-                Spacer()
-                Button("Apply") { model.run(.resources, "\(form.cpu)", "\(form.mem)") }
-                    .disabled(form.cpu == model.vm.cpus && form.mem == model.vm.memGB)
-                    .hint(Help.apply)
-            }
-
-            Divider()
-            SectionHeader(title: "Features")
-            Toggle(isOn: Binding(get: { model.isRosettaEnabled }, set: { model.run(.rosetta, $0 ? "on" : "off") })) {
-                Label("Rosetta (amd64 emulation)", systemImage: "cpu")
-            }
-            .hint(Help.rosetta)
-            Toggle(isOn: Binding(get: { model.isKubernetesEnabled }, set: { model.run(.k8s, $0 ? "on" : "off") })) {
-                Label("Kubernetes (k3s) · context: \(model.kubeContext)", systemImage: "circle.hexagongrid")
-            }
-            .hint(Help.k8s)
-            HStack {
-                Label("Disk: \(model.vm.diskGB) GB", systemImage: "internaldrive")
-                Spacer()
-                ForEach([150, 200, 300].filter { $0 > model.vm.diskGB }, id: \.self) { d in
-                    Button("\(d) GB") { model.run(.disk, "\(d)") }.controlSize(.small)
-                }
-                let smaller = DiskShrink.options(current: model.vm.diskGB)
-                if !smaller.isEmpty {
-                    Menu("Shrink…") {
-                        ForEach(smaller, id: \.self) { d in
-                            Button("\(d) GB") { shrinkDisk(to: d) }
-                        }
-                    }
-                    .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
-                    .hint(Help.diskShrink)
-                }
-            }
-            .hint(Help.disk)
-            Text("A disk grows in place. Shrink deletes all images, containers and volumes.")
-                .font(.caption2).foregroundStyle(.secondary)
+            VMSettingsSection(model: model, form: form, running: true)
 
             Divider()
             SectionHeader(title: "Disk usage")
@@ -290,28 +183,9 @@ struct SystemTab: View {
         }
         .toggleStyle(.switch).controlSize(.small)
         .onAppear {
-            syncPickers()
+            syncLogin()
             syncIdle()
         }
-        .onChange(of: model.vm) { syncPickers() }
-    }
-
-    /// The typed confirmation comes first. Only then does colima-ctl.sh run
-    /// (it asks one more time). The action goes to the profile that the
-    /// confirmation named. If the selected profile changed meanwhile, it stops.
-    private func shrinkDisk(to size: Int) {
-        let p = model.profile
-        let from = model.vm.diskGB
-        guard DiskShrink.isValid(size, current: from) else { return }
-        // The popover would cover the alert.
-        model.dismissPopover()
-        guard
-            ShrinkDiskAlert.confirm(
-                profile: p, from: from, to: size, usage: model.df,
-                kubernetes: model.isKubernetesEnabled),
-            p == model.profile
-        else { return }
-        model.run(.diskShrink, "\(size)", profile: p)
     }
 
     private func dfHelp(_ type: String) -> String {
@@ -323,9 +197,7 @@ struct SystemTab: View {
         }
     }
 
-    private func syncPickers() {
-        form.cpu = model.vm.cpus
-        form.mem = model.vm.memGB
+    private func syncLogin() {
         form.loginEnabled = LoginItem.isEnabled
         let enabled = form.loginEnabled
         Task {

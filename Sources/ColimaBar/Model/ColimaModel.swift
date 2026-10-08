@@ -20,8 +20,9 @@ final class ColimaModel {
     }
     private(set) var busy: String?
     private(set) var vm = VMInfo()
-    private(set) var isRosettaEnabled = false
-    private(set) var isKubernetesEnabled = false
+    /// The colima.yaml of the selected profile, or nil when the file is
+    /// missing. For a stopped VM, `vm` shows the last start, not this file.
+    private(set) var config: VMConfig?
     private(set) var containers: [Container] = [] {
         didSet { updateDerivedLists() }
     }
@@ -158,6 +159,8 @@ final class ColimaModel {
     private(set) var stopped: [Container] = []
     private(set) var unhealthyCount = 0
     var kubeContext: String { Paths.kubeContext(profile) }
+    var isRosettaEnabled: Bool { config?.rosetta ?? false }
+    var isKubernetesEnabled: Bool { config?.kubernetes ?? false }
 
     private(set) var api: DockerAPI
     let proxy: SocketProxy
@@ -458,10 +461,8 @@ final class ColimaModel {
             }
             set(\.vm, v)
         }
-        if let yaml = try? String(contentsOfFile: Paths.config(profile), encoding: .utf8) {
-            set(\.isRosettaEnabled, Parse.yaml(yaml, key: "rosetta") == "true")
-            set(\.isKubernetesEnabled, Parse.yaml(yaml, key: "enabled", section: "kubernetes") == "true")
-        }
+        // A missing file gives nil, so no flags of an older file stay.
+        set(\.config, (try? String(contentsOfFile: Paths.config(profile), encoding: .utf8)).map(VMConfig.parse))
         if state != newState {
             log.notice("profile \(self.profile, privacy: .public): \(String(describing: newState), privacy: .public)")
         }
@@ -527,6 +528,7 @@ final class ColimaModel {
         // must not change the proxy sockets.
         if !isDebug { proxy.upstream = Paths.socket(profile) }
         vm = VMInfo()
+        set(\.config, nil)
         state = .unknown
         idleSince = nil
         otherIdle = [:]
@@ -1067,7 +1069,7 @@ final class ColimaModel {
     /// profile to act on; nil means the selected profile.
     func run(_ action: CtlAction, _ args: String..., profile target: String? = nil) {
         let p = target ?? profile
-        if action.showsDialog { dismissPopover() }
+        if action.showsDialog(running: isRunning(profile: p)) { dismissPopover() }
         let label = markBusy(action, p)
         Task { await execute(action, args, profile: p, label: label) }
     }
@@ -1076,7 +1078,7 @@ final class ColimaModel {
     /// can't race the action. The selected profile shows it in the header,
     /// another profile in the profile menu.
     private func markBusy(_ action: CtlAction, _ p: String) -> String? {
-        guard let label = action.busyLabel else { return nil }
+        guard let label = action.busyLabel(running: isRunning(profile: p)) else { return nil }
         if p == profile { setBusyNow(label) } else { profileActions[p] = label }
         return label
     }
@@ -1107,6 +1109,13 @@ final class ColimaModel {
         if let label, profileActions[p] == label { profileActions[p] = nil }
         busy = readBusy()
         await refreshAll(urgentDF: action.changesDisk)
+        // A shrink runs `colima start`, which switches the docker context.
+        // For a stopped VM, it stops the VM again after a short time, and a
+        // refresh can miss the start. Thus apply the routes here too.
+        if action == .diskShrink, r.status != 2, !isDebug {
+            await Routing.apply()
+            if visibleCount > 0, dashboardTab == .system { await refreshRouting() }
+        }
         return r.ok
     }
 

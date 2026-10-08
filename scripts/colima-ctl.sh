@@ -197,13 +197,27 @@ set_key() {
   grep -qE "^$1: $2\$" "$file" || { notify "Couldn't set $1 in colima.yaml (key not found)."; exit 1; }
 }
 
+# set_k8s true|false -> sets kubernetes.enabled in colima.yaml and checks it took.
+set_k8s() {
+  [ -f "$CONFIG" ] || { notify "$CONFIG not found."; exit 1; }
+  sed -i '' -E "/^kubernetes:/,/^[a-z]/ s/^  enabled: .*/  enabled: $1/" "$CONFIG"
+  sed -n '/^kubernetes:/,/^[a-z]/p' "$CONFIG" | grep -qE "^  enabled: $1\$" \
+    || { notify "Couldn't set kubernetes.enabled in colima.yaml."; exit 1; }
+}
+
 # The smallest disk that disk-shrink accepts, in GB.
 MIN_DISK=10
 
-# shrink_disk BACKUP -> stops the VM, deletes it with its data, puts the
-# edited colima.yaml back and starts the VM. `colima delete` removes the
-# whole profile folder with colima.yaml, so the copy in BACKUP (with the new
-# disk size) goes back before the start. Thus the other VM settings stay.
+# The exit code of shrink_disk when the new disk exists but the last stop
+# failed. The caller tells the user.
+RESTOP_FAILED=3
+
+# shrink_disk BACKUP [RESTOP] -> stops the VM, deletes it with its data,
+# puts the edited colima.yaml back and starts the VM. `colima delete`
+# removes the whole profile folder with colima.yaml, so the copy in BACKUP
+# (with the new disk size) goes back before the start. Thus the other VM
+# settings stay. Colima creates the new disk only at a start. Thus a VM that
+# was stopped starts once: if RESTOP is set, the VM stops again at the end.
 shrink_disk() {
   if colima status >/dev/null 2>&1; then
     colima stop || return 1
@@ -212,7 +226,10 @@ shrink_disk() {
   # Create only the profile folder, inside a Colima folder that still exists.
   [ -d "$COLIMA_DIR" ] || return 1
   mkdir -p "$PROFILE_DIR" && cp -p "$1" "$CONFIG" || return 1
-  colima start
+  colima start || return 1
+  if [ -n "${2:-}" ]; then
+    colima stop || return "$RESTOP_FAILED"
+  fi
 }
 
 # The rules for a new profile name. They must match ProfileName.problem in
@@ -244,8 +261,33 @@ is_num() {
   case "$1" in *[!0123456789]*|"") return 1 ;; esac
 }
 
+# vm_running -> true while the VM of the profile runs.
+vm_running() {
+  colima status >/dev/null 2>&1
+}
+
+# same_state WAS -> true if the VM state is still WAS (1 running, 0 stopped).
+# A dialog can stay open for minutes, and the VM can start or stop meanwhile.
+same_state() {
+  local now=0
+  vm_running && now=1
+  [ "$now" = "$1" ]
+}
+
+# state_changed -> tells the user that the VM state changed during the dialog.
+state_changed() {
+  notify "The VM of $NAMED started or stopped while the dialog was open. Nothing changed. Try again."
+  exit 1
+}
+
+# mem_gb -> the memory in colima.yaml in whole GB (a fraction is cut off),
+# or nothing if the key is missing.
+mem_gb() {
+  sed -n -E 's/^memory: *([0123456789]+)(\.[0123456789]*)? *$/\1/p' "$CONFIG" 2>/dev/null
+}
+
 restart_vm() {
-  if colima status >/dev/null 2>&1; then
+  if vm_running; then
     colima stop || return 1
   fi
   colima start
@@ -262,57 +304,81 @@ case "$1" in
     lock_vm
     with_busy "Restarting" restart_vm || { notify "Restart of $NAMED failed - $SEE_LOG"; exit 1; } ;;
 
-  # resources CPU MEM_GB
+  # resources CPU MEM_GB. A stopped VM only gets the new values in
+  # colima.yaml, with no dialog. They apply at the next start.
   resources)
     cpu="$2"; mem="$3"
     case "$cpu$mem" in *[!0123456789]*|"") notify "Invalid CPU/memory: $cpu / $mem"; exit 1 ;; esac
     lock_vm
-    msg="Restart the Colima VM of $NAMED with ${cpu} CPU / ${mem} GB RAM?"
-    if colima status >/dev/null 2>&1; then
-      msg="$msg $(running_count) running container(s) will stop."
+    if vm_running; then
+      confirm "Restart the Colima VM of $NAMED with ${cpu} CPU / ${mem} GB RAM? $(running_count) running container(s) will stop." || exit 2
+      set_key cpu "$cpu"
+      set_key memory "$mem"
+      with_busy "Applying ${cpu} CPU / ${mem} GB" restart_vm \
+        || { notify "Failed to apply resources to $NAMED - $SEE_LOG"; exit 1; }
+    else
+      set_key cpu "$cpu"
+      set_key memory "$mem"
     fi
-    confirm "$msg" || exit 2
-    set_key cpu "$cpu"
-    set_key memory "$mem"
-    with_busy "Applying ${cpu} CPU / ${mem} GB" restart_vm \
-      || { notify "Failed to apply resources to $NAMED - $SEE_LOG"; exit 1; }
     ;;
 
-  # rosetta on|off
+  # rosetta on|off. A stopped VM only gets the new value in colima.yaml.
   rosetta)
     [ "$2" = on ] && val=true || val=false
     lock_vm
-    confirm "Turn Rosetta (amd64 emulation) $2 for $NAMED? Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
-    set_key rosetta "$val"
-    with_busy "Rosetta $2" restart_vm || { notify "Rosetta change of $NAMED failed - $SEE_LOG"; exit 1; }
-    ;;
-
-  # k8s on|off
-  k8s)
-    [ "$2" = on ] && val=true || val=false
-    lock_vm
-    confirm "Turn Kubernetes (k3s) $2 for $NAMED? Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
-    [ -f "$CONFIG" ] || { notify "$CONFIG not found."; exit 1; }
-    sed -i '' -E "/^kubernetes:/,/^[a-z]/ s/^  enabled: .*/  enabled: $val/" "$CONFIG"
-    sed -n '/^kubernetes:/,/^[a-z]/p' "$CONFIG" | grep -qE "^  enabled: $val\$" \
-      || { notify "Couldn't set kubernetes.enabled in colima.yaml."; exit 1; }
-    with_busy "Kubernetes $2" restart_vm || { notify "Kubernetes change of $NAMED failed - $SEE_LOG"; exit 1; }
-    if [ "$2" = on ]; then
-      kubectl config use-context "$KCTX" >/dev/null 2>&1 || true
+    if vm_running; then
+      confirm "Turn Rosetta (amd64 emulation) $2 for $NAMED? Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
+      set_key rosetta "$val"
+      with_busy "Rosetta $2" restart_vm || { notify "Rosetta change of $NAMED failed - $SEE_LOG"; exit 1; }
+    else
+      set_key rosetta "$val"
     fi
     ;;
 
-  # disk SIZE_GB (grow only)
+  # k8s on|off. A stopped VM only gets the new value in colima.yaml. The
+  # kubectl context does not exist before the first start with Kubernetes.
+  # colima start switches to it.
+  k8s)
+    [ "$2" = on ] && val=true || val=false
+    lock_vm
+    if vm_running; then
+      mem_note=""
+      gb=$(mem_gb)
+      if [ "$2" = on ] && [ -n "$gb" ] && [ "$gb" -lt 4 ]; then
+        mem_note=" The VM has $gb GB of memory. Kubernetes uses about 0.5 to 1 GB of it."
+      fi
+      confirm "Turn Kubernetes (k3s) $2 for $NAMED? Colima will restart the VM and $(running_count) running container(s) will stop.$mem_note" || exit 2
+      set_k8s "$val"
+      with_busy "Kubernetes $2" restart_vm || { notify "Kubernetes change of $NAMED failed - $SEE_LOG"; exit 1; }
+      # colima start also switches the context. This covers a Colima
+      # version that does not.
+      if [ "$2" = on ]; then
+        kubectl config use-context "$KCTX" >/dev/null 2>&1 || true
+      fi
+    else
+      set_k8s "$val"
+    fi
+    ;;
+
+  # disk SIZE_GB (grow only). A stopped VM only gets the new size in
+  # colima.yaml. Colima grows the disk at the next start.
   disk)
     case "$2" in *[!0123456789]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
     lock_vm
-    confirm "Grow the Colima disk of $NAMED to $2 GB? A disk cannot shrink in place: to make it smaller later, all Docker data must be deleted. Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
-    set_key disk "$2"
-    with_busy "Growing disk to $2 GB" restart_vm || { notify "Disk resize of $NAMED failed - $SEE_LOG"; exit 1; }
+    if vm_running; then
+      confirm "Grow the Colima disk of $NAMED to $2 GB? A disk cannot shrink in place: to make it smaller later, all Docker data must be deleted. Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
+      set_key disk "$2"
+      with_busy "Growing disk to $2 GB" restart_vm || { notify "Disk resize of $NAMED failed - $SEE_LOG"; exit 1; }
+    else
+      confirm "Set the disk of $NAMED to $2 GB? Colima grows the disk at the next start. A disk cannot shrink in place: to make it smaller later, all Docker data must be deleted." || exit 2
+      same_state 0 || state_changed
+      set_key disk "$2"
+    fi
     ;;
 
   # disk-shrink SIZE_GB: deletes the VM with all its data, then starts it
-  # with a new, smaller disk. Disks cannot shrink in place.
+  # with a new, smaller disk. Disks cannot shrink in place. A stopped VM
+  # starts once to create the disk, then stops again.
   disk-shrink)
     case "$2" in *[!0123456789]*|"") notify "Invalid disk size: $2"; exit 1 ;; esac
     size=$((10#$2))
@@ -328,17 +394,34 @@ case "$1" in
     if sed -n '/^kubernetes:/,/^[a-z]/p' "$CONFIG" | grep -qE '^  enabled: true$'; then
       k8s_note=" The Kubernetes cluster and its data are also deleted."
     fi
+    was_up=0
+    restop=""
+    after="Then Colima starts the VM again with an empty $size GB disk and the same settings."
+    if vm_running; then
+      was_up=1
+    else
+      restop=1
+      after="Colima starts the VM once to create the new $size GB disk, then stops it again. The other settings stay the same."
+    fi
     confirm "Delete all Docker data of $NAMED and shrink its disk from $cur GB to $size GB?
 
 Colima deletes the VM and its disk. All containers, images, volumes and build cache are lost for good.$k8s_note
 
-Then Colima starts the VM again with an empty $size GB disk and the same settings." || exit 2
+$after" || exit 2
+    same_state "$was_up" || state_changed
     # Edit a copy first: if colima.yaml has no disk key, nothing is deleted.
     backup="$STATE_DIR/colima.$PROFILE.yaml.shrink"
     cp -p "$CONFIG" "$backup" || { notify "Couldn't copy colima.yaml to $backup."; exit 1; }
     set_key disk "$size" "$backup"
     FOLDER_NOTE=" A copy of colima.yaml is in $backup."
-    with_busy "Shrinking disk to $size GB" shrink_disk "$backup" \
+    with_busy "Shrinking disk to $size GB" shrink_disk "$backup" "$restop"
+    rc=$?
+    if [ "$rc" -eq "$RESTOP_FAILED" ]; then
+      rm -f "$backup"
+      notify "The disk of $NAMED is now $size GB, but the stop failed - $SEE_LOG"
+      exit 1
+    fi
+    [ "$rc" -eq 0 ] \
       || { notify "Disk shrink of $NAMED failed - $SEE_LOG. A copy of colima.yaml is in $backup."; exit 1; }
     rm -f "$backup"
     ;;

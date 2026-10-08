@@ -1,0 +1,72 @@
+import Foundation
+
+/// The VM settings in the colima.yaml of a profile. For a stopped VM,
+/// `colima list` shows the values of the last start, not the file. Thus the
+/// settings of a stopped VM come from here.
+struct VMConfig: Equatable, Sendable {
+    var cpus: Int?
+    var memGB: Int?
+    var diskGB: Int?
+    var rosetta = false
+    var kubernetes = false
+    /// "vz", "qemu" or "" when the key is missing.
+    var vmType = ""
+    /// "docker", "containerd" or "" when the key is missing.
+    var runtime = ""
+
+    /// The values that the VM settings show.
+    struct Shown: Equatable {
+        var cpus = 0
+        var memGB = 0
+        var diskGB = 0
+        var rosetta = false
+        var kubernetes = false
+        var rosettaSupported = true
+    }
+
+    /// Reads the settings from the text of colima.yaml. A missing or bad
+    /// key gives nil or the default.
+    static func parse(_ yaml: String) -> VMConfig {
+        func value(_ key: String, section: String? = nil) -> String? {
+            guard var v = Parse.yaml(yaml, key: key, section: section) else { return nil }
+            // An inline comment: "cpu: 4 # four cores".
+            if let hash = v.range(of: " #") { v = String(v[..<hash.lowerBound]) }
+            v = v.trimmingCharacters(in: .whitespaces)
+            if v.count >= 2, let q = v.first, q == "\"" || q == "'", v.last == q {
+                v = String(v.dropFirst().dropLast())
+            }
+            return v
+        }
+        func whole(_ key: String) -> Int? {
+            guard let v = value(key), let d = Double(v), d.isFinite, d >= 0 else { return nil }
+            return Int(d.rounded())
+        }
+        return VMConfig(
+            cpus: whole("cpu"),
+            memGB: whole("memory"),
+            diskGB: whole("disk"),
+            rosetta: value("rosetta") == "true",
+            kubernetes: value("enabled", section: "kubernetes") == "true",
+            vmType: value("vmType") ?? "",
+            runtime: value("runtime") ?? "")
+    }
+
+    /// Rosetta works only with the vz VM type. Colima on Apple silicon
+    /// uses vz when colima.yaml names no VM type.
+    var rosettaSupported: Bool { vmType.isEmpty || vmType == "vz" }
+
+    /// The values that the VM settings show. A running VM shows its live
+    /// CPU, memory and disk. A stopped VM shows colima.yaml, and the last
+    /// `colima list` values for a key that the file does not have. Rosetta
+    /// and Kubernetes always come from colima.yaml.
+    static func shown(running: Bool, vm: VMInfo, config: VMConfig?) -> Shown {
+        let file = running ? nil : config
+        return Shown(
+            cpus: file?.cpus ?? vm.cpus,
+            memGB: file?.memGB ?? vm.memGB,
+            diskGB: file?.diskGB ?? vm.diskGB,
+            rosetta: config?.rosetta ?? false,
+            kubernetes: config?.kubernetes ?? false,
+            rosettaSupported: config?.rosettaSupported ?? true)
+    }
+}

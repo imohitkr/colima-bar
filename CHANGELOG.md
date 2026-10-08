@@ -6,6 +6,14 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Change the settings of a stopped profile. The stopped screen now shows the VM resources and features from `colima.yaml`: CPU, memory, disk, Rosetta and Kubernetes. A change only edits `colima.yaml`. The VM stays stopped, and the new values apply at the next start. CPU, memory, Rosetta and Kubernetes save with no dialog. A bigger disk asks first. **Shrink…** of a stopped VM starts the VM once to create the new disk, then stops it again. See [Open the dashboard](docs/usage.md#open-the-dashboard).
+
+### Changed
+
+- The Rosetta switch is disabled when the VM type of the profile is `qemu`. Rosetta needs the `vz` VM type.
+
 ### Fixed
 
 - **Start** and **Stop** in the profile menu now list the selected profile too. Before, with only one profile, both submenus were empty but still opened, so a click did nothing. An empty submenu is now left out.
