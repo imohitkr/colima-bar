@@ -34,7 +34,7 @@ macOS does not show the "Apple could not verify" prompt for this download. If Co
 Set `COLIMABAR_VERSION` to the release tag. The installer supports v0.4.0 and later.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_VERSION=v0.5.0 bash
+curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_VERSION=v0.6.0 bash
 ```
 
 ## Homebrew
