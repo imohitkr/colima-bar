@@ -70,6 +70,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             case .viewLogs: self.model.openLogs(id: ctr.id, name: ctr.name, profile: p)
             }
         }
+        Notifier.shared.onProfileRestart = { [weak self] profile in
+            self?.model.restartFromAlert(profile)
+        }
     }
 
     func applicationDidFinishLaunching(_ note: Notification) {

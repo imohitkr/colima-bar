@@ -57,6 +57,16 @@ To fix it, do these steps:
 
 Auto-start also does nothing for some profiles. See [When auto-start does not start the VM](auto-start.md#when-auto-start-does-not-start-the-vm).
 
+## Problems after the Mac sleeps
+
+After the Mac wakes, ColimaBar checks each running VM. See [When the Mac sleeps](usage.md#when-the-mac-sleeps). If Docker does not answer, or ColimaBar cannot set the clock of the VM, you get a notification.
+
+To fix it, do these steps:
+
+1. Click **Restart** in the notification, or restart the VM from the dashboard.
+2. If the clock of the VM is wrong, compare the clocks. On the Mac, run `date -u` and `colima ssh --profile PROFILE -- date -u`.
+3. If the clock is often wrong, update Colima and Lima. Lima 2.1 and later set the clock of the VM every 10 seconds.
+
 ## docker cannot connect after you quit ColimaBar
 
 When ColimaBar quits, auto-start stops. The ColimaBar socket then points directly to Colima. If the VM is stopped, docker cannot connect.

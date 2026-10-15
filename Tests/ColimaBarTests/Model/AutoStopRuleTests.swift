@@ -6,7 +6,7 @@ import Testing
 @Suite struct AutoStopRuleTests {
     private func check(
         enabled: Bool = true, isRunning: Bool = true, isBusy: Bool = false, containers: Int? = 0, transfers: Int = 0,
-        since: Date?, now: Date, minutes: Int = 30
+        since: SuspendingClock.Instant?, now: SuspendingClock.Instant, minutes: Int = 30
     ) -> AutoStopRule.Check {
         AutoStopRule.evaluate(
             enabled: enabled, isRunning: isRunning, isBusy: isBusy, runningContainers: containers,
@@ -14,7 +14,7 @@ import Testing
     }
 
     @Test func idleTimeStartsThenBecomesDue() {
-        let clock = TestClock()
+        var clock = TestInstants()
         let start = clock.now
         let first = check(since: nil, now: clock.now)
         #expect(first == AutoStopRule.Check(idleSince: start, isDue: false))
@@ -25,7 +25,7 @@ import Testing
     }
 
     @Test func anyActivityResetsTheIdleTime() {
-        let clock = TestClock()
+        var clock = TestInstants()
         let since = clock.now
         clock.advance(3600)
         let reset = AutoStopRule.Check(idleSince: nil, isDue: false)
@@ -37,7 +37,7 @@ import Testing
     }
 
     @Test func anUnknownContainerListIsNotIdle() {
-        let clock = TestClock()
+        var clock = TestInstants()
         let since = clock.now
         clock.advance(3600)
         #expect(
@@ -47,7 +47,7 @@ import Testing
     @Test func eachProfileKeepsItsOwnIdleTime() {
         // Two profiles that became idle at different times reach the
         // timeout at different times.
-        let clock = TestClock()
+        var clock = TestInstants()
         let a = check(since: nil, now: clock.now)
         clock.advance(10 * 60)
         let b = check(since: nil, now: clock.now)
@@ -56,6 +56,46 @@ import Testing
         #expect(!check(since: b.idleSince, now: clock.now).isDue)
         clock.advance(10 * 60)
         #expect(check(since: b.idleSince, now: clock.now).isDue)
+    }
+
+    @Test func stopTimeMovesLaterByTheSleepTime() {
+        // The Mac sleeps 8 hours: the wall clock moves 8 hours, the instants do not.
+        let wall = Date(timeIntervalSince1970: 1_800_000_000)
+        let since = SuspendingClock.now
+        let now = since + .seconds(10 * 60)
+        let before = AutoStopRule.stopTime(idleSince: since, now: now, wallNow: wall, idleMinutes: 30)
+        #expect(before == wall.addingTimeInterval(20 * 60))
+        let after = AutoStopRule.stopTime(
+            idleSince: since, now: now, wallNow: wall.addingTimeInterval(8 * 3600), idleMinutes: 30)
+        #expect(after == before.addingTimeInterval(8 * 3600))
+    }
+
+    @Test func stopTimeKeepsTheFractionOfASecond() {
+        let wall = Date(timeIntervalSince1970: 1_800_000_000)
+        let since = SuspendingClock.now
+        let now = since + .milliseconds(1500)
+        let stop = AutoStopRule.stopTime(idleSince: since, now: now, wallNow: wall, idleMinutes: 30)
+        #expect(abs(stop.timeIntervalSince(wall) - (30 * 60 - 1.5)) < 0.000_001)
+    }
+
+    @Test func stopTimeStaysWhileTheMacIsAwake() {
+        // Both clocks move by the same time: the stop time does not change.
+        let wall = Date(timeIntervalSince1970: 1_800_000_000)
+        let since = SuspendingClock.now
+        let a = AutoStopRule.stopTime(idleSince: since, now: since, wallNow: wall, idleMinutes: 30)
+        let b = AutoStopRule.stopTime(
+            idleSince: since, now: since + .seconds(300), wallNow: wall.addingTimeInterval(300), idleMinutes: 30)
+        #expect(a == b)
+    }
+
+    @Test func stopTimeIsPublishedOnlyWhenItMovedBySeconds() {
+        let t = Date(timeIntervalSince1970: 1_800_000_000)
+        #expect(!AutoStopRule.stopTimeMoved(old: nil, new: nil))
+        #expect(AutoStopRule.stopTimeMoved(old: nil, new: t))
+        #expect(AutoStopRule.stopTimeMoved(old: t, new: nil))
+        #expect(!AutoStopRule.stopTimeMoved(old: t, new: t.addingTimeInterval(0.9)))
+        #expect(AutoStopRule.stopTimeMoved(old: t, new: t.addingTimeInterval(-1)))
+        #expect(AutoStopRule.stopTimeMoved(old: t, new: t.addingTimeInterval(3600)))
     }
 
     @Test func otherProfilesAreTheRunningDockerProfilesExceptTheSelectedOne() {

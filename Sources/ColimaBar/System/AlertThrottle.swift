@@ -26,4 +26,9 @@ struct AlertThrottle {
         last[key] = now
         return true
     }
+
+    /// Forgets `key`, so the next `allow` for it is true.
+    mutating func reset(_ key: String) {
+        last[key] = nil
+    }
 }

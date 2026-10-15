@@ -131,7 +131,7 @@ enum Help {
     static let autoStop =
         "Stop the VM of each running profile after it is idle for the selected time. Each profile has its own idle time. Running containers and docker builds, pulls or pushes keep a VM running. If auto-start is on, the next docker command starts it again."
     static let autoStopMinutes =
-        "The time with no running containers and no docker builds, pulls or pushes before the VM stops."
+        "The time with no running containers and no docker builds, pulls or pushes before the VM stops. Time that the Mac sleeps does not count."
     static let autoStopCustom =
         "Type a number of minutes from 1 to 1440 (24 hours). Press Return or click elsewhere to apply it."
     static let hideIcon =

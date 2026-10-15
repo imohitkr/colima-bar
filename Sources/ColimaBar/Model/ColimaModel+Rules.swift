@@ -75,6 +75,27 @@ extension ColimaModel {
         busyMarker != nil || actionsInFlight > 0
     }
 
+    /// The check after a system sleep skips a profile that blocks auto-stop,
+    /// and a profile that an auto-start (`starting`) wakes now. They report
+    /// their own failures.
+    nonisolated static func blocksSleepCheck(busyMarker: String?, actionsInFlight: Int, starting: Bool) -> Bool {
+        blocksAutoStop(busyMarker: busyMarker, actionsInFlight: actionsInFlight) || starting
+    }
+
+    /// What the Restart button of an alert does for a profile.
+    enum AlertRestart: Equatable {
+        case restart, missing, busy, stopped
+    }
+
+    /// Restart only a profile that still exists, has no action, and has a
+    /// running VM. Else `colima start` could make a new VM or start a VM that
+    /// the user stopped.
+    nonisolated static func alertRestart(exists: Bool, blocked: Bool, running: Bool) -> AlertRestart {
+        guard exists else { return .missing }
+        guard !blocked else { return .busy }
+        return running ? .restart : .stopped
+    }
+
     /// Whether the profile menu offers Start (`start`) or Stop for a profile.
     /// The selected profile uses its live state; another profile uses its
     /// row in the last `colima list`. A profile with an action that runs

@@ -32,6 +32,14 @@ import Testing
         #expect(!t.allow(key))
     }
 
+    @Test func resetAllowsTheKeyAtOnce() {
+        let t = Box(FakeClock())
+        #expect(t.allow("a"))
+        #expect(!t.allow("a"))
+        t.t.reset("a")
+        #expect(t.allow("a"))
+    }
+
     @Test func keysAreSeparateByContainerAndKind() {
         let clock = FakeClock()
         let t = Box(clock)

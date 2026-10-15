@@ -6,8 +6,14 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- After the Mac wakes from sleep, ColimaBar refreshes at once and checks that Docker answers in each running VM with the docker runtime. If Docker does not answer, it sends one notification with a **Restart** button. If the clock of a VM is more than 2 seconds off, ColimaBar waits 20 seconds for Lima to fix it first. Then it sets the clock to the time of the Mac, and it sends a notification if that fails. See [When the Mac sleeps](docs/usage.md#when-the-mac-sleeps).
+
 ### Fixed
 
+- Auto-stop does not count the time that the Mac sleeps as idle time. Before, after a long sleep, the VM stopped seconds after the Mac woke.
+- Auto-start does not fail when the Mac sleeps while it waits for Docker.
 - CI no longer fails now and then on a slow runner. The tests no longer block the threads that Swift concurrency needs, and they wait up to 20 s for a result.
 
 ## [0.6.0] - 2026-10-08

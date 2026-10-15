@@ -110,9 +110,9 @@ struct SystemTab: View {
             }
             .disabled(!model.autoStop)
             .padding(.leading, 22)
-            if model.autoStop, let since = model.idleSince {
+            if model.autoStop, let since = model.idleSince, let stopAt = model.autoStopAt {
                 Text(
-                    "Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(since.addingTimeInterval(Double(model.autoStopMinutes * 60)).formatted(date: .omitted, time: .shortened))."
+                    "Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(stopAt.formatted(date: .omitted, time: .shortened))."
                 )
                 .font(.caption2).foregroundStyle(.secondary)
             }

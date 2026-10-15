@@ -14,7 +14,7 @@ Auto-stop checks each running [profile](usage.md#profiles) with the docker runti
 
 For a different time, select **Custom** and type a number of minutes from 1 to 1440 (24 hours). Press Return or click elsewhere to apply it. Until you apply it, ColimaBar uses the old time and shows a Return symbol next to the field.
 
-While the VM is idle, the System tab shows when the idle time started and when the VM will stop.
+While the VM is idle, the System tab shows when the idle time started and when the VM will stop. If the Mac sleeps, the stop time moves later by the sleep time.
 
 ## What counts as activity
 
@@ -30,6 +30,12 @@ Idle pollers and event streams do not count as activity. A docker client that co
 Before ColimaBar stops the VM, it gets a new container list from the Docker daemon of the profile to confirm that no container runs. If it cannot get the list, it does not stop the VM.
 
 The System tab shows the idle time of the selected profile only. For the other profiles, ColimaBar asks for the container list each 30 seconds. Thus another profile stops up to 30 seconds after its idle time is over.
+
+## When the Mac sleeps
+
+The time that the Mac sleeps does not count as idle time. The VM sleeps with the Mac, so it does no work in that time. After a long sleep, the VM does not stop at once. It stops when the idle time is over, counted without the sleep.
+
+Sleep does not restart the idle time. If you make the Mac sleep often, auto-stop still stops the VM.
 
 ## After auto-stop
 

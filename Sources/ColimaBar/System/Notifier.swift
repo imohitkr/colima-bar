@@ -20,6 +20,9 @@ enum NotificationAction: String, Sendable {
     }
 }
 
+/// The button on a profile alert.
+private let restartProfileAction = "RESTART_VM"
+
 /// Native notifications (ColimaBar's own name and icon). Container alerts get
 /// "View logs" and "Restart" buttons. Permission is requested the first time
 /// something is worth notifying about. Every alert is also handed to
@@ -33,11 +36,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let log = Logger(category: "notify")
     private let center = UNUserNotificationCenter.current()
     private static let containerCategory = "CONTAINER"
+    private static let profileCategory = "PROFILE"
 
     /// Called with (action, container, profile) when a button is used.
     var onContainerAction: ((NotificationAction, ContainerRef, String?) -> Void)?
     /// Called with (title, body, container) for every alert, delivered or not.
     var onAlert: ((String, String, ContainerRef?) -> Void)?
+    /// Called with the profile when the Restart button of a profile alert is used.
+    var onProfileRestart: ((String) -> Void)?
     /// Called with whether macOS currently allows ColimaBar's notifications.
     var onPermission: ((Bool) -> Void)?
 
@@ -56,16 +62,22 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         center.setNotificationCategories([
             UNNotificationCategory(
                 identifier: Self.containerCategory, actions: [logs, restart],
-                intentIdentifiers: [], options: [])
+                intentIdentifiers: [], options: []),
+            UNNotificationCategory(
+                identifier: Self.profileCategory,
+                actions: [UNNotificationAction(identifier: restartProfileAction, title: "Restart", options: [])],
+                intentIdentifiers: [], options: []),
         ])
     }
 
     /// `record: false` for messages about the app itself (updates, tips),
     /// which don't belong in the dashboard's list of container alerts.
     /// `url` makes a click on the banner open that page.
+    /// `restartProfile` adds a Restart button for that profile. A click on the
+    /// banner itself does nothing.
     func post(
         _ body: String, title: String = "Colima", container: ContainerRef? = nil,
-        profile: String? = nil, record: Bool = true, url: URL? = nil
+        profile: String? = nil, record: Bool = true, url: URL? = nil, restartProfile: String? = nil
     ) {
         if record { onAlert?(title, body, container) }
         // The dashboard list above still gets every alert. Only the banner is skipped.
@@ -80,6 +92,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 content.categoryIdentifier = Self.containerCategory
                 content.userInfo = ["id": container.id, "name": container.name, "profile": profile ?? ""]
                 content.threadIdentifier = container.name
+            } else if let restartProfile {
+                content.categoryIdentifier = Self.profileCategory
+                content.userInfo = ["restartProfile": restartProfile]
+                content.sound = .default
             } else if let url {
                 content.userInfo = ["url": url.absoluteString]
             }
@@ -88,6 +104,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 log.error("notification failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+    }
+
+    /// The profile to restart for a response, or nil. Only the Restart button
+    /// of a profile alert gives a profile: a banner click or a container alert gives nil.
+    nonisolated static func profileToRestart(userInfo: [AnyHashable: Any], action: String) -> String? {
+        guard action == restartProfileAction, let name = userInfo["restartProfile"] as? String,
+            ProfileName.isValid(name)
+        else { return nil }
+        return name
     }
 
     /// Debug: prints the permission state and posts a test alert.
@@ -160,7 +185,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let link = (info["url"] as? String).flatMap(URL.init(string:)).flatMap {
             $0.scheme?.lowercased() == "https" ? $0 : nil
         }
+        let restart = Self.profileToRestart(userInfo: info, action: action)
         await MainActor.run {
+            if let restart { self.onProfileRestart?(restart) }
             if let link { NSWorkspace.shared.open(link) }
             if !id.isEmpty {
                 // Clicking the banner itself also opens the logs.

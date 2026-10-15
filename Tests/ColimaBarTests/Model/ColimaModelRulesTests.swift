@@ -161,6 +161,24 @@ import Testing
         #expect(ColimaModel.blocksAutoStop(busyMarker: nil, actionsInFlight: 1))
     }
 
+    @Test func theCheckAfterSleepSkipsProfilesThatReportTheirOwnFailures() {
+        #expect(!ColimaModel.blocksSleepCheck(busyMarker: nil, actionsInFlight: 0, starting: false))
+        #expect(ColimaModel.blocksSleepCheck(busyMarker: "Stopping", actionsInFlight: 0, starting: false))
+        #expect(ColimaModel.blocksSleepCheck(busyMarker: nil, actionsInFlight: 1, starting: false))
+        // An auto-start has no busy marker and no action in flight.
+        #expect(ColimaModel.blocksSleepCheck(busyMarker: nil, actionsInFlight: 0, starting: true))
+    }
+
+    @Test func restartFromAnAlertNeedsAnExistingIdleRunningProfile() {
+        func decide(exists: Bool = true, blocked: Bool = false, running: Bool = true) -> ColimaModel.AlertRestart {
+            ColimaModel.alertRestart(exists: exists, blocked: blocked, running: running)
+        }
+        #expect(decide() == .restart)
+        #expect(decide(exists: false, blocked: true, running: false) == .missing)
+        #expect(decide(blocked: true, running: false) == .busy)
+        #expect(decide(running: false) == .stopped)
+    }
+
     @Test func profileMenuOffersStartAndStopAlsoForTheSelectedProfile() {
         func offers(_ start: Bool, selected: Bool, _ state: VMState, listed: Bool = false, busy: Bool = false) -> Bool {
             ColimaModel.profileAction(
