@@ -15,9 +15,16 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 - The busy marker and the lock of a VM action hold the PID of the script. After a long sleep of the Mac, an action that still runs keeps its lock, and ColimaBar no longer shows it as finished. A marker or lock of a script that is gone ends at once.
 
-- ColimaBar moves the docker CLI back to the `colimabar` context after Colima starts. Before, `colima start` switched it to `colima` and it stayed there. After `colima stop`, docker failed with `context "colima": context not found` and auto-start did not work. ColimaBar now also repairs this state.
+## [0.7.1] - 2026-10-15
+
+### Changed
+
 - While auto-start is on, ColimaBar moves a manual `docker context use colima` back to `colimabar`. The move can take up to 15 seconds.
 - When another profile starts, ColimaBar moves the docker CLI to `colimabar-PROFILE`. Before, it moved to `colimabar`, which pointed at the daemon of the selected profile.
+
+### Fixed
+
+- ColimaBar moves the docker CLI back to the `colimabar` context after Colima starts. Before, `colima start` switched it to `colima` and it stayed there. After `colima stop`, docker failed with `context "colima": context not found` and auto-start did not work. ColimaBar now also repairs this state.
 
 ## [0.7.0] - 2026-10-15
 
@@ -176,7 +183,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/imohitkr/colima-bar/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/imohitkr/colima-bar/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/imohitkr/colima-bar/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...v0.5.0
