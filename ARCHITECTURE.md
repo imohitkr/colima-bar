@@ -10,7 +10,7 @@ ColimaBar is a menu bar app for [Colima](https://github.com/abiosoft/colima). It
 2. **Auto-start.** It runs a proxy on a unix socket, the stable socket. All docker clients use that socket. While the VM is down, the first real docker request starts Colima. Each docker profile also has its own proxy socket, the profile socket, which starts that profile.
 3. **Auto-stop.** It can stop the VM of each running profile after an idle time.
 
-ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
+ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
 
 ColimaBar gets its data from three sources:
 
@@ -41,7 +41,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `SettingsTransfer`: the settings file format (JSON with a format name and a version), its checks and the import plan.
 - `DiskShrink`: the rules and the warning text for a smaller disk.
 - `VMConfig`: the VM settings in the `colima.yaml` of the selected profile (`ColimaModel.config`), and the values that the settings show (`VMConfig.shown`). For a stopped VM, `colima list` shows the values of the last start, not the file. Memory is a decimal number of GiB, as in Colima: `memory: 2.5` is 2.5 GiB. CPU and disk are whole numbers.
-- `AutoStopRule`: the idle rule for one profile (it uses `SuspendingClock`), the stop time and which other profiles auto-stop checks.
+- `AutoStopRule`: the idle rule for one profile (it uses `SuspendingClock`), the idle time for the power state (`limit`), the stop time and which other profiles auto-stop checks.
 - `AfterSleepCheck`: which profiles the check after a system sleep covers, its ping delays and its notification texts.
 - `ClockDrift`: measures the clock of a VM against the Mac, and builds the command that fixes it.
 - `ProfileName`: the name rules of `colima-ctl.sh`, and the stricter rules for a new profile.
@@ -68,7 +68,8 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `ProfileContexts`: creates, updates and removes the `colimabar-PROFILE` docker contexts.
 - `LoginItem`: the login item.
 - `Notifier` and `AlertThrottle`: notifications and their rate limit.
-- `SystemPowerObserver`: reports system sleep and the end of it. It is the only place that subscribes to power events.
+- `SystemPowerObserver`: reports system sleep and the end of it. It also reports changes of the power state: the charger (`notify_register_dispatch` with `kIOPSNotifyPowerSource`), Low Power Mode and the thermal state. It is the only place that subscribes to power events.
+- `PowerState`: on battery, Low Power Mode and a hot Mac, and the heartbeat saving that follows (`PowerState.Saving`). `read()` is the only part that calls IOKit and `ProcessInfo`.
 - `Updater`, `Version`, `ReleaseLink`: the daily release check.
 - `Defaults`: `UserDefaults` access.
 - `ColimaDirWatcher`: watches the Colima folder, Lima's folder and their subfolders. Lima's folder can be outside the Colima folder (`LIMA_HOME`).
@@ -152,14 +153,24 @@ On quit, or when auto-start is off, each profile socket becomes a symlink to the
 
 ### VM state
 
-The heartbeat runs each second while a dashboard is open or an action runs. Otherwise it runs each 5 seconds. It pings the Docker socket each 3 seconds while a dashboard is open, and each 10 seconds otherwise.
+The heartbeat runs each second while a dashboard is open or an action runs. Otherwise its steps depend on the power state (`PowerState.saving`, `ColimaModel.tickInterval`, `pingInterval` and `staleAfter`). The model uses `.off` while a dashboard is open or an action runs.
+
+| Saving | Tick | Ping | `colima list` (running or stopped) |
+|---|---|---|---|
+| Dashboard open | 1 s | 3 s | 5 min |
+| Action runs, dashboard closed | 1 s | 10 s | 5 min |
+| `.off` (charger) | 5 s | 10 s | 5 min |
+| `.battery` | 10 s | 20 s | 10 min |
+| `.strong` (Low Power Mode, or thermal state serious or critical) | 15 s | 30 s | 15 min |
+
+Each ping time is a whole number of ticks. A VM in another state refreshes after 60 seconds. The proxies and the folder watcher do not depend on the tick. Auto-start and auto-stop read the busy marker directly, so auto-start is not slower. The hourglass for an action from outside the app follows the tick: in Low Power Mode with the dashboard closed, it can lag by up to about 22 seconds.
 
 ColimaBar runs `colima list -j` only in these cases:
 
 - A ping shows that the VM went up or down.
 - `ColimaDirWatcher` sees a change in the Colima folder (`Paths.colimaDir`), a profile folder, Lima's folder (`Paths.limaDir`) or a Lima instance folder.
 - The dashboard opens and the last list is more than 1 minute old.
-- The last list is more than 5 minutes old (1 minute when the state is not running or stopped).
+- The last list is older than the time in the table above (5, 10 or 15 minutes; 1 minute when the state is not running or stopped).
 
 The model reads the `colima.yaml` of the selected profile after each `colima list` that succeeds, each time the dashboard opens, and after a config edit of a stopped VM.
 
@@ -203,9 +214,10 @@ The exit codes are fixed. 0 means done. 1 means failed, and the script already n
 
 `AutoStopRule.evaluate` holds the idle rule for one profile. A profile is idle when no container runs, no `colima-ctl.sh` action that ColimaBar started runs (`blocksAutoStop`) and its proxies have no active transfers. A transfer is a connection whose latest request is a build, pull, push, load, save, commit or BuildKit session (`SocketProxy.isWork`). Each profile has its own idle time. The timeout setting is the same for all.
 
-- `checkIdle()` checks the selected profile at each tick. It counts the transfers of the stable socket and of the profile socket of the selected profile. Before it stops the VM, it gets a fresh container list. If that fails, it does not stop.
+- `checkIdle()` checks the selected profile at each tick. It counts the transfers of the stable socket and of the profile socket of the selected profile. Before it stops the VM, it gets a fresh container list. If that fails, it does not stop. While that check runs, `checkIdle()` does nothing. After the list, it reads the limit again and stops only if the idle time (`AutoStopRule.stillDue`) is still over.
 - `checkOtherProfilesIdle()` checks each other running docker profile (`AutoStopRule.otherProfiles`). A transfer or a busy marker resets its idle time at each tick. Each 30 seconds (`AutoStopRule.otherCheckInterval`), it gets a fresh container list from the socket of the profile. A failed list does not count as idle. When the idle time is over, it runs `auto-stop` for that profile.
 - The idle time uses `SuspendingClock`, which stops while the Mac sleeps, as the VM does. Thus the sleep time never counts, and a dark wake needs no event. The idle time does not restart after a sleep: on a laptop that sleeps often, it would never stop the VM. `idleSince` is the wall time for display. `autoStopAt` is the stop time (`AutoStopRule.stopTime`). It moves later by the sleep time.
+- `AutoStopRule.limit` gives the idle time for the power state: at most 10 minutes on battery and at most 5 minutes in Low Power Mode, while `autoStopSooner` is on. A shorter user time stays. The thermal state does not change it. `checkIdle()` and `checkOtherProfilesIdle()` read the limit at each check. A power change keeps the idle start, so the stop time moves at once. A change of the `autoStopSooner` setting restarts the idle time, as a change of the minutes does.
 - `checkIdle()` does nothing in a debug run.
 
 ### System sleep
@@ -264,7 +276,7 @@ Live stats stream only while a dashboard is on screen. Saved-log streams open on
 
 ### Debug runs
 
-`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep and auto-stop. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 
@@ -279,7 +291,7 @@ Do not break these rules.
 - **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
 - **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
-- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It does not observe system sleep, and it does not auto-stop a VM.
+- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It does not observe system sleep or power changes, and it does not auto-stop a VM.
 
 ## Testing
 

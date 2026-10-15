@@ -110,6 +110,19 @@ final class ColimaModel {
             resetIdle()
         }
     }
+    /// Stop sooner on battery or in Low Power Mode (`AutoStopRule.limit`).
+    var autoStopSooner = Defaults.bool(.autoStopSooner) ?? true {
+        didSet {
+            Defaults.set(autoStopSooner, .autoStopSooner)
+            resetIdle()
+        }
+    }
+    /// The power state. A debug run does not observe it, so it stays the default.
+    private(set) var power = PowerState()
+    /// The idle time that applies now.
+    var autoStopLimit: AutoStopRule.Limit {
+        AutoStopRule.limit(minutes: autoStopMinutes, power: power, stopSooner: autoStopSooner)
+    }
     var hideIconWhenStopped = Defaults.bool(.hideIconWhenStopped) ?? false {
         didSet { Defaults.set(hideIconWhenStopped, .hideIconWhenStopped) }
     }
@@ -276,13 +289,20 @@ final class ColimaModel {
             let observer = SystemPowerObserver()
             observer.onSleep = { [weak self] in self?.systemSleepBegan() }
             observer.onSleepEnd = { [weak self] in self?.systemSleepEnded() }
+            observer.onPowerChange = { [weak self] in self?.powerChanged($0) }
+            set(\.power, observer.power)
+            let p = observer.power
+            log.notice(
+                "power at start: battery \(p.onBattery, privacy: .public), low power \(p.lowPowerMode, privacy: .public), hot \(p.isHot, privacy: .public)"
+            )
             powerObserver = observer
         }
         Task { await refreshAll() }
         lastPing = Date()
         tickTask = Task {
             while !Task.isCancelled {
-                let interval = Self.tickInterval(state: state, busy: busy != nil, dashboardOpen: visibleCount > 0)
+                let interval = Self.tickInterval(
+                    state: state, busy: busy != nil, dashboardOpen: visibleCount > 0, saving: heartbeatSaving)
                 // A separate task, so wakeHeartbeat() can end the sleep early.
                 let sleep = Task { _ = try? await Task.sleep(for: interval, tolerance: interval / 2) }
                 tickSleep = sleep
@@ -298,6 +318,24 @@ final class ColimaModel {
         ColimaDirWatcher(root: Paths.colimaDir, lima: Paths.limaDir) { [weak self] in
             Task { await self?.refreshStatus() }
         }
+    }
+
+    /// The heartbeat saves nothing while a dashboard is open or an action runs.
+    private var heartbeatSaving: PowerState.Saving {
+        visibleCount > 0 || busy != nil ? .off : power.saving
+    }
+
+    /// The power state changed. The idle time does not restart: the stop time
+    /// follows the new limit at the next check.
+    private func powerChanged(_ new: PowerState) {
+        guard new != power else { return }
+        power = new
+        log.notice(
+            "power changed: battery \(new.onBattery, privacy: .public), low power \(new.lowPowerMode, privacy: .public), hot \(new.isHot, privacy: .public)"
+        )
+        // The stop time and its note follow at once, not at the next tick.
+        checkIdle()
+        wakeHeartbeat()
     }
 
     /// Ends the heartbeat's current sleep, so a tick runs now and the next
@@ -337,12 +375,15 @@ final class ColimaModel {
         }
         if visibleCount > 0 { publishStats() }
 
-        let staleAfter = Self.staleAfter(state: state)
+        let saving = heartbeatSaving
+        let staleAfter = Self.staleAfter(state: state, saving: saving)
         // A containerd profile has no docker socket, so a ping says nothing
         // about it. Refresh its state only when it is stale.
         if !hasDockerSocket {
             if Date().timeIntervalSince(lastColima) > staleAfter { await refreshStatus() }
-        } else if Date().timeIntervalSince(lastPing) >= (visibleCount > 0 ? 3 : 10) - 0.5 {
+        } else if Date().timeIntervalSince(lastPing) >= Self.pingInterval(
+            dashboardOpen: visibleCount > 0, saving: saving) - 0.5
+        {
             // The 0.5 s margin absorbs the sleep's tolerance.
             lastPing = Date()
             let ping = await api.get("/_ping", timeout: 2)
@@ -866,19 +907,22 @@ final class ColimaModel {
     private func checkIdle() {
         // A debug run changes nothing: it must not stop the VM of the user.
         guard !isDebug else { return }
+        // A check with a fresh list runs: a new evaluation would clear the idle
+        // start that the check needs after the await.
+        guard !isConfirmingAutoStop else { return }
         let now = SuspendingClock.now
+        let limit = autoStopLimit
         let check = AutoStopRule.evaluate(
             enabled: autoStop, isRunning: state == .running,
-            isBusy: Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0)
-                || isConfirmingAutoStop,
+            isBusy: Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0),
             runningContainers: running.count, transfers: selectedTransfers(), idleSince: idleStart, now: now,
-            idleMinutes: autoStopMinutes)
+            idleMinutes: limit.minutes)
         if check.idleSince != idleStart {
             idleStart = check.idleSince
             idleSince = check.idleSince == nil ? nil : Date()
         }
         let stopAt = check.idleSince.map {
-            AutoStopRule.stopTime(idleSince: $0, now: now, wallNow: Date(), idleMinutes: autoStopMinutes)
+            AutoStopRule.stopTime(idleSince: $0, now: now, wallNow: Date(), idleMinutes: limit.minutes)
         }
         if AutoStopRule.stopTimeMoved(old: autoStopAt, new: stopAt) { autoStopAt = stopAt }
         guard check.isDue else { return }
@@ -897,9 +941,16 @@ final class ColimaModel {
                 resetSelectedIdle()
                 return
             }
+            // The power state or the setting can change during the check.
+            let current = autoStopLimit
+            guard
+                AutoStopRule.stillDue(idleSince: idleStart, now: SuspendingClock.now, minutes: current.minutes)
+            else { return }
             resetSelectedIdle()
-            log.notice("auto-stopping idle profile \(self.profile, privacy: .public)")
-            run(.autoStop, "\(autoStopMinutes)")
+            log.notice(
+                "auto-stopping idle profile \(self.profile, privacy: .public) after \(current.minutes, privacy: .public) min\(current.reason.map { " (\($0.note))" } ?? "", privacy: .public)"
+            )
+            run(.autoStop, "\(current.minutes)")
         }
     }
 
@@ -958,16 +1009,20 @@ final class ColimaModel {
                 // A profile switch or a settings change reset the state.
                 guard gen == generation, var s = otherIdle[p] else { return }
                 s.isChecking = false
+                // Read the limit after the count: the power state can change during it.
+                let limit = autoStopLimit
                 let check = AutoStopRule.evaluate(
                     enabled: autoStop, isRunning: profiles.contains { $0.name == p && $0.isRunning } && p != profile,
                     isBusy: Self.blocksAutoStop(busyMarker: readBusy(p), actionsInFlight: actionsInFlight[p] ?? 0),
                     runningContainers: count, transfers: profileProxies.activeTransfers(p),
-                    idleSince: s.since, now: .now, idleMinutes: autoStopMinutes)
+                    idleSince: s.since, now: .now, idleMinutes: limit.minutes)
                 s.since = check.idleSince
                 otherIdle[p] = check.isDue ? nil : s
                 guard check.isDue else { return }
-                log.notice("auto-stopping idle profile \(p, privacy: .public)")
-                run(.autoStop, "\(autoStopMinutes)", profile: p)
+                log.notice(
+                    "auto-stopping idle profile \(p, privacy: .public) after \(limit.minutes, privacy: .public) min\(limit.reason.map { " (\($0.note))" } ?? "", privacy: .public)"
+                )
+                run(.autoStop, "\(limit.minutes)", profile: p)
             }
         }
     }
@@ -1409,6 +1464,8 @@ final class ColimaModel {
     private func setBusyNow(_ label: String) {
         localBusy = label
         if busy == nil { busy = label }
+        // The heartbeat runs each second now, not after a long sleep.
+        wakeHeartbeat()
     }
 
     func record(_ title: String, _ body: String, containerID: String?) {

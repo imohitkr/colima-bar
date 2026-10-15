@@ -8,6 +8,7 @@ extension ColimaModel {
             .autoStart: .bool(autoStart),
             .autoStop: .bool(autoStop),
             .autoStopMinutes: .int(autoStopMinutes),
+            .autoStopSooner: .bool(autoStopSooner),
             .hideIconWhenStopped: .bool(hideIconWhenStopped),
             .notifyOnCrash: .bool(notifyOnCrash),
             .keepRemovedLogs: .bool(keepRemovedLogs),
@@ -29,6 +30,7 @@ extension ColimaModel {
         case (.autoStart, .bool(let v)): autoStart = v
         case (.autoStop, .bool(let v)): autoStop = v
         case (.autoStopMinutes, .int(let v)): autoStopMinutes = IdleMinutes.clamp(v)
+        case (.autoStopSooner, .bool(let v)): autoStopSooner = v
         case (.hideIconWhenStopped, .bool(let v)): hideIconWhenStopped = v
         case (.notifyOnCrash, .bool(let v)): notifyOnCrash = v
         case (.keepRemovedLogs, .bool(let v)): keepRemovedLogs = v

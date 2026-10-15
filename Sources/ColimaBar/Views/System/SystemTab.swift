@@ -110,9 +110,15 @@ struct SystemTab: View {
             }
             .disabled(!model.autoStop)
             .padding(.leading, 22)
+            Toggle("Stop sooner on battery or in Low Power Mode", isOn: $model.autoStopSooner)
+                .toggleStyle(.checkbox)
+                .padding(.leading, 22)
+                .disabled(!model.autoStop)
+                .hint(Help.autoStopSooner)
             if model.autoStop, let since = model.idleSince, let stopAt = model.autoStopAt {
+                let note = model.autoStopLimit.reason.map { " (\($0.note))" } ?? ""
                 Text(
-                    "Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(stopAt.formatted(date: .omitted, time: .shortened))."
+                    "Idle since \(since.formatted(date: .omitted, time: .shortened)); stops at \(stopAt.formatted(date: .omitted, time: .shortened))\(note)."
                 )
                 .font(.caption2).foregroundStyle(.secondary)
             }

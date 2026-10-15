@@ -10,6 +10,7 @@ import Testing
         .autoStart: .bool(true),
         .autoStop: .bool(true),
         .autoStopMinutes: .int(45),
+        .autoStopSooner: .bool(false),
         .hideIconWhenStopped: .bool(false),
         .notifyOnCrash: .bool(true),
         .keepRemovedLogs: .bool(false),
@@ -34,6 +35,11 @@ import Testing
         let (values, skipped) = try T.decode(data)
         #expect(values == sample)
         #expect(skipped.isEmpty)
+    }
+
+    @Test func exportHoldsTheStopSoonerSetting() throws {
+        let settings = try #require(try object(try T.encode(sample, appVersion: "0.5.0"))["settings"] as? [String: Any])
+        #expect(settings["autoStopSooner"] as? Bool == false)
     }
 
     @Test func exportHasTheFormatHeader() throws {

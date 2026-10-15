@@ -24,6 +24,7 @@ enum SettingsTransfer {
         case autoStart
         case autoStop
         case autoStopMinutes
+        case autoStopSooner
         case hideIconWhenStopped
         case notifyOnCrash
         case keepRemovedLogs
@@ -37,6 +38,7 @@ enum SettingsTransfer {
             case .autoStart: "Auto-start"
             case .autoStop: "Auto-stop"
             case .autoStopMinutes: "Auto-stop time"
+            case .autoStopSooner: "Stop sooner on battery or in Low Power Mode"
             case .hideIconWhenStopped: "Hide the icon while Colima is stopped"
             case .notifyOnCrash: "Crash notifications"
             case .keepRemovedLogs: "Keep logs of removed containers"

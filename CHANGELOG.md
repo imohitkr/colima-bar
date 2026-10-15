@@ -9,6 +9,11 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Added
 
 - After the Mac wakes from sleep, ColimaBar refreshes at once and checks that Docker answers in each running VM with the docker runtime. If Docker does not answer, it sends one notification with a **Restart** button. If the clock of a VM is more than 2 seconds off, ColimaBar waits 20 seconds for Lima to fix it first. Then it sets the clock to the time of the Mac, and it sends a notification if that fails. See [When the Mac sleeps](docs/usage.md#when-the-mac-sleeps).
+- On battery, auto-stop stops an idle VM after 10 minutes at most. In Low Power Mode, it stops the VM after 5 minutes at most. A shorter time that you select stays. To turn this off, clear **Stop sooner on battery or in Low Power Mode**. Export and import include this setting. See [On battery and in Low Power Mode](docs/auto-stop.md#on-battery-and-in-low-power-mode).
+
+### Changed
+
+- On battery, in Low Power Mode or when the Mac is hot, ColimaBar checks the VM less often while the dashboard is closed.
 
 ### Fixed
 

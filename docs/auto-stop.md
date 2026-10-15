@@ -11,6 +11,7 @@ Auto-stop checks each running [profile](usage.md#profiles) with the docker runti
 1. Open the dashboard and click the System tab. The System tab shows only while Colima runs.
 2. Select **Stop Colima when idle**.
 3. Select the idle time: 5, 15, 30 or 60 minutes. The default is 30 minutes.
+4. To keep the full time on battery or in Low Power Mode, clear **Stop sooner on battery or in Low Power Mode**. See [On battery and in Low Power Mode](#on-battery-and-in-low-power-mode).
 
 For a different time, select **Custom** and type a number of minutes from 1 to 1440 (24 hours). Press Return or click elsewhere to apply it. Until you apply it, ColimaBar uses the old time and shows a Return symbol next to the field.
 
@@ -36,6 +37,19 @@ The System tab shows the idle time of the selected profile only. For the other p
 The time that the Mac sleeps does not count as idle time. The VM sleeps with the Mac, so it does no work in that time. After a long sleep, the VM does not stop at once. It stops when the idle time is over, counted without the sleep.
 
 Sleep does not restart the idle time. If you make the Mac sleep often, auto-stop still stops the VM.
+
+## On battery and in Low Power Mode
+
+**Stop sooner on battery or in Low Power Mode** is on by default. It matters only when auto-stop is on. It shortens the idle time to save energy:
+
+- On battery, an idle VM stops after 10 minutes at most.
+- In Low Power Mode, an idle VM stops after 5 minutes at most. This rule also applies on battery.
+
+A shorter time that you select stays. For example, with 5 minutes selected, the time stays 5 minutes on battery. A hot Mac does not change the time.
+
+A change of the power state does not restart the idle time. With the default 30 minutes, if you unplug the charger after 12 idle minutes, the VM stops at once (after the usual check of the container list). The System tab shows the new stop time with a note, for example "Idle since 14:02; stops at 14:12 (on battery)." When you plug in the charger, the stop time moves later again.
+
+On battery, in Low Power Mode or when the Mac is hot, ColimaBar also checks the VM less often while the dashboard is closed. Auto-start is not slower.
 
 ## After auto-stop
 

@@ -12,6 +12,8 @@ enum Defaults {
         case autoStart
         case autoStop
         case autoStopMinutes
+        /// Stop sooner on battery or in Low Power Mode (`AutoStopRule.limit`).
+        case autoStopSooner
         case hideIconWhenStopped
         case toldIconHidden
         case apiVersion
