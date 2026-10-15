@@ -165,12 +165,12 @@ enum Help {
 
     // Doctor
     static let doctorOpen =
-        "Open Doctor. It checks the tools, the docker context, the routes, the VM status and the disk space, and it offers fixes."
+        "Open Doctor. It checks the docker setup, the VM and the disk space of this profile, and offers fixes."
     static let doctorRun =
         "Run all checks again. The checks only read. They do not start or change the VM."
     static let doctorDone = "Close Doctor and go back to the dashboard."
     static let doctorRepair =
-        "Use this when the VM does not start or Colima reports it as Broken. ColimaBar removes the pid files that name another process, stops the VM by force, removes the other stale pid files and starts the VM. It asks first. Disks, images and volumes stay."
+        "Use this when the VM does not start or Colima reports it as Broken. ColimaBar removes the pid files that name another process, stops the VM by force, removes the other stale pid files and starts the VM. It asks first. Running containers stop. Disks, images and volumes stay."
     static let doctorDebug = "A debug run changes nothing."
     static func doctorFix(_ fix: DoctorFix) -> String {
         switch fix {
