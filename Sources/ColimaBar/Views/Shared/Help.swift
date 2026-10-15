@@ -163,6 +163,46 @@ enum Help {
     static let importSettings =
         "Load ColimaBar settings from a JSON file. ColimaBar shows the changes before it applies them. A profile that does not exist on this Mac is skipped."
 
+    // Doctor
+    static let doctorOpen =
+        "Open Doctor. It checks the tools, the docker context, the routes, the VM status and the disk space, and it offers fixes."
+    static let doctorRun =
+        "Run all checks again. The checks only read. They do not start or change the VM."
+    static let doctorDone = "Close Doctor and go back to the dashboard."
+    static let doctorRepair =
+        "Use this when the VM does not start or Colima reports it as Broken. ColimaBar removes the pid files that name another process, stops the VM by force, removes the other stale pid files and starts the VM. It asks first. Disks, images and volumes stay."
+    static let doctorDebug = "A debug run changes nothing."
+    static func doctorFix(_ fix: DoctorFix) -> String {
+        switch fix {
+        case .useColimabar:
+            "Switch the docker CLI to the colimabar context. The docker CLI then starts Colima on demand."
+        case .setRoutes:
+            "Set DOCKER_HOST for apps that launchd starts, and docker.host in ~/.testcontainers.properties. ColimaBar leaves a route that points to another daemon."
+        case .copyLine:
+            "Copy the line 'export DOCKER_HOST=…' for the ColimaBar socket. Paste it in place of the line in your shell startup file."
+        case .useOsxkeychain:
+            "Set credsStore to osxkeychain in the docker config file. ColimaBar saves a backup first."
+        case .addPluginFolder:
+            "Add /opt/homebrew/lib/docker/cli-plugins to cliPluginsExtraDirs in the docker config file. ColimaBar saves a backup first."
+        case .repair:
+            doctorRepair
+        }
+    }
+    static func doctorCheck(_ check: DoctorCheck) -> String {
+        switch check {
+        case .tools: "The versions of colima, Lima and docker."
+        case .context: "The docker context that the docker CLI uses."
+        case .appRoutes: "The routes for apps and testcontainers."
+        case .shellHost: "DOCKER_HOST in the startup files of your shell."
+        case .credentials: "The credential helper for registry logins."
+        case .plugins: "The docker buildx and docker compose plugins."
+        case .vmStatus: "The status of this profile in colima list."
+        case .staleFiles: "Pid files of Lima and of the Colima daemon that name a process that is gone or not theirs."
+        case .diskSpace: "Free space in the VM and on the Mac."
+        }
+    }
+    static let doctorStopped = "Open Doctor to find out why the VM does not start."
+
     // Footer
     static let ssh = "Open a shell in the Colima VM, in iTerm, or in Terminal when iTerm is not installed."
     static let copyEnv =

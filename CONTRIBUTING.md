@@ -49,6 +49,7 @@ The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--
 `--snapshot` also reads these environment variables:
 
 - `COLIMABAR_HINT`: text for the hint bar.
+- `COLIMABAR_DOCTOR`: set it to `1`. The PNG then shows the Doctor page after the checks ran. The checks only read, and the fix buttons are disabled.
 - `COLIMABAR_LOGS`: a container name. The PNG then shows the log viewer for that container.
 - `COLIMABAR_SNAPSHOT_HEIGHT`: the window height in points.
 - `COLIMABAR_SNAPSHOT_DELAY`: seconds to wait before the snapshot (default 6). Use 65 to fill the sparklines.

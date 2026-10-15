@@ -48,6 +48,8 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `NewProfileForm`: the values and checks of the New Profile form.
 - `ProfileDelete`: when a delete is refused, its warning text and the profile to select after it.
 - `CtlAction`: the actions of `colima-ctl.sh`.
+- Doctor, see [Doctor](#doctor): `DoctorCheck` (the nine checks), `DoctorResult` (a status, a detail and an optional `DoctorFix`), `DoctorFix`, `DoctorInputs` (everything the checks read), `DoctorRules` and `DoctorRules+Docker` (the pure rules: inputs in, results out), `DoctorReport` (the results of one run, its summary and its plain text), `ColimaModel+Doctor` (`runDoctor()`, `applyFix(_:)`, `repairProfile()`, `currentDoctorReport`, `doctorHint`). The parsers and rules have their own types: `ToolVersions`, `ShellStartupScan`, `DockerConfig`, `StaleLimaFile`, `DiskSpace`.
+- `BusyMarker`: reads the busy marker (label and owner PID) and decides if it is stale.
 - `DFGate`: allows one `/system/df` call at a time.
 - `LatestOnly`: drops results of overlapping calls that arrive out of order.
 - `Models`, `VMState`, `IdleMinutes`: row types, the VM state and the auto-stop times.
@@ -64,7 +66,10 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 - `Paths`: all file paths. `colimaDir` and `limaDir` find the Colima folder and Lima's folder with the rule in [Actions and `colima-ctl.sh`](#actions-and-colima-ctlsh). The model checks both folders again on each status refresh and each heartbeat tick.
 - `Shell`: runs `colima`, `colima-ctl.sh` and other tools, and opens iTerm or Terminal.
-- `Routing`: sets and checks the docker routes.
+- `Routing`: sets and checks the docker routes. `Routing.useOwnContext()` is the Doctor fix **Use colimabar**.
+- `DoctorProbe`: all the I/O of Doctor (tool versions, `docker context ls`, the shell files, the docker config file, plugin folders, `colima-ctl.sh stale-files`, `df`). It reads only.
+- `DockerConfigFile`: edits the docker config file for a Doctor fix: a private backup `config.json.colimabar-YYYYMMDD-HHMMSS`, then a write through a symlink.
+- `ProcessProbe`: the start time of a process by PID (`sysctl`), for the busy marker.
 - `ProfileContexts`: creates, updates and removes the `colimabar-PROFILE` docker contexts.
 - `LoginItem`: the login item.
 - `Notifier` and `AlertThrottle`: notifications and their rate limit.
@@ -81,17 +86,17 @@ The log windows. `LogStore` holds the live state for one container. If the conta
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Doctor/` has `DoctorView` (the Doctor page) and `DoctorRow` (one check). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
 
 ### `Support/`
 
-Small helpers with no app state: `Parse` (for example `colima.yaml` lookup), byte formatting and bounded concurrency. `Logger+ColimaBar` creates loggers in the unified log subsystem `com.imohitkr.ColimaBar`.
+Small helpers with no app state: `Parse` (for example `colima.yaml` lookup), byte formatting, bounded concurrency and `SymlinkWrite` (writes to the target of a symlink and keeps the mode; `Routing` and `DockerConfigFile` use it). `Logger+ColimaBar` creates loggers in the unified log subsystem `com.imohitkr.ColimaBar`.
 
 ### Other files
 
 | Path | Contents |
 |---|---|
-| `scripts/colima-ctl.sh` | VM actions, confirm dialogs and `colima.yaml` changes. The app bundle contains it. |
+| `scripts/colima-ctl.sh` | VM actions, confirm dialogs, `colima.yaml` changes, `stale-files` and `repair`. The app bundle contains it. |
 | `scripts/install.sh` | The installer. |
 | `scripts/uninstall.sh` | The uninstall script. The app bundle contains it. |
 | `scripts/make-icon.swift` | Draws `Resources/AppIcon.icns`. |
@@ -217,7 +222,25 @@ The script reads values of `colima.yaml` in the same forms as `VMConfig.parse`: 
 
 A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. Colima creates the new disk only at a start. Thus for a stopped VM, the script runs `colima stop` at the end. The busy marker covers the full run. That start switches the docker context, so the model checks the context after the shrink like after any VM action. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
 
+The script puts its PID in the lock (`lock.PROFILE/pid`, written through a temporary file and `mv`) and in line 2 of the busy marker (line 1 is the label). A leftover is stale when `ps` shows that its owner is gone, or that the PID belongs to a process that started after the file was written (`owner_check`, with `ps -o command=` and `ps -o etime=`). If the PID cannot be read, the lock follows the 30-minute rule. A lock folder with no PID file, left by an owner that is ending, is removed, not given back. Age alone does not free a lock whose owner runs, so a long sleep of the Mac cannot free the lock of an action that still runs. A lock or marker with no PID (older versions) keeps the old rule: 30 and 20 minutes. `ColimaModel` reads the marker with `BusyMarker` and `ProcessProbe` and removes a stale one.
+
+`stale-files` prints the pid files of Lima and of the Colima daemon that they cannot use, as `reason<TAB>path<TAB>pid` lines (`gone`, `reused`, `invalid`). It takes no lock, writes no busy marker and runs no `colima` command. `repair` is the action behind Doctor's **Repair**: see [Doctor](#doctor).
+
 The exit codes are fixed. 0 means done. 1 means failed, and the script already notified the user. 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
+
+### Doctor
+
+Doctor checks the setup of the selected profile. It runs only on request: the **Run checks** button, or the Doctor page when it opens and the last report is more than 5 minutes old (`DoctorReport.staleAfter`). It never runs from the heartbeat. The checks never send a notification. A fix sends one with the result. One run at a time (`isDoctorRunning`). A profile switch drops the result of a run in progress (`generation`). A request during a run (`isDoctorRunQueued`) makes the run start once more, so the new profile gets its report. A probe that fails gives a skipped or warning result, never an OK: a failed `colima list` (`refreshStatus()` returns false), a failed `stale-files`, a failed `df`, a tool that does not run, a file that cannot be read.
+
+- **Design.** `DoctorProbe` reads the system (the only I/O), `ColimaModel.collectDoctor()` fills `DoctorInputs`, and `DoctorRules.evaluate` gives one `DoctorResult` for each `DoctorCheck`. The independent probes run in parallel (`async let`) and each has a time-out of 5 to 15 seconds. No probe starts the VM: it uses `docker --version` (not `docker version`), `docker context ls` and, only while the VM runs, `colima ssh -- df -Pk`.
+- **Context and routes** reuse the code of the docker context check: the current context comes from `Routing.currentContext()` (the config file), the list from `Routing.existingContexts`, the routes from `Routing.status()`. The fixes call `Routing.useOwnContext()` and `Routing.apply`.
+- **Shell.** `ShellStartupScan` reads the text of the startup files of the login shell. It runs no user code, so a new terminal can still differ.
+- **Registry login.** `DockerConfig` reads helper names only. It never reads `auths`.
+- **Fixes.** **Use colimabar**, **Set routes**, **Copy line** (`CtlAction.copyEnv`), **Use osxkeychain**, **Add folder** and **Repair…**. Each fix runs the checks again. The two docker config fixes go through `DockerConfigFile.edit`.
+- **Repair.** `colima-ctl.sh repair` takes the lock, refuses without a `colima.yaml` and while a start runs, and asks first. Then it runs under the busy marker "Repairing": (1) remove the pid files whose PID was reused or is not a number, before the force stop, so Lima never sends SIGKILL, and Colima never sends SIGTERM, to that process. If a file stays, notify and stop before the force stop; (2) `colima stop --force`, whose failure is logged; (3) if a Lima process of the VM still runs, fail and remove nothing more; (4) remove the other stale pid files; (5) `colima start`. The script decides and deletes in one process, under the lock. Only regular files (never links) are removed: `ha.pid`, `vz.pid`, `qemu.pid` and `krunkit.pid` of the instance of the profile, and `usernet_NAME.pid` of a network when no instance has a live host agent, and `PROFILE/daemon/daemon.pid` of the Colima folder (the owner must be `colima daemon`; `colima stop` and `colima start` run `pkill -F` on this file with no owner check). It never touches disks, `cidata.iso`, `*.yaml`, logs or sockets. `CtlAction.repair` is a VM action, so the model checks the docker context after it like after any VM action.
+- **UI.** `ViewState.showDoctor` makes `DashboardView` show `DoctorView` between the header and the hint bar. The page scrolls inside the fixed popover size. Entry points: the System tab, the stopped screen (only when `colima list` shows the profile Broken or its last start failed, `ColimaModel.doctorHint`) and the right-click menu.
+- **Debug runs.** A debug run may run the checks (they only read). It makes no fix and no repair: the buttons are disabled and `applyFix` and `repairProfile` check `isDebug`. `COLIMABAR_DOCTOR=1` with `--snapshot` opens the Doctor page.
+- **Later features.** `DoctorProbe.tools()` and `DoctorProbe.versions()` stand alone, so an upgrade guard can compare the versions of the last good start. `DoctorReport.text(home:version:)` is plain text for a diagnostics bundle: it shows the home folder as `~` and holds no secrets.
 
 ### Auto-stop
 
@@ -285,7 +308,7 @@ Live stats stream only while a dashboard is on screen. Saved-log streams open on
 
 ### Debug runs
 
-`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 
@@ -300,10 +323,10 @@ Do not break these rules.
 - **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
 - **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
-- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It does not observe system sleep or power changes, and it does not auto-stop a VM.
+- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
 
 ## Testing
 
 Tests use Swift Testing. Logic lives in small static functions, so tests can call it without a VM. `Tests/ColimaBarTests/TestSupport/` has shared fakes, for example `FakeDaemon`. Automated runs never start or stop the user's Colima VM.
 
-`Tests/ColimaBarTests/Scripts/` tests the scripts in `scripts/`. `ScriptSandbox` runs a copy of a script in a temporary HOME, with stub `osascript`, `colima`, `docker`, `kubectl` and `pgrep` first on its PATH. Thus no dialog reaches the screen, and no VM or docker context changes. The uninstall tests source only the helper functions of `uninstall.sh`.
+`Tests/ColimaBarTests/Scripts/` tests the scripts in `scripts/`. `ScriptSandbox` runs a copy of a script in a temporary HOME, with stub `osascript`, `colima`, `docker`, `kubectl`, `pgrep` and `ps` first on its PATH. The stub `ps` answers `-o command=` and `-o etime=` for a PID from a table (`stubProcesses`), so the owner checks of the lock, the busy marker and the pid files of Lima run without real processes. Thus no dialog reaches the screen, and no VM or docker context changes. The uninstall tests source only the helper functions of `uninstall.sh`.

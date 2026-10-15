@@ -12,5 +12,7 @@ final class ViewState {
     var search = ""
     var runningOnly = false
     var collapsed: Set<String> = []
+    /// The Doctor page replaces the tabs and the stopped screen.
+    var showDoctor = false
     let system = SystemForm()
 }

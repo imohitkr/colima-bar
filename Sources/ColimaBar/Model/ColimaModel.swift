@@ -38,6 +38,16 @@ final class ColimaModel {
     /// shows them. The selected profile uses `busy`.
     private(set) var profileActions: [String: String] = [:]
     private(set) var routing = Routing.Status()
+    /// The last Doctor run (see ColimaModel+Doctor), or nil before the first.
+    private(set) var doctorReport: DoctorReport?
+    /// A Doctor check or fix runs now.
+    private(set) var isDoctorRunning = false
+    /// A Doctor run was asked for while another one ran (a profile switch).
+    /// The running one starts once more when it ends.
+    @ObservationIgnored var isDoctorRunQueued = false
+    /// The last start of the selected profile failed. It clears when the VM
+    /// runs, and when another profile is selected. The stopped screen reads it.
+    private(set) var startFailed = false
     /// The dashboard's selected tab, set by DashboardView. No view reads it
     /// here; it tells the model which costly data is on screen.
     @ObservationIgnored var dashboardTab: DashboardTab = .containers {
@@ -204,7 +214,7 @@ final class ColimaModel {
     @ObservationIgnored private var lastColima = Date.distantPast
     @ObservationIgnored private var lastPing = Date()
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
-    @ObservationIgnored private var isDebug = false
+    @ObservationIgnored private(set) var isDebug = false
     @ObservationIgnored private var isCheckingContext = false
     @ObservationIgnored private var contextCheckAgain = false
     /// The modification time of the docker config file at the last tick.
@@ -212,7 +222,7 @@ final class ColimaModel {
     /// When a failed docker context check can run again.
     @ObservationIgnored private var contextRetryAt: Date?
     @ObservationIgnored private var contextFailures = 0
-    @ObservationIgnored private var generation = 0  // bumps on profile switch; stale callbacks are ignored
+    @ObservationIgnored private(set) var generation = 0  // bumps on profile switch; stale callbacks are ignored
     // Drops `colima list` results older than the last applied one.
     @ObservationIgnored private var statusOrder = LatestOnly()
     @ObservationIgnored private var isConfirmingAutoStop = false  // an auto-stop check runs a fresh list
@@ -247,8 +257,6 @@ final class ColimaModel {
 
     /// The dashboard keeps at most this many alerts.
     static let alertCap = 20
-    /// A busy marker older than this was left behind by a killed script.
-    nonisolated static let staleBusyMarkerAge: TimeInterval = 20 * 60
     /// How long a proxy wake waits for another start or stop to finish.
     static let startWaitSeconds = 300
     /// After a wake, Docker counts as ready after this many successful
@@ -437,19 +445,22 @@ final class ColimaModel {
         p == profile ? readBusy() : Self.readBusyMarker(p) ?? profileActions[p]
     }
 
-    /// The busy marker colima-ctl.sh writes while a long action runs. One left
-    /// behind by a killed script is ignored after `staleBusyMarkerAge`.
+    /// The label in the busy marker colima-ctl.sh writes while a VM action
+    /// runs. A marker whose script is gone is removed (see `BusyMarker`).
     nonisolated private static func readBusyMarker(_ profile: String) -> String? {
         let path = Paths.busy(profile)
         guard let attrs = try? FileManager.default.attributesOfItem(atPath: path),
             let mtime = attrs[.modificationDate] as? Date
         else { return nil }
-        if Date().timeIntervalSince(mtime) > staleBusyMarkerAge {
+        let marker = BusyMarker.parse((try? String(contentsOfFile: path, encoding: .utf8)) ?? "")
+        if BusyMarker.isStale(
+            mtime: mtime, now: Date(), pid: marker.pid,
+            ownerStarted: marker.pid.flatMap { ProcessProbe.startTime(pid: $0) })
+        {
             try? FileManager.default.removeItem(atPath: path)
             return nil
         }
-        return (try? String(contentsOfFile: path, encoding: .utf8))?
-            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "Working"
+        return marker.label
     }
 
     // MARK: - Refresh
@@ -463,14 +474,17 @@ final class ColimaModel {
         }
     }
 
-    func refreshStatus() async {
+    /// Returns false when `colima list` did not give a list: colima is missing,
+    /// the call failed or timed out, or the profile changed during the call.
+    @discardableResult
+    func refreshStatus() async -> Bool {
         lastColima = Date()
         if Paths.refreshColimaFolders() { colimaFoldersChanged() }
         // Profiles and Lima instances come and go: watch the current set.
         dirWatcher?.rearm()
         guard Shell.which("colima") != nil else {
             set(\.state, .notInstalled)
-            return
+            return false
         }
         let gen = generation
         // The directory watcher and the heartbeat can both start a refresh.
@@ -478,14 +492,14 @@ final class ColimaModel {
         // newer one (an old "Running" after a new "Stopped").
         let seq = statusOrder.begin()
         let r = await Shell.run(["colima", "list", "-j"], timeout: 10)
-        guard gen == generation else { return }
+        guard gen == generation else { return false }
         // A slow or failed `colima list` says nothing about the VM: keep the
         // current state instead of treating it as "stopped".
         guard r.ok else {
             log.error("colima list failed (status \(r.status)); keeping state")
-            return
+            return false
         }
-        guard statusOrder.apply(seq) else { return }
+        guard statusOrder.apply(seq) else { return true }
         let dec = JSONDecoder()
         let all = r.out.split(separator: "\n").compactMap { try? dec.decode(ColimaListJSON.self, from: Data($0.utf8)) }
         // The selected profile was deleted (`colima delete -p X`): fall back
@@ -498,7 +512,7 @@ final class ColimaModel {
         {
             log.notice("profile \(self.profile, privacy: .public) no longer exists; switching to default")
             profile = "default"
-            return
+            return false
         }
         let wasRunningNames = Set(profiles.filter(\.isRunning).map(\.name))
         let hadProfiles = !profiles.isEmpty
@@ -507,7 +521,8 @@ final class ColimaModel {
             all.map {
                 ProfileRow(
                     name: $0.name ?? "default", isRunning: $0.status == "Running", cpus: $0.cpus ?? 0,
-                    memGB: ByteFormat.gib(bytes: $0.memory ?? 0), runtime: $0.runtime ?? "")
+                    memGB: ByteFormat.gib(bytes: $0.memory ?? 0), runtime: $0.runtime ?? "",
+                    status: $0.status)
             })
         syncProfiles()
         // `colima start` switches the docker context, and `colima stop`
@@ -526,7 +541,7 @@ final class ColimaModel {
             v.diskGB = Int((info.disk ?? 0) / ByteFormat.bytesPerGiB)
             if newState == .running && (!wasRunning || v.driver.isEmpty) {
                 let s = await Shell.run(["colima", "status", "-j", "--profile", profile], timeout: 10)
-                guard gen == generation, statusOrder.isLatestApplied(seq) else { return }
+                guard gen == generation, statusOrder.isLatestApplied(seq) else { return true }
                 if let st = try? dec.decode(ColimaStatusJSON.self, from: Data(s.out.utf8)) {
                     v.driver = st.driver ?? ""
                     v.mountType = st.mount_type ?? ""
@@ -541,16 +556,18 @@ final class ColimaModel {
         set(\.state, newState)
 
         if newState == .running {
+            set(\.startFailed, false)
             if events == nil { startEvents() }
             if !wasRunning {
                 revealIcon = false
                 await refreshContainers()
-                guard gen == generation else { return }
+                guard gen == generation else { return true }
                 requestDF()
             }
         } else {
             clearVMData()
         }
+        return true
     }
 
     /// Reads the colima.yaml of the selected profile. A missing file gives
@@ -578,6 +595,7 @@ final class ColimaModel {
         // the profile menu shows it until the action ends (see execute).
         if let b = localBusy { profileActions[old] = b }
         localBusy = profileActions.removeValue(forKey: profile)
+        set(\.startFailed, false)
         // At once, not on the next tick: the Delete guard of the menu reads it.
         set(\.busy, readBusy())
         retargetSocket()
@@ -764,6 +782,7 @@ final class ColimaModel {
             wakes[p] = nil
             syncWakeHolds()
         }
+        if !ok, p == profile { set(\.startFailed, true) }
         return ok
     }
 
@@ -1373,7 +1392,7 @@ final class ColimaModel {
     /// Shows the busy label at once, not on the next tick, so a second click
     /// can't race the action. The selected profile shows it in the header,
     /// another profile in the profile menu.
-    private func markBusy(_ action: CtlAction, _ p: String, running: Bool? = nil) -> String? {
+    func markBusy(_ action: CtlAction, _ p: String, running: Bool? = nil) -> String? {
         guard let label = action.busyLabel(running: running ?? isRunning(profile: p)) else { return nil }
         if p == profile { setBusyNow(label) } else { profileActions[p] = label }
         return label
@@ -1382,7 +1401,7 @@ final class ColimaModel {
     /// Returns true if the script exited with 0. `expectRunning` is the VM
     /// state that `run` used to decide on the popover and the busy label.
     @discardableResult
-    private func execute(
+    func execute(
         _ action: CtlAction, _ args: [String], profile p: String, label: String?, expectRunning: Bool? = nil
     ) async -> Bool {
         actionsInFlight[p, default: 0] += 1
@@ -1397,6 +1416,9 @@ final class ColimaModel {
             notified = true
         }
         // Exit 2 = the user cancelled a confirm dialog or another action holds the lock.
+        if p == profile, r.status != 2, action == .start || action == .restart || action == .repair {
+            set(\.startFailed, !r.ok)
+        }
         if !r.ok, !notified, r.status != 2 {
             Notifier.shared.post(
                 "\(action.rawValue) failed for profile \(p) (exit \(r.status)). See \(Paths.ctlLog).")
@@ -1415,6 +1437,14 @@ final class ColimaModel {
         if action.isVMAction, r.status != 2 { checkDockerContext() }
         return r.ok
     }
+
+    /// Doctor publishes through these two, because the properties are
+    /// `private(set)` and Doctor lives in `ColimaModel+Doctor`.
+    func publishDoctor(report: DoctorReport?) {
+        if doctorReport != report { doctorReport = report }
+    }
+
+    func setDoctorRunning(_ on: Bool) { set(\.isDoctorRunning, on) }
 
     // MARK: - Profiles
 

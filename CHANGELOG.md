@@ -6,6 +6,15 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Doctor checks the docker setup of the selected profile: the tools, the docker context, the app routes, `DOCKER_HOST` in your shell files, the registry login, the docker plugins, the VM status, stale Lima files and the disk space. It offers a fix for most findings. Open it from the System tab, the stopped screen or the right-click menu. See [Doctor](docs/usage.md#doctor).
+- Repair gets a profile that Colima shows as Broken, or that does not start, running again. It removes the pid files of Lima and of the Colima daemon whose process is gone, stops the VM by force and starts it. It removes a file whose PID belongs to another program before the force stop, so Colima and Lima never stop that program. If it cannot remove such a file, it stops nothing. See [Repair](docs/usage.md#repair).
+
+### Fixed
+
+- The busy marker and the lock of a VM action hold the PID of the script. After a long sleep of the Mac, an action that still runs keeps its lock, and ColimaBar no longer shows it as finished. A marker or lock of a script that is gone ends at once.
+
 ## [0.7.1] - 2026-10-15
 
 ### Changed

@@ -12,7 +12,9 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             HeaderView(model: model)
             Divider()
-            if model.state == .running {
+            if ui.showDoctor {
+                DoctorView(model: model, ui: ui)
+            } else if model.state == .running {
                 LiveTiles(model: model).padding(.horizontal, 12).padding(.vertical, 10)
                 Picker("", selection: $ui.tab) {
                     ForEach(DashboardTab.allCases) { Text($0.rawValue).tag($0) }
@@ -28,7 +30,7 @@ struct DashboardView: View {
                         case .containers: ContainersTab(model: model, ui: ui)
                         case .images: ImagesTab(model: model, search: ui.search)
                         case .volumes: VolumesTab(model: model, search: ui.search)
-                        case .system: SystemTab(model: model, form: ui.system)
+                        case .system: SystemTab(model: model, form: ui.system, ui: ui)
                         }
                     }
                     .padding(12)
@@ -36,7 +38,7 @@ struct DashboardView: View {
                 }
                 .scrollIndicators(.automatic)
             } else {
-                StoppedView(model: model, form: ui.system)
+                StoppedView(model: model, ui: ui)
             }
             HintBar()
             Divider()

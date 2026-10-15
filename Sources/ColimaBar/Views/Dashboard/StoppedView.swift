@@ -5,7 +5,8 @@ import SwiftUI
 /// edits colima.yaml, and it applies at the next start.
 struct StoppedView: View {
     @Bindable var model: ColimaModel
-    @Bindable var form: SystemForm
+    @Bindable var ui: ViewState
+    private var form: SystemForm { ui.system }
 
     var body: some View {
         if model.state == .stopped {
@@ -36,6 +37,14 @@ struct StoppedView: View {
                 if model.autoStart {
                     Text("It will start by itself when something uses docker.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                if let why = model.doctorHint {
+                    HStack(spacing: 6) {
+                        Image(systemName: "stethoscope").foregroundStyle(.orange)
+                        Text(why).font(.caption).foregroundStyle(.orange)
+                        Button("Doctor…") { ui.showDoctor = true }
+                            .controlSize(.mini).hint(Help.doctorStopped)
+                    }
                 }
                 Button {
                     model.run(.start)
