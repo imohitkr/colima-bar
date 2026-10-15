@@ -8,10 +8,13 @@ import PackageDescription
 // Command Line Tools ship swift-testing's macro plugin in a subfolder that
 // SwiftPM does not always search, so test builds fail now and then with
 // "plugin for module 'TestingMacros' not found". Point the compiler at it
-// when it is there. Swift.org toolchains (CI) find it on their own.
+// when it is there. Swift.org toolchains (CI, swiftly) bring their own
+// plugin. A newer plugin from the Command Line Tools does not match their
+// Testing library, so set COLIMABAR_TOOLCHAIN_PLUGINS=1 to skip this.
 let cltTestingPlugins = "/Library/Developer/CommandLineTools/usr/lib/swift/host/plugins/testing"
+let usesToolchainPlugins = ProcessInfo.processInfo.environment["COLIMABAR_TOOLCHAIN_PLUGINS"] == "1"
 let testSettings: [SwiftSetting] =
-    FileManager.default.fileExists(atPath: cltTestingPlugins)
+    !usesToolchainPlugins && FileManager.default.fileExists(atPath: cltTestingPlugins)
     ? [.unsafeFlags(["-plugin-path", cltTestingPlugins])]
     : []
 
