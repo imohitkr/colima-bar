@@ -41,7 +41,9 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `SettingsTransfer`: the settings file format (JSON with a format name and a version), its checks and the import plan.
 - `DiskShrink`: the rules and the warning text for a smaller disk.
 - `VMConfig`: the VM settings in the `colima.yaml` of the selected profile (`ColimaModel.config`), and the values that the settings show (`VMConfig.shown`). For a stopped VM, `colima list` shows the values of the last start, not the file. Memory is a decimal number of GiB, as in Colima: `memory: 2.5` is 2.5 GiB. CPU and disk are whole numbers.
-- `AutoStopRule`: the idle rule for one profile, and which other profiles auto-stop checks.
+- `AutoStopRule`: the idle rule for one profile (it uses `SuspendingClock`), the stop time and which other profiles auto-stop checks.
+- `AfterSleepCheck`: which profiles the check after a system sleep covers, its ping delays and its notification texts.
+- `ClockDrift`: measures the clock of a VM against the Mac, and builds the command that fixes it.
 - `ProfileName`: the name rules of `colima-ctl.sh`, and the stricter rules for a new profile.
 - `NewProfileForm`: the values and checks of the New Profile form.
 - `ProfileDelete`: when a delete is refused, its warning text and the profile to select after it.
@@ -66,6 +68,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `ProfileContexts`: creates, updates and removes the `colimabar-PROFILE` docker contexts.
 - `LoginItem`: the login item.
 - `Notifier` and `AlertThrottle`: notifications and their rate limit.
+- `SystemPowerObserver`: reports system sleep and the end of it. It is the only place that subscribes to power events.
 - `Updater`, `Version`, `ReleaseLink`: the daily release check.
 - `Defaults`: `UserDefaults` access.
 - `ColimaDirWatcher`: watches the Colima folder, Lima's folder and their subfolders. Lima's folder can be outside the Colima folder (`LIMA_HOME`).
@@ -202,6 +205,22 @@ The exit codes are fixed. 0 means done. 1 means failed, and the script already n
 
 - `checkIdle()` checks the selected profile at each tick. It counts the transfers of the stable socket and of the profile socket of the selected profile. Before it stops the VM, it gets a fresh container list. If that fails, it does not stop.
 - `checkOtherProfilesIdle()` checks each other running docker profile (`AutoStopRule.otherProfiles`). A transfer or a busy marker resets its idle time at each tick. Each 30 seconds (`AutoStopRule.otherCheckInterval`), it gets a fresh container list from the socket of the profile. A failed list does not count as idle. When the idle time is over, it runs `auto-stop` for that profile.
+- The idle time uses `SuspendingClock`, which stops while the Mac sleeps, as the VM does. Thus the sleep time never counts, and a dark wake needs no event. The idle time does not restart after a sleep: on a laptop that sleeps often, it would never stop the VM. `idleSince` is the wall time for display. `autoStopAt` is the stop time (`AutoStopRule.stopTime`). It moves later by the sleep time.
+- `checkIdle()` does nothing in a debug run.
+
+### System sleep
+
+The word for the Mac sleeping is "system sleep". The word "wake" means auto-start in this code (`wakeForProxy`). Only `NSWorkspace.didWakeNotification` uses it for the Mac.
+
+`SystemPowerObserver` calls `systemSleepBegan()` and `systemSleepEnded()` of the model. The model creates it in a normal run only.
+
+- `systemSleepBegan()` and `systemSleepEnded()` cancel the check that runs. The newest check wins.
+- `recoverAfterSleep()` opens the `/events` stream again (it can hang after a sleep without an error), opens the stat streams again if a dashboard is on screen, and runs `refreshAll()`.
+- `checkAfterSleep(_:)` runs for each profile in `AfterSleepCheck.profiles`: running, docker runtime, valid name, no busy marker, no action in flight and no auto-start. The profiles run in parallel. It waits 0, 1, 2, 4 and 8 seconds before each ping. Each ping has a 3-second time-out, so the check ends within about 30 seconds. Before each try and each notification, it stops quietly if the task is cancelled, an action or a start began, or the VM stopped. If no ping answers, it refreshes the status, and if the VM still runs, it sends one notification with a **Restart** button. An `AlertThrottle` of 30 minutes, keyed by kind and profile, stops repeats.
+- `syncClock(_:_:)` runs when Docker answers. It measures with `ClockDrift.sample` (`GET /info`, the middle of the request time). A fix is needed when the offset minus the uncertainty is more than 2 seconds. Then it waits 20 seconds for Lima (Lima 2.1 and later set the guest clock every 10 seconds), measures again. If the clock is still off, it runs `colima ssh --profile P -- sudo -n date -s +N.NNNsec` through `Shell.run`, with stderr in the output for the log. A set of profiles with a clock fix in flight stops a second fix for the same profile. GNU date applies the amount to the guest clock when it runs, so ssh adds no error. It is not a `colima-ctl.sh` action. It sends a notification only if the last measurement still needs a fix.
+- `restartFromAlert(_:)` handles the **Restart** button. It checks, in order: the profile exists (`colima.yaml` and the profile list), no action runs for it, and its VM runs. It restarts only then. Else it posts a short notice, so `colima start` never makes a new VM or starts a VM that the user stopped. `ColimaModel.alertRestart` holds the rule.
+- The check uses the Colima sockets, never the proxy sockets, so it never starts a VM.
+- The readiness gate of `performWake` uses `SuspendingClock` for its deadline, so a sleep during the gate does not use up the time.
 
 ### Login item
 
@@ -211,7 +230,7 @@ ColimaBar does not use `SMAppService`. launchd ties an `SMAppService` agent to t
 
 ### Notifications
 
-Notifications go out for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Exit codes 0, 130, 137 and 143 are a normal stop (`ColimaModel.ignoredExitCodes`). Containers with the label `org.testcontainers=true` do not send alerts. Two other notifications go out once: one for each new version, and one the first time the icon hides. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
+Notifications go out for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Exit codes 0, 130, 137 and 143 are a normal stop (`ColimaModel.ignoredExitCodes`). Containers with the label `org.testcontainers=true` do not send alerts. Two other notifications go out once: one for each new version, and one the first time the icon hides. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. The checks after a system sleep send a notification with a **Restart** button (category `PROFILE`) when Docker does not answer or the clock fix fails. A click on its banner does nothing. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
 
 **Saved logs.** Docker removes an auto-remove container (`docker run --rm`) and its logs right after it dies. While the option is on (`Defaults.Key.keepRemovedLogs`, off by default) and crash alerts are on, `RemovedLogKeeper` does this for the selected profile:
 
@@ -245,7 +264,7 @@ Live stats stream only while a dashboard is on screen. Saved-log streams open on
 
 ### Debug runs
 
-`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep and auto-stop. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 
@@ -260,7 +279,7 @@ Do not break these rules.
 - **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
 - **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
-- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item.
+- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It does not observe system sleep, and it does not auto-stop a VM.
 
 ## Testing
 

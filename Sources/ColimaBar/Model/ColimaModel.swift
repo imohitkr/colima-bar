@@ -50,7 +50,12 @@ final class ColimaModel {
     }
     private(set) var alerts: [AlertItem] = []  // newest first, also shown in the dashboard
     var notificationsAllowed = true
+    /// The wall clock time when the idle time started, or nil if the
+    /// selected profile is not idle. The System tab shows it.
     private(set) var idleSince: Date?
+    /// The wall clock time when auto-stop stops the selected profile, or nil.
+    /// It moves later by the time that the Mac sleeps.
+    private(set) var autoStopAt: Date?
 
     var profile = Defaults.string(.profile) ?? "default" {
         didSet {
@@ -91,8 +96,7 @@ final class ColimaModel {
     var autoStop = Defaults.bool(.autoStop) ?? false {
         didSet {
             Defaults.set(autoStop, .autoStop)
-            idleSince = nil
-            otherIdle = [:]
+            resetIdle()
         }
     }
     var autoStopMinutes = Defaults.int(.autoStopMinutes).map(IdleMinutes.clamp) ?? 30 {
@@ -103,8 +107,7 @@ final class ColimaModel {
                 return
             }
             Defaults.set(autoStopMinutes, .autoStopMinutes)
-            idleSince = nil
-            otherIdle = [:]
+            resetIdle()
         }
     }
     var hideIconWhenStopped = Defaults.bool(.hideIconWhenStopped) ?? false {
@@ -199,6 +202,18 @@ final class ColimaModel {
     @ObservationIgnored private var wakeToken = 0
     // Auto-stop state of the running profiles other than the selected one.
     @ObservationIgnored private var otherIdle: [String: OtherIdle] = [:]
+    // When the idle time of the selected profile started. `SuspendingClock`
+    // stops while the Mac sleeps, as the VM does.
+    @ObservationIgnored private var idleStart: SuspendingClock.Instant?
+    // The observer of system sleep (not created in a debug run) and the
+    // check that runs after a system sleep. The newest check wins.
+    @ObservationIgnored private var powerObserver: SystemPowerObserver?
+    @ObservationIgnored private var afterSleep: Task<Void, Never>?
+    // One notification for each profile and kind every 30 minutes, whatever
+    // the number of system sleeps.
+    @ObservationIgnored private var afterSleepAlerts = AlertThrottle(window: 30 * 60)
+    // The profiles with a clock fix that runs now. A new check must not fix again.
+    @ObservationIgnored private var clockFixes: Set<String> = []
     // The colimabar-PROFILE contexts: the last applied and the next wanted set.
     @ObservationIgnored private var appliedContexts: [String: String]?
     @ObservationIgnored private var wantedContexts: [String: String]?
@@ -257,6 +272,11 @@ final class ColimaModel {
                 routing = await Routing.status()
             }
             dirWatcher = makeDirWatcher()
+            // A debug run changes nothing, so it does not observe system sleep.
+            let observer = SystemPowerObserver()
+            observer.onSleep = { [weak self] in self?.systemSleepBegan() }
+            observer.onSleepEnd = { [weak self] in self?.systemSleepEnded() }
+            powerObserver = observer
         }
         Task { await refreshAll() }
         lastPing = Date()
@@ -535,8 +555,7 @@ final class ColimaModel {
         vm = VMInfo()
         set(\.config, nil)
         state = .unknown
-        idleSince = nil
-        otherIdle = [:]
+        resetIdle()
     }
 
     /// The Colima folder changed (see Paths.refreshColimaFolders). Every
@@ -771,8 +790,9 @@ final class ColimaModel {
             if !r.ok { log.error("auto-start: colima-ctl.sh start exited \(r.status) for \(p, privacy: .public)") }
         }
         var streak = 0
-        let deadline = Date().addingTimeInterval(Self.readinessTimeout)
-        while Date() < deadline {
+        // SuspendingClock: a system sleep during the wait does not use up the time.
+        let deadline = SuspendingClock.now + .seconds(Self.readinessTimeout)
+        while SuspendingClock.now < deadline {
             streak = await ready() ? streak + 1 : 0
             if streak >= Self.readinessStreak {
                 // Refresh the cached API version from the real daemon (a Colima
@@ -844,13 +864,23 @@ final class ColimaModel {
     /// traffic through the proxies also counts as "not idle". Transfers count
     /// on the stable socket and on the socket of the selected profile.
     private func checkIdle() {
+        // A debug run changes nothing: it must not stop the VM of the user.
+        guard !isDebug else { return }
+        let now = SuspendingClock.now
         let check = AutoStopRule.evaluate(
             enabled: autoStop, isRunning: state == .running,
             isBusy: Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0)
                 || isConfirmingAutoStop,
-            runningContainers: running.count, transfers: selectedTransfers(), idleSince: idleSince, now: Date(),
+            runningContainers: running.count, transfers: selectedTransfers(), idleSince: idleStart, now: now,
             idleMinutes: autoStopMinutes)
-        if check.idleSince != idleSince { idleSince = check.idleSince }
+        if check.idleSince != idleStart {
+            idleStart = check.idleSince
+            idleSince = check.idleSince == nil ? nil : Date()
+        }
+        let stopAt = check.idleSince.map {
+            AutoStopRule.stopTime(idleSince: $0, now: now, wallNow: Date(), idleMinutes: autoStopMinutes)
+        }
+        if AutoStopRule.stopTimeMoved(old: autoStopAt, new: stopAt) { autoStopAt = stopAt }
         guard check.isDue else { return }
         // The list can be stale (events missed during a reconnect): confirm
         // with a fresh one right before stopping.
@@ -864,13 +894,25 @@ final class ColimaModel {
                 !Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0),
                 running.isEmpty, selectedTransfers() == 0
             else {
-                idleSince = nil
+                resetSelectedIdle()
                 return
             }
-            idleSince = nil
+            resetSelectedIdle()
             log.notice("auto-stopping idle profile \(self.profile, privacy: .public)")
             run(.autoStop, "\(autoStopMinutes)")
         }
+    }
+
+    /// Starts the idle time of the selected profile and of the others again.
+    private func resetIdle() {
+        resetSelectedIdle()
+        otherIdle = [:]
+    }
+
+    private func resetSelectedIdle() {
+        idleStart = nil
+        set(\.idleSince, nil)
+        set(\.autoStopAt, nil)
     }
 
     private func selectedTransfers() -> Int {
@@ -879,7 +921,7 @@ final class ColimaModel {
 
     /// The auto-stop state of a running profile other than the selected one.
     private struct OtherIdle {
-        var since: Date?
+        var since: SuspendingClock.Instant?
         var lastCheck: Date?
         var isChecking = false
     }
@@ -920,7 +962,7 @@ final class ColimaModel {
                     enabled: autoStop, isRunning: profiles.contains { $0.name == p && $0.isRunning } && p != profile,
                     isBusy: Self.blocksAutoStop(busyMarker: readBusy(p), actionsInFlight: actionsInFlight[p] ?? 0),
                     runningContainers: count, transfers: profileProxies.activeTransfers(p),
-                    idleSince: s.since, now: Date(), idleMinutes: autoStopMinutes)
+                    idleSince: s.since, now: .now, idleMinutes: autoStopMinutes)
                 s.since = check.idleSince
                 otherIdle[p] = check.isDue ? nil : s
                 guard check.isDue else { return }
@@ -937,6 +979,166 @@ final class ColimaModel {
             let list = try? JSONDecoder().decode([APIContainer].self, from: r.body)
         else { return nil }
         return list.count
+    }
+
+    // MARK: - After system sleep
+
+    /// The Mac is about to sleep: stop a check that still runs, so no ping
+    /// runs into the sleep.
+    private func systemSleepBegan() {
+        afterSleep?.cancel()
+        afterSleep = nil
+    }
+
+    /// The Mac woke from sleep. The newest check wins.
+    private func systemSleepEnded() {
+        afterSleep?.cancel()
+        afterSleep = Task { await recoverAfterSleep() }
+    }
+
+    /// A stream can hang after a sleep without an error, so open the streams
+    /// again, refresh at once, and check each running VM.
+    private func recoverAfterSleep() async {
+        restartStreams()
+        await refreshAll()
+        let blocked = Set(profiles.map(\.name).filter { isBlockedForSleepCheck($0) })
+        let names = AfterSleepCheck.profiles(profiles, blocked: blocked)
+        await withTaskGroup(of: Void.self) { group in
+            for p in names { group.addTask { await self.checkAfterSleep(p) } }
+        }
+    }
+
+    private func restartStreams() {
+        events?.cancel()
+        events = nil
+        if state == .running { startEvents() }
+        guard visibleCount > 0 else { return }
+        for h in statStreams.values { h.cancel() }
+        statStreams = [:]
+        latest = [:]
+        syncStatStreams()
+    }
+
+    /// An action, an auto-start or a busy marker: they report their own failures.
+    private func isBlockedForSleepCheck(_ p: String) -> Bool {
+        Self.blocksSleepCheck(
+            busyMarker: readBusy(p), actionsInFlight: actionsInFlight[p] ?? 0, starting: wakes[p] != nil)
+    }
+
+    /// False when the check of a profile must stop quietly.
+    private func canCheckAfterSleep(_ p: String) -> Bool {
+        !Task.isCancelled && !isBlockedForSleepCheck(p) && isRunning(profile: p)
+    }
+
+    /// Pings the Colima socket of the profile (never a proxy socket, so the
+    /// check never starts a VM). If Docker answers, it checks the clock.
+    /// If it does not, it sends one notification with a Restart button.
+    private func checkAfterSleep(_ p: String) async {
+        let api = DockerAPI(socketPath: Paths.socket(p))
+        for delay in AfterSleepCheck.pingDelays {
+            try? await Task.sleep(for: delay)
+            guard canCheckAfterSleep(p) else { return }
+            if await api.get("/_ping", timeout: AfterSleepCheck.pingTimeout)?.ok == true {
+                // A new failure after this recovery must notify again.
+                afterSleepAlerts.reset("no answer|\(p)")
+                await syncClock(p, api)
+                return
+            }
+        }
+        guard canCheckAfterSleep(p) else { return }
+        await refreshStatus()
+        guard canCheckAfterSleep(p) else { return }
+        log.error("docker does not answer in profile \(p, privacy: .public) after system sleep")
+        guard afterSleepAlerts.allow("no answer|\(p)") else { return }
+        Notifier.shared.post(AfterSleepCheck.noAnswerText(profile: p), restartProfile: p)
+    }
+
+    /// Measures the clock of the VM. If it is off, it waits for Lima to fix
+    /// it, measures again, and sets the clock if it is still off. It sends a
+    /// notification only if the clock is still off after that.
+    private func syncClock(_ p: String, _ api: DockerAPI) async {
+        guard !clockFixes.contains(p) else { return }
+        let first: ClockDrift.Sample
+        switch await Self.sampleClock(api) {
+        case .success(let s): first = s
+        case .failure(let e):
+            log.error("no clock sample for profile \(p, privacy: .public): \(e.reason, privacy: .public)")
+            return
+        }
+        guard ClockDrift.needsFix(first) else { return }
+        log.notice("clock of profile \(p, privacy: .public) is off by \(first.offset, privacy: .public) s")
+        try? await Task.sleep(for: ClockDrift.limaGrace)
+        guard canCheckAfterSleep(p) else { return }
+        let second: ClockDrift.Sample
+        switch await Self.sampleClock(api) {
+        case .success(let s): second = s
+        case .failure(let e):
+            log.error("no second clock sample for profile \(p, privacy: .public): \(e.reason, privacy: .public)")
+            return
+        }
+        guard ClockDrift.needsFix(second) else {
+            log.notice("clock of profile \(p, privacy: .public) is fine again")
+            return
+        }
+        guard canCheckAfterSleep(p), !clockFixes.contains(p) else { return }
+        clockFixes.insert(p)
+        defer { clockFixes.remove(p) }
+        let command = ClockDrift.fixCommand(profile: p, offset: second.offset)
+        let r = await Shell.run(command, timeout: 20, includeStderr: true)
+        if r.ok {
+            log.notice("clock fix for profile \(p, privacy: .public) done")
+        } else {
+            let output = String(r.out.suffix(500))
+            log.error(
+                "clock fix for profile \(p, privacy: .public) exited \(r.status): \(output, privacy: .public)")
+        }
+        guard canCheckAfterSleep(p) else { return }
+        let third: ClockDrift.Sample
+        switch await Self.sampleClock(api) {
+        case .success(let s): third = s
+        case .failure(let e):
+            log.error("no clock sample after the fix for profile \(p, privacy: .public): \(e.reason, privacy: .public)")
+            return
+        }
+        guard ClockDrift.needsFix(third) else {
+            log.notice("clock of profile \(p, privacy: .public) fixed")
+            return
+        }
+        log.error("clock of profile \(p, privacy: .public) is still off by \(third.offset, privacy: .public) s")
+        guard canCheckAfterSleep(p), afterSleepAlerts.allow("clock|\(p)") else { return }
+        Notifier.shared.post(AfterSleepCheck.clockText(profile: p, offset: third.offset), restartProfile: p)
+    }
+
+    private struct ClockSampleError: Error { let reason: String }
+
+    nonisolated private static func sampleClock(_ api: DockerAPI) async -> Result<ClockDrift.Sample, ClockSampleError> {
+        let sent = Date()
+        guard let r = await api.get("/info", timeout: 5) else { return .failure(.init(reason: "no reply")) }
+        let received = Date()
+        guard r.ok else { return .failure(.init(reason: "status \(r.status)")) }
+        let info: APIInfo
+        do { info = try JSONDecoder().decode(APIInfo.self, from: r.body) } catch {
+            return .failure(.init(reason: "decode error: \(error.localizedDescription)"))
+        }
+        guard let time = info.SystemTime else { return .failure(.init(reason: "SystemTime missing")) }
+        guard let sample = ClockDrift.sample(systemTime: time, sentAt: sent, receivedAt: received) else {
+            return .failure(.init(reason: "SystemTime not valid: \(time)"))
+        }
+        return .success(sample)
+    }
+
+    /// The Restart button of an after-sleep alert. It never starts a VM.
+    func restartFromAlert(_ p: String) {
+        let exists =
+            (p == "default" || FileManager.default.fileExists(atPath: Paths.config(p)))
+            && profiles.contains { $0.name == p }
+        let blocked = isBlockedForSleepCheck(p) || (p == profile && busy != nil)
+        switch Self.alertRestart(exists: exists, blocked: blocked, running: isRunning(profile: p)) {
+        case .restart: run(.restart, profile: p)
+        case .missing: Notifier.shared.post(AfterSleepCheck.restartMissingText(profile: p))
+        case .busy: Notifier.shared.post(AfterSleepCheck.restartBusyText(profile: p))
+        case .stopped: Notifier.shared.post(AfterSleepCheck.restartStoppedText(profile: p))
+        }
     }
 
     // MARK: - Live stats

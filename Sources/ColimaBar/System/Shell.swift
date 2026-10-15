@@ -53,8 +53,12 @@ enum Shell {
     /// seconds it sends SIGTERM (colima-ctl.sh then cleans up and stops its
     /// children), and SIGKILL 10 s later. It returns when the process exits,
     /// even if an orphaned grandchild still holds the stdout pipe.
-    /// colima-ctl.sh's stderr goes to Paths.ctlLog; other tools' is dropped.
-    static func run(_ args: [String], timeout: TimeInterval = 20, extraEnv: [String: String] = [:]) async -> Result {
+    /// colima-ctl.sh's stderr goes to Paths.ctlLog; other tools' is dropped,
+    /// or read with stdout when `includeStderr` is true.
+    static func run(
+        _ args: [String], timeout: TimeInterval = 20, extraEnv: [String: String] = [:],
+        includeStderr: Bool = false
+    ) async -> Result {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 let p = Process()
@@ -63,7 +67,11 @@ enum Shell {
                 p.environment = environment(for: args).merging(extraEnv) { $1 }
                 let pipe = Pipe()
                 p.standardOutput = pipe
-                p.standardError = args.first == Paths.ctl ? ctlLogHandle() : FileHandle.nullDevice
+                if includeStderr {
+                    p.standardError = pipe
+                } else {
+                    p.standardError = args.first == Paths.ctl ? ctlLogHandle() : FileHandle.nullDevice
+                }
                 p.standardInput = FileHandle.nullDevice
                 let out = OutputBuffer()
                 // Only this handler reads the pipe, so reads never overlap.

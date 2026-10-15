@@ -20,6 +20,11 @@ struct ColimaStatusJSON: Decodable {
 
 // Docker Engine API payloads (only the fields we use).
 
+struct APIInfo: Decodable {
+    /// The clock of the VM, in RFC 3339 format.
+    let SystemTime: String?
+}
+
 struct APIContainer: Decodable {
     struct Port: Decodable {
         let IP: String?

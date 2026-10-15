@@ -27,6 +27,14 @@ import Testing
         #expect(s.memBytes == 0)
     }
 
+    @Test func infoDecodesTheVMClock() throws {
+        let json = #"{"ID":"x","SystemTime":"2026-10-15T19:54:38.123456789+02:00","Containers":3}"#
+        let info = try JSONDecoder().decode(APIInfo.self, from: Data(json.utf8))
+        #expect(info.SystemTime == "2026-10-15T19:54:38.123456789+02:00")
+        let none = try JSONDecoder().decode(APIInfo.self, from: Data("{}".utf8))
+        #expect(none.SystemTime == nil)
+    }
+
     @Test func containerDecodesFromAPI() throws {
         let json = """
             [{"Id":"abc123","Names":["/web"],"Image":"nginx","State":"running","Status":"Up 1 minute",

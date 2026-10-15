@@ -37,7 +37,7 @@ The version comes from `git describe --tags`. Without a tag, the version is the 
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep and auto-stop. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|

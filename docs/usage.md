@@ -143,6 +143,17 @@ Right-click or Control-click the menu bar icon for these menu items:
 
 When you quit ColimaBar, Colima and your containers continue to run. Auto-start stops until you open ColimaBar again.
 
+## When the Mac sleeps
+
+When the Mac wakes from sleep, ColimaBar does these steps:
+
+1. It opens its streams again and refreshes the dashboard at once.
+2. For each running profile with the docker runtime, it asks the Colima socket if Docker answers. It tries for about 30 seconds. It skips a profile with a running action or auto-start.
+3. If Docker does not answer, it sends one notification with a **Restart** button.
+4. If Docker answers and the clock of the VM is more than 2 seconds off, it waits 20 seconds for Lima to fix it. If the clock is still off, ColimaBar sets it to the time of the Mac. If ColimaBar cannot set the clock, it sends a notification with a **Restart** button.
+
+The **Restart** button restarts only a profile that still exists, has no running action and has a running VM. Else ColimaBar sends a short notice and does nothing. The check never starts a VM. Auto-stop does not count the sleep time. See [Auto-stop](auto-stop.md#when-the-mac-sleeps).
+
 ## Hide the icon
 
 This option is off by default. To turn it on, use one of these controls:
@@ -165,6 +176,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - An action fails.
 - A new version is available. ColimaBar sends one notification for each new version. See [Update](install.md#update).
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.
+- After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. See [When the Mac sleeps](#when-the-mac-sleeps).
 
 ColimaBar sends no notification for a normal start or stop. Exit codes 130, 137 and 143 (SIGINT, SIGKILL and SIGTERM) count as a normal stop, so they send no crash alert. ColimaBar also ignores testcontainers containers. For one container and one kind of failure, it sends at most one notification each 10 minutes.
 
