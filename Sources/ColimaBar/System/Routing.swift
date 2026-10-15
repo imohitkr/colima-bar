@@ -5,12 +5,13 @@ import os
 /// socket (Paths.proxySocket), so `docker run` from a terminal, an IDE test
 /// runner or testcontainers all go through the auto-start proxy.
 ///
-/// The routes are set once and never need switching back: when ColimaBar
-/// isn't running, the stable path is a symlink to Colima's socket.
+/// When ColimaBar isn't running, the stable path is a symlink to Colima's
+/// socket. Colima switches the docker context on start and deletes it on
+/// stop, so ColimaBar moves the context back (`restoreContext`).
 @MainActor
 enum Routing {
     private static let log = Logger(category: "routing")
-    static let contextName = "colimabar"
+    nonisolated static let contextName = "colimabar"
     static var stableHost: String { "unix://\(Paths.proxySocket)" }
 
     struct Status: Equatable {
@@ -23,9 +24,13 @@ enum Routing {
     /// Applies the routes that need no admin rights. Leaves things alone if the
     /// user has deliberately chosen some other daemon (a remote context, a
     /// custom testcontainers docker.host).
-    static func apply() async {
-        let ours = await ensureContext()
-        await applyLaunchd(contextIsOurs: ours)
+    static func apply(selected: String) async {
+        let r = await ensureContext(selected: selected, launch: true)
+        if r.ok || r.ours {
+            await applyLaunchd(contextIsOurs: r.ours)
+        } else {
+            log.error("left launchd DOCKER_HOST alone (the docker context check failed)")
+        }
         applyTestcontainers()
     }
 
@@ -53,8 +58,7 @@ enum Routing {
 
     static func status() async -> Status {
         var s = Status()
-        let cur = await Shell.run(["docker", "context", "show"], timeout: 5)
-        s.context = cur.out.trimmingCharacters(in: .whitespacesAndNewlines) == contextName
+        s.context = currentContext().map(isOurs) ?? false
         let env = await Shell.run(["launchctl", "getenv", "DOCKER_HOST"], timeout: 5)
         s.launchd = env.out.trimmingCharacters(in: .whitespacesAndNewlines) == stableHost
         s.testcontainers = testcontainersHost() == stableHost
@@ -63,28 +67,164 @@ enum Routing {
         return s
     }
 
-    /// Creates the "colimabar" context and switches to it, but only when the
-    /// current context is a Colima one (or the env-based default). Returns
-    /// true when "colimabar" is the current context afterwards.
-    private static func ensureContext() async -> Bool {
-        let ls = await Shell.run(["docker", "context", "ls", "--format", "{{.Name}}"], timeout: 10)
-        let names = Set(ls.out.split(separator: "\n").map(String.init))
+    /// The current docker context, read from the docker config file. Unlike
+    /// `docker context show`, this works when the current context is missing
+    /// (`colima stop` deletes it). "" means the default context. Nil means
+    /// the file cannot be read or is not valid JSON.
+    static func currentContext() -> String? {
+        currentContext(path: Paths.dockerConfig(env: ProcessInfo.processInfo.environment, home: Paths.home))
+    }
+
+    /// Reads `currentContext` from a config file. A missing file, an empty
+    /// file and a file without the key all mean the default context ("").
+    nonisolated static func currentContext(path: String) -> String? {
+        guard FileManager.default.fileExists(atPath: path) else { return "" }
+        guard let data = FileManager.default.contents(atPath: path) else { return nil }
+        return currentContext(config: data)
+    }
+
+    /// The `currentContext` value of a docker config.json. "" if the key is
+    /// absent or the data is empty. Nil if the data is not a JSON object.
+    nonisolated static func currentContext(config: Data) -> String? {
+        if config.allSatisfy({ $0 == 0x20 || $0 == 0x0A || $0 == 0x0D || $0 == 0x09 }) { return "" }
+        guard let obj = (try? JSONSerialization.jsonObject(with: config)) as? [String: Any] else { return nil }
+        return obj["currentContext"] as? String ?? ""
+    }
+
+    /// The modification time of the docker config file, or nil if it is missing.
+    /// A change means some tool switched the docker context.
+    static func configStamp() -> Date? {
+        configStamp(path: Paths.dockerConfig(env: ProcessInfo.processInfo.environment, home: Paths.home))
+    }
+
+    /// Follows a symlink: docker writes to the target of the link.
+    nonisolated static func configStamp(path: String) -> Date? {
+        let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        return (try? FileManager.default.attributesOfItem(atPath: real))?[.modificationDate] as? Date
+    }
+
+    nonisolated static func isOurs(_ context: String) -> Bool {
+        context == contextName || context.hasPrefix(ProfileContexts.prefix)
+    }
+
+    /// The names of the contexts that exist, from `docker context ls` with
+    /// `listFormat`. docker adds a row with an error for the current context
+    /// when it is missing; that row is not a context.
+    nonisolated static let listFormat = "{{.Name}}\t{{.Error}}"
+
+    nonisolated static func existingContexts(listing: String) -> Set<String> {
+        var names = Set<String>()
+        for line in listing.split(separator: "\n") {
+            let cols = line.split(separator: "\t", maxSplits: 1, omittingEmptySubsequences: false)
+            if cols.count == 2, !cols[1].trimmingCharacters(in: .whitespaces).isEmpty { continue }
+            if let name = cols.first, !name.isEmpty { names.insert(String(name)) }
+        }
+        return names
+    }
+
+    /// Moves the docker CLI back to a ColimaBar context after Colima changed
+    /// it. Runs no docker process when nothing needs to change. When a
+    /// ColimaBar context is current, it also sets the launchd and
+    /// testcontainers routes, in case a first try missed them. Returns false
+    /// when a step failed (the caller tries again later).
+    static func restoreContext(selected: String) async -> Bool {
+        guard let cur = currentContext() else {
+            log.error("cannot read the docker config file")
+            return false
+        }
+        var ours = isOurs(cur)
+        var ok = true
+        if !cur.isEmpty, cur != contextName, cur != "default" {
+            let r = await ensureContext(selected: selected, launch: false)
+            (ours, ok) = (r.ours, r.ok)
+        }
+        if ours {
+            await applyLaunchd(contextIsOurs: true)
+            applyTestcontainers()
+        }
+        return ok
+    }
+
+    /// The profile of a Colima docker context: "colima" is `default`,
+    /// "colima-work" is `work`. Nil for any other name.
+    nonisolated static func colimaProfile(_ context: String) -> String? {
+        if context == "colima" { return "default" }
+        let prefix = "colima-"
+        guard context.hasPrefix(prefix), context.count > prefix.count else { return nil }
+        return String(context.dropFirst(prefix.count))
+    }
+
+    /// The context to switch to, or nil to leave the current one. `existing`
+    /// has only contexts that exist (see `existingContexts`).
+    ///
+    /// - `colimabar` stays.
+    /// - The default context (empty or `default`) moves to `colimabar` only
+    ///   at launch. Later, the user chose it.
+    /// - A Colima context moves to the ColimaBar context of its profile
+    ///   (`colimabar` for the selected profile, else `colimabar-PROFILE`).
+    ///   If that context is missing, an existing Colima context stays and a
+    ///   missing one moves to `colimabar`.
+    /// - Any other context stays if it exists. If it is missing, it moves to
+    ///   `colimabar`.
+    nonisolated static func contextTarget(
+        current: String, existing: Set<String>, selected: String, launch: Bool
+    ) -> String? {
+        if current == contextName { return nil }
+        if current.isEmpty || current == "default" { return launch ? contextName : nil }
+        if let profile = colimaProfile(current) {
+            let target = profile == selected ? contextName : ProfileContexts.name(profile)
+            if existing.contains(target) { return target }
+        }
+        return existing.contains(current) ? nil : contextName
+    }
+
+    /// Creates the "colimabar" context if it is missing and switches to the
+    /// context that `contextTarget` gives. `ours`: a ColimaBar context is
+    /// current afterwards. `ok`: no step failed.
+    private static func ensureContext(selected: String, launch: Bool) async -> (ours: Bool, ok: Bool) {
+        let ls = await Shell.run(["docker", "context", "ls", "--format", listFormat], timeout: 10)
+        guard ls.ok else {
+            log.error("docker context ls failed (exit \(ls.status))")
+            return (false, false)
+        }
+        guard let cur = currentContext() else {
+            log.error("cannot read the docker config file")
+            return (false, false)
+        }
+        var names = existingContexts(listing: ls.out)
+        var ok = true
         if !names.contains(contextName) {
-            _ = await Shell.run(
+            let made = await Shell.run(
                 [
                     "docker", "context", "create", contextName,
                     "--description", "ColimaBar (auto-starts Colima)",
                     "--docker", "host=\(stableHost)",
                 ], timeout: 10)
-            log.info("created docker context \(contextName, privacy: .public)")
+            if made.ok {
+                names.insert(contextName)
+                log.info("created docker context \(contextName, privacy: .public)")
+            } else {
+                ok = false
+                log.error("docker context create failed (exit \(made.status))")
+            }
         }
-        let cur = await Shell.run(["docker", "context", "show"], timeout: 5).out
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        if cur == contextName { return true }
-        if cur == "default" || cur.hasPrefix("colima") {
-            return await Shell.run(["docker", "context", "use", contextName], timeout: 10).ok
+        var now = cur
+        if let target = contextTarget(current: cur, existing: names, selected: selected, launch: launch),
+            names.contains(target)
+        {
+            let used = await Shell.run(["docker", "context", "use", target], timeout: 10)
+            if used.ok {
+                let cause = launch ? "ColimaBar started" : "auto-start is on"
+                log.notice(
+                    "switched docker context \(cur.isEmpty ? "default" : cur, privacy: .public) to \(target, privacy: .public) (\(cause, privacy: .public))"
+                )
+                now = target
+            } else {
+                ok = false
+                log.error("docker context use \(target, privacy: .public) failed (exit \(used.status))")
+            }
         }
-        return false
+        return (isOurs(now), ok)
     }
 
     // MARK: - testcontainers

@@ -76,12 +76,18 @@ To fix it, do one of these steps:
 - Open ColimaBar again. Auto-start then starts the VM on the next docker command.
 - Run `colima start`.
 
+## docker says context not found
+
+docker shows `context "colima": context not found`, or `colima-PROFILE` for a profile that is not `default`. `colima stop` deleted the context, but the docker config still names it.
+
+To fix it, run `docker context use colimabar`, then `docker ps`. While auto-start is on, ColimaBar repairs this itself within 15 seconds.
+
 ## docker does not start Colima
 
 1. Make sure that ColimaBar runs and that auto-start is on. Look at **Auto-start Colima on Demand** in the right-click menu.
 2. Start Colima, then open the System tab. Each route to the ColimaBar socket shows a check mark when it is set. The System tab shows only while Colima runs.
 3. In your terminal, run `echo $DOCKER_HOST`. If it shows a different socket, replace that line in your `~/.zshrc` with the [shell snippet](auto-start.md#shell-setup).
-4. Run `docker context show`. It must show `colimabar`, or a `colimabar-PROFILE` context if you chose one. ColimaBar does not change a context that points to a different daemon.
+4. Run `docker context show`. It must show `colimabar`, or `colimabar-PROFILE` for a profile that is not selected. ColimaBar does not change a context that points to a different daemon.
 5. If an IDE test cannot connect, restart the IDE. An IDE reads the launchd `DOCKER_HOST` only when it starts.
 
 ## ColimaBar uses the wrong Colima folder

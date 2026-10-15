@@ -6,6 +6,12 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- ColimaBar moves the docker CLI back to the `colimabar` context after Colima starts. Before, `colima start` switched it to `colima` and it stayed there. After `colima stop`, docker failed with `context "colima": context not found` and auto-start did not work. ColimaBar now also repairs this state.
+- While auto-start is on, ColimaBar moves a manual `docker context use colima` back to `colimabar`. The move can take up to 15 seconds.
+- When another profile starts, ColimaBar moves the docker CLI to `colimabar-PROFILE`. Before, it moved to `colimabar`, which pointed at the daemon of the selected profile.
+
 ## [0.7.0] - 2026-10-15
 
 ### Added

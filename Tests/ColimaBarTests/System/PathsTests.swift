@@ -12,6 +12,12 @@ import Testing
         #expect(Paths.profileSocket("work") == Paths.profilesDir + "/work.sock")
     }
 
+    @Test func dockerConfigUsesDockerConfigEnvOrHome() {
+        #expect(Paths.dockerConfig(env: ["DOCKER_CONFIG": "/d"], home: "/h") == "/d/config.json")
+        #expect(Paths.dockerConfig(env: [:], home: "/h") == "/h/.docker/config.json")
+        #expect(Paths.dockerConfig(env: ["DOCKER_CONFIG": ""], home: "/h") == "/h/.docker/config.json")
+    }
+
     @Test func colimaDirUsesTheFirstRuleThatApplies() {
         let home = "/Users/me"
         let dotColima = "/Users/me/.colima"

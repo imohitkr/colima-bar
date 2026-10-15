@@ -47,4 +47,148 @@ import Testing
         #expect(Routing.dockerHostValue("docker.host") == nil)
         #expect(Routing.dockerHostValue("# docker.host tcp://remote:2375") == nil)
     }
+
+    // MARK: - docker context
+
+    private func target(_ current: String, _ existing: Set<String>, selected: String = "default", launch: Bool = false)
+        -> String?
+    {
+        Routing.contextTarget(current: current, existing: existing, selected: selected, launch: launch)
+    }
+
+    @Test func colimabarContextStays() {
+        #expect(target("colimabar", ["colimabar", "colima"], launch: true) == nil)
+    }
+
+    @Test func defaultContextMovesOnlyAtLaunch() {
+        #expect(target("", ["colimabar"], launch: true) == "colimabar")
+        #expect(target("default", ["colimabar"], launch: true) == "colimabar")
+        #expect(target("", ["colimabar"]) == nil)
+        #expect(target("default", ["colimabar"]) == nil)
+    }
+
+    @Test func colimaContextOfSelectedProfileMovesToColimabar() {
+        #expect(target("colima", ["colimabar", "colima"]) == "colimabar")
+        #expect(target("colima-work", ["colimabar", "colima-work"], selected: "work") == "colimabar")
+    }
+
+    @Test func missingColimaContextMovesToColimabar() {
+        #expect(target("colima", ["colimabar"]) == "colimabar")
+        #expect(target("colima-work", ["colimabar"]) == "colimabar")
+    }
+
+    @Test func colimaContextOfOtherProfileMovesToItsColimabarContext() {
+        #expect(target("colima-work", ["colimabar", "colimabar-work", "colima-work"]) == "colimabar-work")
+        #expect(target("colima", ["colimabar", "colimabar-default"], selected: "work") == "colimabar-default")
+    }
+
+    @Test func existingColimaContextOfOtherProfileStaysWithoutColimabarContext() {
+        #expect(target("colima-work", ["colimabar", "colima-work"]) == nil)
+    }
+
+    @Test func colimabarProfileContextIsNotTreatedAsColimaContext() {
+        #expect(target("colimabar-work", ["colimabar", "colimabar-work"]) == nil)
+        #expect(target("colimabar-work", ["colimabar"]) == "colimabar")
+    }
+
+    @Test func otherContextStaysIfItExistsAndMovesIfItIsMissing() {
+        #expect(target("remote", ["colimabar", "remote"], launch: true) == nil)
+        #expect(target("remote", ["colimabar"], launch: true) == "colimabar")
+        #expect(target("remote", ["colimabar"]) == "colimabar")
+    }
+
+    @Test func colimaProfileInvertsKubeContext() {
+        #expect(Routing.colimaProfile("colima") == "default")
+        #expect(Routing.colimaProfile("colima-work") == "work")
+        #expect(Routing.colimaProfile(Paths.kubeContext("a-b")) == "a-b")
+        #expect(Routing.colimaProfile("colima-") == nil)
+        #expect(Routing.colimaProfile("colimabar") == nil)
+        #expect(Routing.colimaProfile("colimabar-work") == nil)
+        #expect(Routing.colimaProfile("default") == nil)
+    }
+
+    @Test func currentContextComesFromConfig() {
+        func read(_ json: String) -> String? { Routing.currentContext(config: Data(json.utf8)) }
+        #expect(read(#"{"auths":{},"currentContext":"colima"}"#) == "colima")
+        #expect(read(#"{"auths":{}}"#) == "")
+        #expect(read("not json") == nil)
+        #expect(read("[]") == nil)
+        #expect(read("") == "")
+        #expect(read(" \n") == "")
+    }
+
+    @Test func currentContextFromFileReadsMissingAsDefaultAndDirectoryAsUnreadable() throws {
+        let dir = NSTemporaryDirectory() + "routing-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        #expect(Routing.currentContext(path: "\(dir)/missing.json") == "")
+        #expect(Routing.currentContext(path: dir) == nil)
+        let file = "\(dir)/config.json"
+        try Data(#"{"currentContext":"colima"}"#.utf8).write(to: URL(fileURLWithPath: file))
+        #expect(Routing.currentContext(path: file) == "colima")
+        let link = "\(dir)/link.json"
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: file)
+        #expect(Routing.currentContext(path: link) == "colima")
+    }
+
+    @Test func existingContextsSkipsTheErrorRowOfAMissingCurrentContext() {
+        let listing = "colimabar\t\ndefault\t\ncolima-work\tcontext not found: context \"colima-work\" does not exist\n"
+        #expect(Routing.existingContexts(listing: listing) == ["colimabar", "default"])
+        #expect(Routing.existingContexts(listing: "") == [])
+    }
+
+    @Test func missingCurrentContextMovesToColimabarWhenListedWithAnError() {
+        let existing = Routing.existingContexts(listing: "colimabar\t\ncolima-work\tcontext not found\n")
+        #expect(target("colima-work", existing, selected: "work") == "colimabar")
+    }
+
+    @Test func colimabarProfileContextsAreOurs() {
+        #expect(Routing.isOurs("colimabar"))
+        #expect(Routing.isOurs("colimabar-work"))
+        #expect(!Routing.isOurs("colima"))
+        #expect(!Routing.isOurs(""))
+    }
+
+    @Test func contextCheckRunsOnAConfigChangeOrWhenARetryIsDue() {
+        let t = Date(timeIntervalSince1970: 1_000_000)
+        let later = t.addingTimeInterval(120)
+        #expect(!ColimaModel.contextCheckDue(stamp: t, lastStamp: t, retryAt: nil, now: later))
+        #expect(ColimaModel.contextCheckDue(stamp: later, lastStamp: t, retryAt: nil, now: later))
+        #expect(!ColimaModel.contextCheckDue(stamp: t, lastStamp: t, retryAt: later, now: t))
+        #expect(ColimaModel.contextCheckDue(stamp: t, lastStamp: t, retryAt: t, now: later))
+    }
+
+    @Test func failedContextChecksRetryOnlyAFewTimes() {
+        let t = Date(timeIntervalSince1970: 1000)
+        #expect(ColimaModel.contextCheckRetryAt(failures: 1, now: t) == t.addingTimeInterval(60))
+        #expect(ColimaModel.contextCheckRetryAt(failures: ColimaModel.contextCheckMaxRetries, now: t) != nil)
+        #expect(ColimaModel.contextCheckRetryAt(failures: ColimaModel.contextCheckMaxRetries + 1, now: t) == nil)
+    }
+
+    @Test func configStampFollowsTheFile() throws {
+        let dir = NSTemporaryDirectory() + "routing-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let file = "\(dir)/config.json"
+        try Data("{}".utf8).write(to: URL(fileURLWithPath: file))
+        let old = Date(timeIntervalSince1970: 1_000_000)
+        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: file)
+        let stamp = (try FileManager.default.attributesOfItem(atPath: file))[.modificationDate] as? Date
+        #expect(stamp == old)
+        #expect(Routing.configStamp(path: file) == old)
+        #expect(Routing.configStamp(path: "\(dir)/missing.json") == nil)
+    }
+
+    @Test func configStampFollowsASymlinkToTheTarget() throws {
+        let dir = NSTemporaryDirectory() + "routing-\(UUID().uuidString)"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        let target = "\(dir)/real.json"
+        let link = "\(dir)/config.json"
+        try Data("{}".utf8).write(to: URL(fileURLWithPath: target))
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: target)
+        let old = Date(timeIntervalSince1970: 2_000_000)
+        try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: target)
+        #expect(Routing.configStamp(path: link) == old)
+    }
 }

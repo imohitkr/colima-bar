@@ -153,4 +153,24 @@ extension ColimaModel {
     ) -> Bool {
         wanted != failed || now.timeIntervalSince(failedAt) >= contextsRetryInterval
     }
+
+    /// After a failed docker context check, the check runs again after this time.
+    nonisolated static let contextCheckRetryInterval: TimeInterval = 60
+
+    /// A failed check is retried at most this many times in a row.
+    nonisolated static let contextCheckMaxRetries = 3
+
+    /// When to retry after a failed check, or nil after too many failures.
+    /// `failures` counts the failures in a row, this one included.
+    nonisolated static func contextCheckRetryAt(failures: Int, now: Date) -> Date? {
+        failures <= contextCheckMaxRetries ? now.addingTimeInterval(contextCheckRetryInterval) : nil
+    }
+
+    /// True if the docker context check is due on this tick: the config file
+    /// changed, or a failed check can run again.
+    nonisolated static func contextCheckDue(
+        stamp: Date?, lastStamp: Date?, retryAt: Date?, now: Date
+    ) -> Bool {
+        stamp != lastStamp || retryAt.map { now >= $0 } ?? false
+    }
 }
