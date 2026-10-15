@@ -20,6 +20,9 @@ permissions:
 # have it yet. If you change it, also change the swift image tag in the lint job.
 env:
   SWIFT_VERSION: 6.4.0
+  # Package.swift: use the testing macro plugin of the Swift.org toolchain, not
+  # the one of the Command Line Tools, which can be newer on the runner image.
+  COLIMABAR_TOOLCHAIN_PLUGINS: "1"
 
 # Actions are pinned to full commit SHAs, so a moved tag cannot change them.
 jobs:
