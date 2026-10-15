@@ -6,20 +6,22 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-10-15
+
 ### Added
 
-- After the Mac wakes from sleep, ColimaBar refreshes at once and checks that Docker answers in each running VM with the docker runtime. If Docker does not answer, it sends one notification with a **Restart** button. If the clock of a VM is more than 2 seconds off, ColimaBar waits 20 seconds for Lima to fix it first. Then it sets the clock to the time of the Mac, and it sends a notification if that fails. See [When the Mac sleeps](docs/usage.md#when-the-mac-sleeps).
+- After the Mac wakes from sleep, ColimaBar refreshes at once and checks that Docker answers in each running VM with the docker runtime. If Docker does not answer, it sends one notification with a **Restart** button. If the clock of a VM is more than 2 seconds off, ColimaBar waits 20 seconds for Lima to fix it. If the clock is still off, ColimaBar sets it to the time of the Mac. If that fails, it sends a notification with a **Restart** button. See [When the Mac sleeps](docs/usage.md#when-the-mac-sleeps).
 - On battery, auto-stop stops an idle VM after 10 minutes at most. In Low Power Mode, it stops the VM after 5 minutes at most. A shorter time that you select stays. To turn this off, clear **Stop sooner on battery or in Low Power Mode**. Export and import include this setting. See [On battery and in Low Power Mode](docs/auto-stop.md#on-battery-and-in-low-power-mode).
 
 ### Changed
 
 - On battery, in Low Power Mode or when the Mac is hot, ColimaBar checks the VM less often while the dashboard is closed.
+- The README and the Install guide recommend Homebrew first.
 
 ### Fixed
 
 - Auto-stop does not count the time that the Mac sleeps as idle time. Before, after a long sleep, the VM stopped seconds after the Mac woke.
 - Auto-start does not fail when the Mac sleeps while it waits for Docker.
-- CI no longer fails now and then on a slow runner. The tests no longer block the threads that Swift concurrency needs, and they wait up to 20 s for a result.
 
 ## [0.6.0] - 2026-10-08
 
@@ -161,7 +163,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/imohitkr/colima-bar/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/imohitkr/colima-bar/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/imohitkr/colima-bar/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/imohitkr/colima-bar/compare/v0.3.1...v0.4.0

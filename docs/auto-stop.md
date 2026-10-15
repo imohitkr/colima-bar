@@ -30,7 +30,7 @@ Idle pollers and event streams do not count as activity. A docker client that co
 
 Before ColimaBar stops the VM, it gets a new container list from the Docker daemon of the profile to confirm that no container runs. If it cannot get the list, it does not stop the VM.
 
-The System tab shows the idle time of the selected profile only. For the other profiles, ColimaBar asks for the container list each 30 seconds. Thus another profile stops up to 30 seconds after its idle time is over.
+The System tab shows the idle time of the selected profile only. For the other profiles, ColimaBar asks for the container list each 30 seconds. Thus another profile stops up to 30 seconds after its idle time is over, or up to about 45 seconds on battery, in Low Power Mode or when the Mac is hot.
 
 ## When the Mac sleeps
 
@@ -47,7 +47,7 @@ Sleep does not restart the idle time. If you make the Mac sleep often, auto-stop
 
 A shorter time that you select stays. For example, with 5 minutes selected, the time stays 5 minutes on battery. A hot Mac does not change the time.
 
-A change of the power state does not restart the idle time. With the default 30 minutes, if you unplug the charger after 12 idle minutes, the VM stops at once (after the usual check of the container list). The System tab shows the new stop time with a note, for example "Idle since 14:02; stops at 14:12 (on battery)." When you plug in the charger, the stop time moves later again.
+A change of the power state does not restart the idle time. For example, with the default 30 minutes, you unplug the charger after 4 idle minutes. The VM then stops 6 minutes later. The System tab shows the new stop time with a note, for example "Idle since 14:02; stops at 14:12 (on battery)." If you unplug after 10 or more idle minutes, the VM stops at once (after the usual check of the container list). When you plug in the charger, the stop time moves later again.
 
 On battery, in Low Power Mode or when the Mac is hot, ColimaBar also checks the VM less often while the dashboard is closed. Auto-start is not slower.
 
