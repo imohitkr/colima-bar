@@ -68,6 +68,39 @@ import Testing
         }
     }
 
+    @Test func tickSlowsDownWhenThePowerStateSaves() {
+        func tick(_ saving: PowerState.Saving, busy: Bool = false, open: Bool = false) -> Duration {
+            ColimaModel.tickInterval(state: .running, busy: busy, dashboardOpen: open, saving: saving)
+        }
+        #expect(tick(.off) == .seconds(5))
+        #expect(tick(.battery) == .seconds(10))
+        #expect(tick(.strong) == .seconds(15))
+        #expect(tick(.strong, open: true) == .seconds(1))
+        #expect(tick(.strong, busy: true) == .seconds(1))
+    }
+
+    @Test func pingSlowsDownWhenThePowerStateSaves() {
+        #expect(ColimaModel.pingInterval(dashboardOpen: false, saving: .off) == 10)
+        #expect(ColimaModel.pingInterval(dashboardOpen: false, saving: .battery) == 20)
+        #expect(ColimaModel.pingInterval(dashboardOpen: false, saving: .strong) == 30)
+        #expect(ColimaModel.pingInterval(dashboardOpen: true, saving: .strong) == 3)
+    }
+
+    @Test func eachPingIntervalIsAWholeNumberOfTicks() {
+        for saving in [PowerState.Saving.off, .battery, .strong] {
+            let tick = ColimaModel.tickInterval(state: .running, busy: false, dashboardOpen: false, saving: saving)
+            let ping = ColimaModel.pingInterval(dashboardOpen: false, saving: saving)
+            #expect(ping.truncatingRemainder(dividingBy: Double(tick.components.seconds)) == 0)
+        }
+    }
+
+    @Test func staleLimitGrowsWhenThePowerStateSaves() {
+        #expect(ColimaModel.staleAfter(state: .running, saving: .battery) == 600)
+        #expect(ColimaModel.staleAfter(state: .stopped, saving: .strong) == 900)
+        #expect(ColimaModel.staleAfter(state: .unknown, saving: .strong) == 60)
+        #expect(ColimaModel.staleAfter(state: .notInstalled, saving: .battery) == 60)
+    }
+
     @Test func listsRarelyAndOnOpenOnlyWhenOld() {
         #expect(ColimaModel.staleAfter(state: .running) == 300)
         #expect(ColimaModel.staleAfter(state: .stopped) == 300)

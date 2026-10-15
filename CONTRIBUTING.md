@@ -37,7 +37,7 @@ The version comes from `git describe --tags`. Without a tag, the version is the 
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep and auto-stop. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|
@@ -69,7 +69,7 @@ Each source file holds one type, or one type and its small private helpers. The 
 ## Coding conventions
 
 - Use Swift 6.4 and SwiftPM, in the Swift 6 language mode. Do not add third-party dependencies.
-- Use only Apple frameworks: AppKit, SwiftUI, Observation, UserNotifications and ServiceManagement.
+- Use only Apple frameworks: AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement and IOKit (`notify` is part of libSystem).
 - Draw graphs with SwiftUI `Shape` or `Path`. Do not use Swift Charts or `Canvas`, because they use a lot of graphics memory.
 - Keep UI state in the `@Observable` `ColimaModel`. Assign a property only when its value changes. This keeps the popover still and the redraws small.
 - Write tests with [Swift Testing](https://developer.apple.com/documentation/testing) (`@Suite`, `@Test`, `#expect`). Do not use XCTest.

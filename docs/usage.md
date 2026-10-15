@@ -71,7 +71,7 @@ These tabs show sizes and the items that containers use. You can pull the latest
 - Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is not `vz`, the Rosetta switch is disabled, unless Rosetta is on. A missing `vmType` counts as `vz`.
 - To change these settings while the VM is stopped, use the [stopped screen](#open-the-dashboard).
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons.
-- **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md).
+- **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md). **Stop sooner on battery or in Low Power Mode** shortens the idle time. See [On battery and in Low Power Mode](auto-stop.md#on-battery-and-in-low-power-mode).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
 - **Profiles**: shown only when you have more than one profile.
 - **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
@@ -100,7 +100,7 @@ If the VM was stopped, Colima must start it once to create the new disk. Thus Co
 
 Use these buttons to copy your ColimaBar settings to a different Mac.
 
-**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Hide menu bar icon while Colima is stopped**, crash notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile and the login item. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile and the login item. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 

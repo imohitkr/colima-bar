@@ -7,7 +7,8 @@ import Testing
     /// saved setting, so this list must change only on purpose.
     @Test func keysKeepTheirStoredNames() {
         let expected: Set<String> = [
-            "profile", "notifyOnCrash", "autoStart", "autoStop", "autoStopMinutes", "hideIconWhenStopped",
+            "profile", "notifyOnCrash", "autoStart", "autoStop", "autoStopMinutes", "autoStopSooner",
+            "hideIconWhenStopped",
             "toldIconHidden", "apiVersion", "checkUpdates", "notifiedVersion", "didOfferLoginItem",
             "didMigrateLoginItem", "revealOnLaunch", "keepRemovedLogs",
         ]

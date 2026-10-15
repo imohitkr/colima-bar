@@ -119,4 +119,72 @@ import Testing
         clock.advance(1)
         #expect(AutoStopRule.isCheckDue(lastCheck: last, now: clock.now))
     }
+
+    // MARK: - Limit for the power state
+
+    private func limit(
+        _ minutes: Int, battery: Bool = false, lowPower: Bool = false, hot: Bool = false, sooner: Bool = true
+    ) -> AutoStopRule.Limit {
+        AutoStopRule.limit(
+            minutes: minutes, power: PowerState(onBattery: battery, lowPowerMode: lowPower, isHot: hot),
+            stopSooner: sooner)
+    }
+
+    @Test func limitIsTheUserTimeOnTheCharger() {
+        #expect(limit(30) == AutoStopRule.Limit(minutes: 30, reason: nil))
+    }
+
+    @Test func limitCapsTheTimeOnBattery() {
+        #expect(limit(30, battery: true) == AutoStopRule.Limit(minutes: 10, reason: .battery))
+        #expect(limit(5, battery: true) == AutoStopRule.Limit(minutes: 5, reason: nil))
+        #expect(limit(10, battery: true) == AutoStopRule.Limit(minutes: 10, reason: nil))
+    }
+
+    @Test func limitCapsTheTimeInLowPowerMode() {
+        #expect(limit(30, lowPower: true) == AutoStopRule.Limit(minutes: 5, reason: .lowPowerMode))
+        #expect(limit(3, lowPower: true) == AutoStopRule.Limit(minutes: 3, reason: nil))
+    }
+
+    @Test func lowPowerModeWinsOverBattery() {
+        #expect(limit(8, battery: true, lowPower: true) == AutoStopRule.Limit(minutes: 5, reason: .lowPowerMode))
+    }
+
+    @Test func limitIsTheUserTimeWhenStopSoonerIsOff() {
+        #expect(limit(30, battery: true, lowPower: true, sooner: false) == AutoStopRule.Limit(minutes: 30, reason: nil))
+    }
+
+    @Test func aHotMacDoesNotChangeTheLimit() {
+        #expect(limit(30, hot: true) == AutoStopRule.Limit(minutes: 30, reason: nil))
+    }
+
+    @Test func limitNotesNameTheReason() {
+        #expect(AutoStopRule.Reason.battery.note == "on battery")
+        #expect(AutoStopRule.Reason.lowPowerMode.note == "Low Power Mode")
+    }
+
+    @Test func aShorterLimitKeepsTheIdleStartAndMovesTheStopTimeEarlier() {
+        // 12 minutes idle: not due with 30 minutes, due with 10 minutes, same idle start.
+        var clock = TestInstants()
+        let start = clock.now
+        clock.advance(12 * 60)
+        let wall = Date(timeIntervalSince1970: 1_800_000_000)
+        let onCharger = check(since: start, now: clock.now, minutes: 30)
+        let onBattery = check(since: start, now: clock.now, minutes: 10)
+        #expect(onCharger == AutoStopRule.Check(idleSince: start, isDue: false))
+        #expect(onBattery == AutoStopRule.Check(idleSince: start, isDue: true))
+        let later = AutoStopRule.stopTime(idleSince: start, now: clock.now, wallNow: wall, idleMinutes: 30)
+        let sooner = AutoStopRule.stopTime(idleSince: start, now: clock.now, wallNow: wall, idleMinutes: 10)
+        #expect(later.timeIntervalSince(sooner) == 20 * 60)
+        #expect(AutoStopRule.stopTimeMoved(old: later, new: sooner))
+    }
+
+    @Test func stillDueNeedsAnIdleStartAndEnoughTime() {
+        var clock = TestInstants()
+        let start = clock.now
+        clock.advance(12 * 60)
+        #expect(AutoStopRule.stillDue(idleSince: start, now: clock.now, minutes: 10))
+        #expect(AutoStopRule.stillDue(idleSince: start, now: clock.now, minutes: 12))
+        #expect(!AutoStopRule.stillDue(idleSince: start, now: clock.now, minutes: 30))
+        #expect(!AutoStopRule.stillDue(idleSince: nil, now: clock.now, minutes: 10))
+    }
 }

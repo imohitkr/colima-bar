@@ -30,6 +30,13 @@ enum AutoStopRule {
         return Check(idleSince: since, isDue: now - since >= .seconds(idleMinutes * 60))
     }
 
+    /// True if the idle time has run for `minutes` now. A check that waits for
+    /// a fresh container list calls it again: the limit can change meanwhile.
+    static func stillDue(idleSince: SuspendingClock.Instant?, now: SuspendingClock.Instant, minutes: Int) -> Bool {
+        guard let since = idleSince else { return false }
+        return now - since >= .seconds(minutes * 60)
+    }
+
     /// The wall clock time when the VM stops. The time that is left comes from
     /// the instants, so it grows by the time of a system sleep.
     static func stopTime(
@@ -47,6 +54,50 @@ enum AutoStopRule {
         case let (old?, new?): return abs(new.timeIntervalSince(old)) >= 1
         default: return true
         }
+    }
+
+    /// On battery, an idle VM stops after this many minutes at most. It is
+    /// about the energy of one restart: a longer idle time costs more.
+    static let batteryMinutes = 10
+    /// In Low Power Mode, an idle VM stops after this many minutes at most.
+    /// It is the shortest preset. It is never "at once", because scripts have
+    /// short gaps, for example `compose down && up`.
+    static let lowPowerMinutes = 5
+
+    /// Why the idle time is shorter than the user's time.
+    enum Reason: Equatable {
+        case battery, lowPowerMode
+
+        /// The text for the System tab.
+        var note: String {
+            switch self {
+            case .battery: "on battery"
+            case .lowPowerMode: "Low Power Mode"
+            }
+        }
+    }
+
+    /// The idle time that applies now.
+    struct Limit: Equatable {
+        var minutes: Int
+        /// Set only when the power state made the time shorter.
+        var reason: Reason?
+    }
+
+    /// The idle time for the power state. A shorter time that the user selects
+    /// stays. The thermal state does not change it.
+    static func limit(minutes: Int, power: PowerState, stopSooner: Bool) -> Limit {
+        guard stopSooner else { return Limit(minutes: minutes, reason: nil) }
+        let cap: (minutes: Int, reason: Reason)
+        if power.lowPowerMode {
+            cap = (lowPowerMinutes, .lowPowerMode)
+        } else if power.onBattery {
+            cap = (batteryMinutes, .battery)
+        } else {
+            return Limit(minutes: minutes, reason: nil)
+        }
+        return cap.minutes < minutes
+            ? Limit(minutes: cap.minutes, reason: cap.reason) : Limit(minutes: minutes, reason: nil)
     }
 
     /// The running profiles other than the selected one that auto-stop
