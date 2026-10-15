@@ -176,7 +176,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - An action fails.
 - A new version is available. ColimaBar sends one notification for each new version. See [Update](install.md#update).
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.
-- After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. See [When the Mac sleeps](#when-the-mac-sleeps).
+- After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).
 
 ColimaBar sends no notification for a normal start or stop. Exit codes 130, 137 and 143 (SIGINT, SIGKILL and SIGTERM) count as a normal stop, so they send no crash alert. ColimaBar also ignores testcontainers containers. For one container and one kind of failure, it sends at most one notification each 10 minutes.
 

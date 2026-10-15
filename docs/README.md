@@ -4,10 +4,10 @@ These guides are for people who use ColimaBar. For a short overview, read the [p
 
 | Page | Contents |
 |---|---|
-| [Install](install.md) | Requirements, the installer, the disk image, Homebrew, download checks, the build from source and updates. |
+| [Install](install.md) | Requirements, Homebrew, the installer, the disk image, download checks, the build from source and updates. |
 | [Use](usage.md) | The menu bar icon, the stopped screen and its VM settings, the dashboard tabs, disk shrink, settings export and import, the right-click menu, keyboard shortcuts, notifications, system sleep, saved logs and profiles. |
 | [Auto-start](auto-start.md) | The ColimaBar socket, the profile sockets, the shell snippet, what happens when ColimaBar quits, and the docker routes. |
-| [Auto-stop](auto-stop.md) | Stop the VM after an idle time, what counts as activity, and system sleep. |
+| [Auto-stop](auto-stop.md) | Stop the VM after an idle time, what counts as activity, system sleep, and a shorter idle time on battery and in Low Power Mode. |
 | [Uninstall](uninstall.md) | The menu item, the uninstall script, what it removes and what stays. |
 | [Troubleshooting](troubleshooting.md) | Where the logs are, common problems and how to report a bug. |
 | [Roadmap](roadmap.md) | Features that are planned. They have no target version yet. |
