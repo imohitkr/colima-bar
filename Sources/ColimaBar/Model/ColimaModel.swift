@@ -91,6 +91,7 @@ final class ColimaModel {
             guard !isDebug else { return }
             autoStart ? proxy.start() : proxy.stop()
             profileProxies.setListening(autoStart)
+            if autoStart { checkDockerContext() }
         }
     }
     var autoStop = Defaults.bool(.autoStop) ?? false {
@@ -204,6 +205,13 @@ final class ColimaModel {
     @ObservationIgnored private var lastPing = Date()
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
     @ObservationIgnored private var isDebug = false
+    @ObservationIgnored private var isCheckingContext = false
+    @ObservationIgnored private var contextCheckAgain = false
+    /// The modification time of the docker config file at the last tick.
+    @ObservationIgnored private var configStamp: Date?
+    /// When a failed docker context check can run again.
+    @ObservationIgnored private var contextRetryAt: Date?
+    @ObservationIgnored private var contextFailures = 0
     @ObservationIgnored private var generation = 0  // bumps on profile switch; stale callbacks are ignored
     // Drops `colima list` results older than the last applied one.
     @ObservationIgnored private var statusOrder = LatestOnly()
@@ -280,8 +288,9 @@ final class ColimaModel {
             // The proxies appear with the first `colima list` (syncProfiles).
             profileProxies.wake = { [weak self] p in await self?.wakeForProxy(profile: p) ?? false }
             profileProxies.setListening(autoStart)
+            configStamp = Routing.configStamp()
             Task {
-                await Routing.apply()
+                await Routing.apply(selected: profile)
                 routing = await Routing.status()
             }
             dirWatcher = makeDirWatcher()
@@ -367,6 +376,13 @@ final class ColimaModel {
         // A new Colima folder (for example ~/.colima made by a colima call
         // in a terminal) moves every socket: refresh at once.
         if Paths.colimaFoldersMoved { await refreshStatus() }
+        let stamp = Routing.configStamp()
+        if Self.contextCheckDue(stamp: stamp, lastStamp: configStamp, retryAt: contextRetryAt, now: Date()) {
+            if stamp != configStamp { contextFailures = 0 }
+            configStamp = stamp
+            contextRetryAt = nil
+            checkDockerContext()
+        }
         let b = readBusy()
         if b != busy {
             let finished = busy != nil && b == nil
@@ -494,13 +510,9 @@ final class ColimaModel {
                     memGB: ByteFormat.gib(bytes: $0.memory ?? 0), runtime: $0.runtime ?? "")
             })
         syncProfiles()
-        // `colima start` of any profile switches the docker context to that
-        // profile. The selected profile applies the routes below.
-        if !isDebug, hadProfiles,
-            profiles.contains(where: { $0.isRunning && $0.name != profile && !wasRunningNames.contains($0.name) })
-        {
-            Task { await Routing.apply() }
-        }
+        // `colima start` switches the docker context, and `colima stop`
+        // deletes it. Check it when a profile starts or stops.
+        if hadProfiles, Set(profiles.filter(\.isRunning).map(\.name)) != wasRunningNames { checkDockerContext() }
         let info = all.first { ($0.name ?? "default") == profile }
         let newState: VMState = info?.status == "Running" ? .running : .stopped
         let wasRunning = state == .running
@@ -535,13 +547,6 @@ final class ColimaModel {
                 await refreshContainers()
                 guard gen == generation else { return }
                 requestDF()
-                // `colima start` switches the docker context back to colima.
-                if !isDebug {
-                    Task {
-                        await Routing.apply()
-                        if visibleCount > 0, dashboardTab == .system { routing = await Routing.status() }
-                    }
-                }
             }
         } else {
             clearVMData()
@@ -829,6 +834,7 @@ final class ColimaModel {
             if p == profile, localBusy == "Starting" { localBusy = nil }
             if profileActions[p] == "Starting" { profileActions[p] = nil }
             if !r.ok { log.error("auto-start: colima-ctl.sh start exited \(r.status) for \(p, privacy: .public)") }
+            checkDockerContext()
         }
         var streak = 0
         // SuspendingClock: a system sleep during the wait does not use up the time.
@@ -872,6 +878,31 @@ final class ColimaModel {
             if let path = profileProxies.path(for: p) { hosts[p] = "unix://\(path)" }
         }
         applyContexts(hosts)
+    }
+
+    /// Moves the docker CLI back to a ColimaBar context after Colima changed
+    /// it (see `Routing.restoreContext`). Only while auto-start is on. One
+    /// check runs at a time; a request during a check runs it again.
+    private func checkDockerContext() {
+        guard autoStart, !isDebug else { return }
+        guard !isCheckingContext else {
+            contextCheckAgain = true
+            return
+        }
+        isCheckingContext = true
+        Task {
+            repeat {
+                contextCheckAgain = false
+                if await Routing.restoreContext(selected: profile) {
+                    contextFailures = 0
+                } else {
+                    contextFailures += 1
+                    contextRetryAt = Self.contextCheckRetryAt(failures: contextFailures, now: Date())
+                }
+            } while contextCheckAgain
+            isCheckingContext = false
+            if visibleCount > 0, dashboardTab == .system { routing = await Routing.status() }
+        }
     }
 
     /// Applies the `colimabar-PROFILE` contexts in the background, one run at
@@ -1380,13 +1411,8 @@ final class ColimaModel {
         if let label, profileActions[p] == label { profileActions[p] = nil }
         busy = readBusy()
         await refreshAll(urgentDF: action.changesDisk)
-        // A shrink runs `colima start`, which switches the docker context.
-        // For a stopped VM, it stops the VM again after a short time, and a
-        // refresh can miss the start. Thus apply the routes here too.
-        if action == .diskShrink, r.status != 2, !isDebug {
-            await Routing.apply()
-            if visibleCount > 0, dashboardTab == .system { await refreshRouting() }
-        }
+        // Colima switches the docker context on start and deletes it on stop.
+        if action.isVMAction, r.status != 2 { checkDockerContext() }
         return r.ok
     }
 

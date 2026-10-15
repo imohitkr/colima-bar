@@ -115,12 +115,21 @@ All docker clients use the stable socket (`~/.cache/colima-bar/docker.sock`, `Pa
 
 | Client | Route |
 |---|---|
-| docker CLI and tools that read contexts | The docker context `colimabar`. ColimaBar switches to it only from `default` or a `colima*` context. |
+| docker CLI and tools that read contexts | The docker context `colimabar`. ColimaBar switches to it from `default` or a `colima*` context at launch, whatever the auto-start setting. While auto-start is on, it also moves a `colima` or `colima-PROFILE` context back at any time. |
 | IDEs and Dock apps | `launchctl setenv DOCKER_HOST`. ColimaBar also sets `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` for Ryuk. Both apply to all apps that launchd starts in the session. |
 | testcontainers | `docker.host` in `~/.testcontainers.properties`. The write follows a symlink and keeps the file mode. |
 | Tools that only try `/var/run/docker.sock` | An optional symlink that needs an admin password (`Routing.linkVarRun()`). |
 
-`Routing.apply()` runs when the app starts and each time the VM starts, because `colima start` switches the docker context back to `colima`. `Routing` never changes a route that points to a different daemon.
+`Routing.apply(selected:)` runs when the app starts. Colima switches the docker context on `start` and deletes it on `stop`. Thus `ColimaModel.checkDockerContext()` runs `Routing.restoreContext(selected:)`. It runs only while auto-start is on. The triggers are:
+
+- Each VM action that was not cancelled.
+- The end of a wake.
+- A profile start or stop that `refreshStatus()` sees.
+- A change of the mtime of the docker config file (`Routing.configStamp()`, one `stat` for each tick, through a symlink).
+- Auto-start turning on.
+- A retry 60 seconds after a failed check, at most three times in a row.
+
+When a ColimaBar context is current, the check also sets the launchd and testcontainers routes. It reads `currentContext` from the config file, because `docker context show` fails when the context is missing. `Routing.contextTarget` decides the move. `Routing` never changes a route that points to a different daemon.
 
 The upstream of the stable socket is the Colima socket of the selected profile. While the VM is up, the proxy splices bytes in both directions. While the VM is down, it does this:
 
@@ -146,7 +155,7 @@ The listener is a GCD read source on a non-blocking fd. When a client waits, the
 - `refreshStatus()` calls `syncProfiles()` after each `colima list`. It creates the proxies of new profiles, removes the proxies of gone profiles and deletes old files in the folder. It keeps the proxy of a profile while its busy marker exists, because a disk shrink deletes the profile for a short time. An empty list changes nothing. A debug run changes nothing.
 - `ProfileContexts` keeps one docker context `colimabar-PROFILE` for each proxy. It changes only contexts whose description starts with "ColimaBar". It runs the docker CLI only when the wanted set changes. The `colimabar` context, the launchd `DOCKER_HOST` and the testcontainers route still point at the stable socket.
 - `wakeForProxy(profile:)` runs one wake at a time for each profile. The stable socket and the profile socket of the selected profile can ask for the same wake.
-- `colima start` of any profile switches the docker context to that profile. When `refreshStatus()` sees a different profile start, it runs `Routing.apply()`.
+- `colima start` of any profile switches the docker context to `colima-PROFILE`. `Routing.restoreContext` moves a non-selected profile to `colimabar-PROFILE`, which has the same daemon and auto-start.
 - Each proxy holds one listening fd and one GCD read source. It has no accept thread. Thus the idle cost grows by one fd for each profile.
 
 On quit, or when auto-start is off, each profile socket becomes a symlink to the Colima socket of its profile.
@@ -206,7 +215,7 @@ While a `colima start` or `colima restart` for the profile runs (`start_in_progr
 
 The script reads values of `colima.yaml` in the same forms as `VMConfig.parse`: with CRLF line ends, inline comments and quotes. The script runs `colima status` in a subshell. If the Colima folder changed, the main shell exits after the subshell, without the redirect, so the notice of `cleanup` reaches the app.
 
-A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. Colima creates the new disk only at a start. Thus for a stopped VM, the script runs `colima stop` at the end. The busy marker covers the full run. That start switches the docker context. The VM runs only for a short time, so a refresh can miss it. Thus after each shrink that was not cancelled, the model runs `Routing.apply()`. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
+A disk cannot shrink in place. `disk-shrink N` saves a copy of `colima.yaml` with `disk: N`, then runs `colima stop`, `colima delete --data --force`, puts the copy back and runs `colima start`. `colima delete` removes the profile folder with `colima.yaml`, so the copy keeps the other VM settings. Colima creates the new disk only at a start. Thus for a stopped VM, the script runs `colima stop` at the end. The busy marker covers the full run. That start switches the docker context, so the model checks the context after the shrink like after any VM action. While the busy marker exists, the model does not switch away from a profile that `colima list` no longer shows, and auto-start waits.
 
 The exit codes are fixed. 0 means done. 1 means failed, and the script already notified the user. 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 

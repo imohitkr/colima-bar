@@ -24,6 +24,12 @@ enum Paths {
     /// The proxy socket of one profile, or nil if the name is invalid or the
     /// path is too long for a unix socket (see ProfileSocket).
     static func profileSocket(_ profile: String) -> String? { ProfileSocket.path(dir: profilesDir, profile: profile) }
+    /// The docker CLI config file: `$DOCKER_CONFIG/config.json` if
+    /// DOCKER_CONFIG is set and not empty, else `~/.docker/config.json`.
+    static func dockerConfig(env: [String: String], home: String) -> String {
+        if let dir = env["DOCKER_CONFIG"], !dir.isEmpty { return "\(dir)/config.json" }
+        return "\(home)/.docker/config.json"
+    }
     static let testcontainersProps = "\(home)/.testcontainers.properties"
 
     /// The Colima folder and Lima's folder of the Colima instances.
