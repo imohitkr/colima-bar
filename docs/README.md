@@ -9,7 +9,7 @@ These guides are for people who use ColimaBar. For a short overview, read the [p
 | [Auto-start](auto-start.md) | The ColimaBar socket, the profile sockets, the shell snippet, what happens when ColimaBar quits, and the docker routes. |
 | [Auto-stop](auto-stop.md) | Stop the VM after an idle time, what counts as activity, system sleep, and a shorter idle time on battery and in Low Power Mode. |
 | [Uninstall](uninstall.md) | The menu item, the uninstall script, what it removes and what stays. |
-| [Troubleshooting](troubleshooting.md) | Where the logs are, common problems and how to report a bug. |
+| [Troubleshooting](troubleshooting.md) | Run Doctor first, where the logs are, common problems such as a Broken profile and Repair, and how to report a bug. |
 | [Roadmap](roadmap.md) | Features that are planned. They have no target version yet. |
 
 Contributors: read [ARCHITECTURE.md](../ARCHITECTURE.md) for the design and [CONTRIBUTING.md](../CONTRIBUTING.md) to build and test.

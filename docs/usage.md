@@ -73,15 +73,15 @@ These tabs show sizes and the items that containers use. You can pull the latest
 - Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is not `vz`, the Rosetta switch is disabled, unless Rosetta is on. A missing `vmType` counts as `vz`.
 - To change these settings while the VM is stopped, use the [stopped screen](#open-the-dashboard).
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons.
-- **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md). **Stop sooner on battery or in Low Power Mode** shortens the idle time. See [On battery and in Low Power Mode](auto-stop.md#on-battery-and-in-low-power-mode).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
+- **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Profiles**: shown only when you have more than one profile.
 - **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
 
 ### Doctor
 
-Doctor checks the setup of the selected profile and offers a fix for most findings. Doctor only reads: the checks do not start the VM and do not change anything. Doctor runs when you ask for it. It never runs by itself. The checks never send a notification. A fix sends one with the result.
+Doctor checks the setup of the selected profile and offers a fix for most findings. Doctor only reads: the checks do not start the VM and do not change anything. Doctor runs when you ask for it. It never runs by itself. The checks never send a notification. **Use colimabar**, **Set routes**, **Use osxkeychain** and **Add folder** send one with the result. **Repair…** sends one only if it fails. **Copy line** sends none.
 
 To open Doctor, click **Open Doctor** on the System tab, click **Doctor…** on the stopped screen, or choose **Doctor…** in the right-click menu. The page runs the checks when it opens, unless the last report is less than 5 minutes old. **Run checks** runs them again. **Done** closes the page.
 
@@ -90,8 +90,8 @@ Each check has a status: OK (green), warning (orange), problem (red) or skipped.
 | Check | What it looks at | Fix |
 |---|---|---|
 | Tools | colima, limactl and the docker CLI, with their versions. A missing colima or limactl is a problem. A missing docker CLI, or Lima before 2.1, is a warning. | None |
-| Docker context | The current docker context. A context that does not exist is a problem. The `default` context and a `colima` context are a warning, because the docker CLI then skips auto-start. Skipped while auto-start is off. | **Use colimabar** |
-| App routes | The launchd `DOCKER_HOST` and `docker.host` in `~/.testcontainers.properties`. A route to another daemon is a warning, and ColimaBar leaves it. Skipped while auto-start is off. | **Set routes**, only when the docker context is a ColimaBar context, `default` or a `colima` context |
+| Docker context | The current docker context. A context that does not exist is a problem. The `default` context and a `colima` context are a warning, because the docker CLI then skips auto-start. Another context, such as a remote one, is a warning with no fix. Skipped while auto-start is off. | **Use colimabar** |
+| App routes | The launchd `DOCKER_HOST` and `docker.host` in `~/.testcontainers.properties`. A route that is not set, or that points to another daemon, is a warning. ColimaBar leaves a route to another daemon. Skipped while auto-start is off. | **Set routes**, only for a route that is not set, and only when the docker context is a ColimaBar context, `default`, a `colima` context or a context that does not exist |
 | Shell DOCKER_HOST | `DOCKER_HOST` in the startup files of your login shell. Doctor reads the text of the files and runs nothing. A socket of Colima is a warning. A socket of Docker Desktop is a problem. For a full check, run `echo $DOCKER_HOST` in a new terminal. | **Copy line** copies the line for the ColimaBar socket. Paste it in place of the line in your file. |
 | Registry login | The credential helpers in the docker config file. Doctor reads only the names, never the logins. A `credsStore` helper that is missing is a problem. | **Use osxkeychain**, if `docker-credential-osxkeychain` exists |
 | Docker plugins | `docker-buildx` and `docker-compose` in the folders where docker looks. A broken link is a problem. A plugin that is only in `/opt/homebrew/lib/docker/cli-plugins` is a warning. | **Add folder** |
@@ -117,9 +117,9 @@ Repair removes only these regular files (never links) whose owner process is gon
 
 - `ha.pid`, `vz.pid`, `qemu.pid` and `krunkit.pid` in the Lima folder of the profile (`_lima/colima` for `default`, `_lima/colima-NAME` otherwise).
 - `daemon/daemon.pid` in the Colima folder of the profile. The owner must be `colima daemon start`. `colima stop` and `colima start` send SIGTERM to the PID in this file without a check.
-- `usernet_NAME.pid` in `_lima/_networks/NAME`, only when no Lima instance has a host agent that runs.
+- `usernet_*.pid` in each folder of `_lima/_networks`, only when no Lima instance has a host agent that runs.
 
-Repair never touches disks, `cidata.iso`, `*.yaml` files, logs or sockets. Your containers, images and volumes stay. Running containers stop. Repair refuses to run while a `colima start` or `colima restart` of the profile runs, or while another action of the profile runs. ColimaBar writes each removed file to `~/.cache/colima-bar/ctl.log`.
+Repair never touches disks, `cidata.iso`, `*.yaml` files, logs or sockets. Your containers, images and volumes stay. Running containers stop. Repair refuses to run if the profile has no `colima.yaml`, while a `colima start` or `colima restart` of the profile runs, or while another action of the profile runs. ColimaBar writes each removed file to `~/.cache/colima-bar/ctl.log`.
 
 ### Shrink the disk
 
@@ -220,7 +220,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 
 - A container exits with an error code, gets OOM-killed or becomes unhealthy. The notification has **View logs** and **Restart** buttons.
 - An action fails.
-- A Doctor fix ends. The notification gives the result. The Doctor checks send none.
+- A Doctor fix of the docker context, the routes or the docker config file ends. The notification gives the result. The Doctor checks send none.
 - A new version is available. ColimaBar sends one notification for each new version. See [Update](install.md#update).
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.
 - After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).

@@ -26,6 +26,6 @@ body:
     attributes:
       label: ColimaBar version
       description: The dashboard footer and the right-click menu show the version.
-      placeholder: "0.7.1"
+      placeholder: "0.8.0"
     validations:
       required: true

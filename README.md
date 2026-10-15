@@ -25,7 +25,7 @@
 - **Live dashboard**: see containers by Compose project, with health, ports, CPU, memory and logs. Images, volumes and VM settings are one click away.
 - **Auto-stop**: ColimaBar can stop the VM when it is idle.
 - **Doctor**: one click checks the docker setup (context, routes, shell, plugins, VM and disk) and fixes common problems. **Repair** gets a Broken profile running again.
-- **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, one for each new version, and one the first time the icon hides.
+- **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, when a Doctor fix ends, one for each new version, and one the first time the icon hides.
 
 > [!NOTE]
 > ColimaBar is an independent community project. It is not part of [Colima](https://github.com/abiosoft/colima), and the Colima maintainers do not support it. Report ColimaBar problems in the [ColimaBar issue tracker](https://github.com/imohitkr/colima-bar/issues).

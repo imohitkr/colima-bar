@@ -6,7 +6,8 @@ These features are planned. They have no target version yet. The milestones are 
 
 ## 1. Doctor
 
-- Find common problems and fix them: a `DOCKER_HOST` that bypasses ColimaBar, a Docker Desktop credential helper, missing buildx or compose plugins, stale VM files and a full disk. **Repair** stops the VM by force, removes stale files and starts it again.
+Doctor and Repair shipped in 0.8.0. See [Doctor](usage.md#doctor). These parts remain:
+
 - Warn before a start when the Colima or Lima version changed since the last good start.
 - Save a diagnostics file for a bug report, and open a prefilled issue.
 

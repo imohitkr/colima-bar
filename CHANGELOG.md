@@ -6,13 +6,20 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-10-16
+
 ### Added
 
-- Doctor checks the docker setup of the selected profile: the tools, the docker context, the app routes, `DOCKER_HOST` in your shell files, the registry login, the docker plugins, the VM status, stale Lima files and the disk space. It offers a fix for most findings. Open it from the System tab, the stopped screen or the right-click menu. See [Doctor](docs/usage.md#doctor).
-- Repair gets a profile that Colima shows as Broken, or that does not start, running again. It removes the pid files of Lima and of the Colima daemon whose process is gone, stops the VM by force and starts it. It removes a file whose PID belongs to another program before the force stop, so Colima and Lima never stop that program. If it cannot remove such a file, it stops nothing. See [Repair](docs/usage.md#repair).
+- Doctor checks the docker setup of the selected profile: the tools, the docker context, the app routes, `DOCKER_HOST` in your shell files, the registry login, the docker plugins, the VM status, stale Lima files and the disk space. It offers a fix for most findings. Open it from the System tab or the right-click menu. If the profile is Broken or its last start failed, the stopped screen also shows a **Doctor…** button. See [Doctor](docs/usage.md#doctor).
+- Repair gets a profile that Colima shows as Broken, or that does not start, running again. It removes a file whose PID belongs to another program before the force stop, so Colima and Lima never stop that program. If it cannot remove such a file, it stops nothing. It stops the VM by force, removes the pid files of Lima and of the Colima daemon whose process is gone, and starts the VM again. See [Repair](docs/usage.md#repair).
+
+### Changed
+
+- ColimaBar now also moves a launchd `DOCKER_HOST` or testcontainers `docker.host` that points to a Colima socket in `~/.colima` to the ColimaBar socket.
 
 ### Fixed
 
+- ColimaBar no longer rewrites `~/.testcontainers.properties` when it cannot read it as UTF-8 text.
 - The busy marker and the lock of a VM action hold the PID of the script. After a long sleep of the Mac, an action that still runs keeps its lock, and ColimaBar no longer shows it as finished. A marker or lock of a script that is gone ends at once.
 
 ## [0.7.1] - 2026-10-15
@@ -183,7 +190,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/imohitkr/colima-bar/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/imohitkr/colima-bar/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/imohitkr/colima-bar/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/imohitkr/colima-bar/compare/v0.5.0...v0.6.0
