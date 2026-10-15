@@ -13,11 +13,33 @@ import Foundation
 /// the real `colima delete` removes the profile folder. The stub `pgrep`
 /// finds no process and logs nothing, so a real `colima start` on the Mac
 /// does not change a test.
+///
+/// The stub `ps` answers `-o command= -p PID` and `-o etime= -p PID` from a
+/// table. It starts empty: no process runs. `stubProcesses(_:)` fills it, for
+/// the owner checks of the lock, the busy marker and the pid files of Lima.
 final class ScriptSandbox {
     let root: String
     let home: String
     let bin: String
     let log: String
+    /// The table of the stub `ps`: PID, etime and command, tab separated.
+    let processTable: String
+
+    /// A process that the stub `ps` knows.
+    struct FakeProcess {
+        let pid: Int
+        /// How long the process runs, in seconds.
+        let age: Int
+        let command: String
+
+        /// The `etime` text of `ps`: `[[DD-]HH:]MM:SS`.
+        var etime: String {
+            let d = age / 86400, h = age % 86400 / 3600, m = age % 3600 / 60, s = age % 60
+            if d > 0 { return String(format: "%d-%02d:%02d:%02d", d, h, m, s) }
+            if h > 0 { return String(format: "%02d:%02d:%02d", h, m, s) }
+            return String(format: "%02d:%02d", m, s)
+        }
+    }
 
     /// The repository root, found from this file's path.
     static let repo = URL(fileURLWithPath: #filePath)
@@ -29,6 +51,7 @@ final class ScriptSandbox {
         home = root + "/home"
         bin = root + "/bin"
         log = root + "/calls.log"
+        processTable = root + "/processes.tsv"
         let fm = FileManager.default
         try fm.createDirectory(atPath: home, withIntermediateDirectories: true)
         try fm.createDirectory(atPath: bin, withIntermediateDirectories: true)
@@ -52,6 +75,18 @@ final class ScriptSandbox {
         try stub("kubectl", "printf 'kubectl %s\\n' \"$*\" >> \"\(log)\"\nexit 0")
         // colima-ctl.sh looks for a `colima start` in progress.
         try stub("pgrep", "exit 1")
+        // The owner checks of colima-ctl.sh ask `ps` about a PID.
+        fm.createFile(atPath: processTable, contents: nil)
+        try stub(
+            "ps",
+            """
+            col=""; pid=""
+            while [ $# -gt 0 ]; do
+              case "$1" in -o) col="$2"; shift ;; -p) pid="$2"; shift ;; esac
+              shift
+            done
+            awk -F'\t' -v p="$pid" -v c="$col" '$1 == p { if (c == "command=") print $3; else if (c == "etime=") print $2; found = 1 } END { exit found ? 0 : 1 }' "\(processTable)"
+            """)
     }
 
     deinit { try? FileManager.default.removeItem(atPath: root) }
@@ -61,6 +96,18 @@ final class ScriptSandbox {
         let path = "\(bin)/\(tool)"
         try ("#!/bin/bash\n" + body + "\n").write(toFile: path, atomically: true, encoding: .utf8)
         chmod(path, 0o755)
+    }
+
+    /// Sets the processes that the stub `ps` knows. Any other PID has no process.
+    func stubProcesses(_ processes: [FakeProcess]) throws {
+        let text = processes.map { "\($0.pid)\t\($0.etime)\t\($0.command)" }.joined(separator: "\n") + "\n"
+        try text.write(toFile: processTable, atomically: true, encoding: .utf8)
+    }
+
+    /// Sets the modification time of a file or folder to `seconds` ago.
+    func setAge(_ path: String, seconds: TimeInterval) throws {
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSinceNow: -seconds)], ofItemAtPath: path)
     }
 
     /// A copy of `scripts/NAME` that finds the stub tools first. It throws
@@ -101,9 +148,24 @@ final class ScriptSandbox {
         }.get()
     }
 
+    /// Runs a copy of scripts/colima-ctl.sh for `profile`, as ColimaBar does.
+    func ctl(
+        _ args: [String], profile: String = "work", env: [String: String] = [:]
+    ) async throws -> (status: Int32, out: String) {
+        try await bash(
+            [copy("colima-ctl.sh")] + args,
+            env: ["COLIMABAR_PROFILE": profile, "COLIMABAR_APP": "1"].merging(env) { $1 })
+    }
+
     /// The stub calls so far, one line each.
     var calls: [String] {
         ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    }
+
+    /// True when the script left no lock folder and no busy marker.
+    var leavesNoLockOrBusyMarker: Bool {
+        let left = (try? FileManager.default.contentsOfDirectory(atPath: home + "/.cache/colima-bar")) ?? []
+        return !left.contains { $0.hasPrefix("lock.") || $0.hasPrefix("busy.") }
     }
 
     /// Writes a file below HOME, for example ".config/colima/work/colima.yaml".

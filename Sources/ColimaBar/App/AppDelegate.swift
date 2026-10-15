@@ -162,6 +162,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                 }
                 return
             }
+            // COLIMABAR_DOCTOR=1: show the Doctor page. It runs the checks.
+            if ProcessInfo.processInfo.environment["COLIMABAR_DOCTOR"] == "1" { ui.showDoctor = true }
             showWindow()
             if let hs = ProcessInfo.processInfo.environment["COLIMABAR_SNAPSHOT_HEIGHT"], let h = Double(hs) {
                 window?.setContentSize(NSSize(width: 480, height: h))
@@ -331,6 +333,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         }
         menu.addItem(.separator())
         add("Open Dashboard Window", #selector(openWindowAction))
+        add("Doctor…", #selector(openDoctor))
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = LoginItem.isEnabled ? .on : .off
@@ -375,6 +378,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     @objc private func stopVM() { model.run(.stop) }
     @objc private func restartVM() { model.run(.restart) }
     @objc private func openWindowAction() { showWindow() }
+    /// Opens the dashboard popover on the Doctor page.
+    @objc private func openDoctor() {
+        ui.showDoctor = true
+        if !popover.isShown { togglePopover() }
+    }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func toggleAutoStart() { model.autoStart.toggle() }
     @objc private func toggleHideIcon() { model.hideIconWhenStopped.toggle() }

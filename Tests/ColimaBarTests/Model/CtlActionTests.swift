@@ -110,7 +110,7 @@ import Testing
     @Test func vmActionsShowABusyLabel() {
         let vm: Set<CtlAction> = [
             .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop, .profileCreate,
-            .profileDelete,
+            .profileDelete, .repair,
         ]
         for a in CtlAction.allCases {
             #expect(a.isVMAction == vm.contains(a), "\(a.rawValue)")
@@ -124,6 +124,19 @@ import Testing
         #expect(CtlAction.diskShrink.busyLabel(running: false) == "Shrinking disk")
         #expect(CtlAction.profileCreate.busyLabel(running: false) == "Creating")
         #expect(CtlAction.profileDelete.busyLabel(running: false) == "Deleting")
+        #expect(CtlAction.repair.busyLabel(running: true) == "Repairing")
+        #expect(CtlAction.repair.busyLabel(running: false) == "Repairing")
+    }
+
+    @Test func repairAsksInBothStatesAndStaleFilesIsReadOnly() throws {
+        #expect(CtlAction.repair.showsDialog(running: true) && CtlAction.repair.showsDialog(running: false))
+        #expect(!CtlAction.repair.checksExpectedState)
+        #expect(CtlAction.repair.isVMAction)
+        #expect(!CtlAction.staleFiles.isVMAction)
+        #expect(!CtlAction.staleFiles.showsDialog(running: true))
+        #expect(CtlAction.staleFiles.rawValue == "stale-files")
+        let labels = try scriptActions()
+        #expect(labels.contains("repair") && labels.contains("stale-files"))
     }
 
     @Test func aConfigEditOfAStoppedVMShowsSaving() {

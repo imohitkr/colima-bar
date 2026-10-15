@@ -4,6 +4,7 @@ import SwiftUI
 struct SystemTab: View {
     @Bindable var model: ColimaModel
     @Bindable var form: SystemForm
+    var ui: ViewState
     @FocusState private var minutesFocused: Bool
 
     var body: some View {
@@ -128,6 +129,15 @@ struct SystemTab: View {
             .toggleStyle(.checkbox)
             .hint(Help.hideIcon)
 
+            Divider()
+            SectionHeader(title: "Doctor")
+            HStack(spacing: 8) {
+                Text(doctorSummary).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+                Button("Open Doctor") { ui.showDoctor = true }
+                    .hint(Help.doctorOpen)
+            }
+
             if model.profiles.count > 1 {
                 Divider()
                 SectionHeader(title: "Profiles", hint: Help.profiles) { EmptyView() }
@@ -193,6 +203,12 @@ struct SystemTab: View {
             syncLogin()
             syncIdle()
         }
+    }
+
+    /// The result of the last Doctor run, or a note that none ran.
+    private var doctorSummary: String {
+        guard let r = model.currentDoctorReport else { return "Checks the Docker setup. Not run yet." }
+        return "\(r.summary) · \(r.date.formatted(date: .omitted, time: .shortened))"
     }
 
     private func dfHelp(_ type: String) -> String {

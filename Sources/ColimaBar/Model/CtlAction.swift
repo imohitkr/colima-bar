@@ -18,6 +18,12 @@ enum CtlAction: String, CaseIterable, Sendable {
     case profileCreate = "profile-create"
     /// Deletes a profile with `colima delete --data --force`.
     case profileDelete = "profile-delete"
+    /// Stops the VM by force, removes the stale pid files of Lima and starts
+    /// the VM again (Doctor).
+    case repair
+    /// Lists the pid files of Lima that it cannot use. Read-only: no lock,
+    /// no busy marker and no `colima` call.
+    case staleFiles = "stale-files"
     case copyEnv = "copy-env"
     case containerRemove = "ctr-rm"
     case containerLogs = "ctr-logs"
@@ -36,7 +42,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     var isVMAction: Bool {
         switch self {
         case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop, .profileCreate,
-            .profileDelete:
+            .profileDelete, .repair:
             true
         default: false
         }
@@ -70,7 +76,8 @@ enum CtlAction: String, CaseIterable, Sendable {
     func showsDialog(running: Bool) -> Bool {
         switch self {
         case .resources, .rosetta, .k8s: running
-        case .disk, .diskShrink, .profileDelete, .containerRemove, .imageRemove, .volumeRemove, .stopAll, .prune:
+        case .disk, .diskShrink, .profileDelete, .repair, .containerRemove, .imageRemove, .volumeRemove, .stopAll,
+            .prune:
             true
         default: false
         }
@@ -107,6 +114,7 @@ enum CtlAction: String, CaseIterable, Sendable {
         case .diskShrink: return "Shrinking disk"
         case .profileCreate: return "Creating"
         case .profileDelete: return "Deleting"
+        case .repair: return "Repairing"
         default: return "Restarting"
         }
     }

@@ -191,4 +191,34 @@ import Testing
         try FileManager.default.setAttributes([.modificationDate: old], ofItemAtPath: target)
         #expect(Routing.configStamp(path: link) == old)
     }
+
+    @Test func onlyAHostOfAnotherDaemonIsForeign() {
+        let stable = "unix:///Users/me/.cache/colima-bar/docker.sock"
+        func foreign(_ h: String?) -> Bool { Routing.isForeignHost(h, stableHost: stable, home: "/Users/me") }
+        #expect(!foreign(nil) && !foreign("") && !foreign(stable))
+        // Both Colima folders are Colima's, not another daemon.
+        #expect(!foreign("unix:///Users/me/.colima/default/docker.sock"))
+        #expect(!foreign("unix:///Users/me/.config/colima/default/docker.sock"))
+        #expect(foreign("tcp://remote:2375"))
+        #expect(foreign("ssh://me@host/home/me/.colima/default/docker.sock"))
+        #expect(foreign("unix:///Users/me/.docker/run/docker.sock"))
+    }
+
+    @MainActor @Test func firstWriteCreatesTheTestcontainersFile() throws {
+        let dir = try TempFolder()
+        let path = dir.path + "/tc.properties"
+        #expect(Routing.applyTestcontainers(path: path))
+        #expect(try String(contentsOfFile: path, encoding: .utf8) == "docker.host=\(Routing.stableHost)\n")
+    }
+
+    @MainActor @Test func testcontainersFileThatCannotBeReadIsLeftAlone() throws {
+        let dir = try TempFolder()
+        let path = dir.path + "/tc.properties"
+        let bytes = Data([0x61, 0x3D, 0xFF, 0x0A])
+        try bytes.write(to: URL(fileURLWithPath: path))
+        #expect(!Routing.applyTestcontainers(path: path))
+        #expect(try Data(contentsOf: URL(fileURLWithPath: path)) == bytes)
+        try "docker.host=tcp://remote:2375\n".write(toFile: path, atomically: true, encoding: .utf8)
+        #expect(!Routing.applyTestcontainers(path: path))
+    }
 }

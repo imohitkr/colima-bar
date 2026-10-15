@@ -69,7 +69,9 @@ SOCK="$PROFILE_DIR/docker.sock"
 export DOCKER_HOST="unix://$SOCK"
 # kubectl context Colima creates: "colima" for default, "colima-NAME" otherwise.
 KCTX=$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")
-LIMA_LOG="$LIMA_DIR/$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")/ha.stderr.log"
+# The Lima instance of the profile: "colima" for default, "colima-NAME" otherwise.
+LIMA_INST=$([ "$PROFILE" = default ] && echo colima || echo "colima-$PROFILE")
+LIMA_LOG="$LIMA_DIR/$LIMA_INST/ha.stderr.log"
 
 # Every colima call targets the selected profile.
 colima() { colima_home; command colima "$@" --profile "$PROFILE"; }
@@ -110,21 +112,83 @@ confirm() {
     -e 'end run' "$1" >/dev/null 2>&1
 }
 
+# etime_seconds ETIME -> the seconds in the output of `ps -o etime=`
+# ([[DD-]HH:]MM:SS).
+etime_seconds() {
+  local e="${1//[[:space:]]/}" d=0 a="" b="" c=""
+  case "$e" in *-*) d=${e%%-*}; e=${e#*-} ;; esac
+  IFS=: read -r a b c <<<"$e"
+  if [ -n "$c" ]; then
+    echo $((10#$d * 86400 + 10#$a * 3600 + 10#$b * 60 + 10#$c))
+  else
+    echo $((10#$d * 86400 + 10#${a:-0} * 60 + 10#${b:-0}))
+  fi
+}
+
+# owner_check PID FILE PATTERN -> tells if PID is the process that wrote FILE
+# (it runs, its command line contains PATTERN and it started before FILE was
+# written). After a restart of the Mac, a PID can belong to an unrelated
+# process that started later. Return code:
+#   0  the owner runs.
+#   1  the owner is gone: `ps` shows no process, or another one.
+#   2  unknown: the PID or the file cannot be read.
+owner_check() {
+  local pid="$1" file="$2" pattern="$3" cmd et mtime age
+  case "$pid" in ""|*[!0123456789]*) return 2 ;; esac
+  cmd=$(ps -o command= -p "$pid" 2>/dev/null)
+  [ -n "$cmd" ] || return 1
+  case "$cmd" in *"$pattern"*) ;; *) return 1 ;; esac
+  et=$(ps -o etime= -p "$pid" 2>/dev/null)
+  [ -n "$et" ] || return 1
+  mtime=$(stat -f %m "$file" 2>/dev/null) || return 2
+  age=$(($(date +%s) - mtime))
+  # The 2 seconds absorb the rounding of both times.
+  [ "$(etime_seconds "$et")" -ge $((age - 2)) ] && return 0
+  return 1
+}
+
+# owner_alive PID FILE PATTERN -> true if owner_check finds the owner.
+owner_alive() {
+  owner_check "$@"
+}
+
+# lock_stale DIR -> true if the lock folder DIR is left over from a script
+# that is gone. With an owner PID, only the owner counts, so a long action
+# (also a long sleep of the Mac) keeps its lock. The lock is stale only if
+# `ps` shows that the owner is gone. If the PID cannot be read (the owner
+# writes it now, or removes the lock now), and for a lock with no PID file
+# (older versions), the lock is stale after 30 minutes.
+lock_stale() {
+  local pid rc=2
+  if [ -f "$1/pid" ]; then
+    pid=$(cat "$1/pid" 2>/dev/null)
+    owner_check "$pid" "$1/pid" colima-ctl && rc=0 || rc=$?
+  fi
+  case "$rc" in
+    0) return 1 ;;
+    1) return 0 ;;
+  esac
+  [ -n "$(find "$1" -maxdepth 0 -mmin +30 2>/dev/null)" ]
+}
+
 # lock_vm -> takes this profile's lock for a VM action (confirm dialog
-# included), so two starts/restarts can't run at once. A lock older than 30
-# minutes is left over from a killed script and is taken over.
+# included), so two starts/restarts can't run at once. The lock folder holds
+# the PID of the script. A lock whose owner is gone is left over from a
+# killed script and is taken over.
 # lock_vm [quiet] -> "quiet" skips the notice (timer-driven auto-stop).
 HOLD_LOCK=""
 lock_vm() {
   (umask 077 && mkdir -p "$STATE_DIR")  # private: 0700
   if ! mkdir "$LOCK" 2>/dev/null; then
     # Take over a stale lock atomically: only one script wins the mv.
-    if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +30 2>/dev/null)" ] \
-      && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null; then
+    if lock_stale "$LOCK" && mv "$LOCK" "$LOCK.stale.$$" 2>/dev/null; then
       # Another script may have taken over first and made a fresh lock that
       # we just moved. If so, give it back.
-      if [ -z "$(find "$LOCK.stale.$$" -maxdepth 0 -mmin +30 2>/dev/null)" ]; then
-        [ -e "$LOCK" ] || mv "$LOCK.stale.$$" "$LOCK" 2>/dev/null
+      if ! lock_stale "$LOCK.stale.$$"; then
+        # A folder with no PID file is empty: its owner removed the lock just
+        # now. Remove it. If we gave it back, no action could start for 30
+        # minutes.
+        [ -e "$LOCK.stale.$$/pid" ] && [ ! -e "$LOCK" ] && mv "$LOCK.stale.$$" "$LOCK" 2>/dev/null
         rm -rf "$LOCK.stale.$$"
         [ "${1:-}" = quiet ] || notify "Another Colima action is still running for $NAMED."
         exit 2
@@ -137,6 +201,12 @@ lock_vm() {
     fi
   fi
   HOLD_LOCK=1
+  # Write the PID in one step: a reader never sees an empty file. If the
+  # folder is gone, another script removed it as stale: do not run unlocked.
+  if ! { echo "$$" >"$LOCK/pid.$$" && mv -f "$LOCK/pid.$$" "$LOCK/pid"; } 2>/dev/null; then
+    HOLD_LOCK=""
+    exit 2
+  fi
 }
 
 # Clean up on any exit, and stop the running action when ColimaBar times
@@ -150,7 +220,7 @@ cleanup() {
     notify "The Colima folder changed during the action of $NAMED. Try again.$FOLDER_NOTE"
   fi
   [ -n "$WROTE_BUSY" ] && rm -f "$BUSY"
-  [ -n "$HOLD_LOCK" ] && rmdir "$LOCK" 2>/dev/null
+  [ -n "$HOLD_LOCK" ] && { rm -f "$LOCK/pid" "$LOCK/pid.$$"; rmdir "$LOCK" 2>/dev/null; }
   return 0
 }
 on_term() {
@@ -167,7 +237,9 @@ trap on_term TERM INT
 with_busy() {
   local label="$1"; shift
   (umask 077 && mkdir -p "$STATE_DIR")  # private: 0700
-  echo "$label" > "$BUSY"
+  # Line 1 is the label. Line 2 is the PID of this script: ColimaBar ignores
+  # the marker when that process is gone.
+  printf '%s\n%s\n' "$label" "$$" > "$BUSY"
   WROTE_BUSY=1
   # The extra subshell is needed. In a plain "$@" & bash 3.2 (macOS) can run
   # the first `command colima` of a function with exec. Then the action ends
@@ -343,7 +415,7 @@ vm_running() {
 # before a dialog opens.
 no_start_in_progress() {
   start_in_progress || return 0
-  notify "A start of $NAMED runs now. Try again when it ends."
+  notify "A start of $NAMED runs now. Try again when it ends.${1:-}"
   exit 1
 }
 
@@ -402,6 +474,140 @@ whole() {
   case "$1" in ""|.|*.*.*|*[!0123456789.]*) return 0 ;; esac
   w=${1%%.*}
   printf '%s\n' "$((10#${w:-0}))"
+}
+
+# file_pid FILE -> the first word of FILE, the PID of a pid file.
+file_pid() {
+  local p=""
+  read -r p _ <"$1" 2>/dev/null || true
+  printf '%s' "$p"
+}
+
+# pid_pattern FILE -> the text that the command line of the owner of a pid
+# file contains. The daemon of Colima runs as `colima daemon start PROFILE`.
+pid_pattern() {
+  case "${1##*/}" in
+    qemu.pid) echo qemu-system ;;
+    krunkit.pid) echo krunkit ;;
+    daemon.pid) echo "colima daemon start" ;;
+    *) echo limactl ;;
+  esac
+}
+
+# stale_check FILE -> prints "REASON<TAB>FILE<TAB>PID" if FILE is a pid file
+# that Lima cannot use. Only a regular file counts, never a link.
+#   invalid: the file has no PID.
+#   gone:    no process has the PID.
+#   reused:  another process has the PID (it started after the file).
+stale_check() {
+  local f="$1" pid
+  [ -f "$f" ] && [ ! -L "$f" ] || return 0
+  pid=$(file_pid "$f")
+  case "$pid" in
+    ""|*[!0123456789]*) printf 'invalid\t%s\t%s\n' "$f" "$pid"; return 0 ;;
+  esac
+  if [ -z "$(ps -o command= -p "$pid" 2>/dev/null)" ]; then
+    printf 'gone\t%s\t%s\n' "$f" "$pid"
+  elif ! owner_alive "$pid" "$f" "$(pid_pattern "$f")"; then
+    printf 'reused\t%s\t%s\n' "$f" "$pid"
+  fi
+}
+
+# live_pid_file FILE -> true if FILE is a regular file and its owner runs.
+live_pid_file() {
+  [ -f "$1" ] && [ ! -L "$1" ] && owner_alive "$(file_pid "$1")" "$1" "$(pid_pattern "$1")"
+}
+
+# instance_pid_files -> the pid files of the Lima instance of PROFILE.
+instance_pid_files() {
+  local inst="$LIMA_DIR/$LIMA_INST" f
+  [ -d "$inst" ] && [ ! -L "$inst" ] || return 0
+  for f in ha.pid vz.pid qemu.pid krunkit.pid; do echo "$inst/$f"; done
+}
+
+# daemon_pid_file -> the pid file of the Colima daemon of PROFILE. `colima
+# stop` and `colima start` run `pkill -F` on it, with no check of the owner.
+daemon_pid_file() {
+  [ -d "$PROFILE_DIR" ] && [ ! -L "$PROFILE_DIR" ] || return 0
+  [ -d "$PROFILE_DIR/daemon" ] && [ ! -L "$PROFILE_DIR/daemon" ] || return 0
+  echo "$PROFILE_DIR/daemon/daemon.pid"
+}
+
+# own_pid_files -> the pid files of the instance and of the daemon.
+own_pid_files() {
+  instance_pid_files
+  daemon_pid_file
+}
+
+# short_path FILE -> FILE without the Lima or the Colima folder.
+short_path() {
+  local p="${1#"$LIMA_DIR"/}"
+  printf '%s' "${p#"$COLIMA_DIR"/}"
+}
+
+# stale_files -> prints a line for each pid file that Lima or Colima cannot
+# use (see stale_check). It reads only these files, in the instance of
+# PROFILE, the daemon folder of PROFILE and the network folder of Lima. All instances share the network folder, so
+# it counts only when no instance has a live host agent. It changes nothing.
+stale_files() {
+  local f d net_ok=1
+  while IFS= read -r f; do [ -n "$f" ] && stale_check "$f"; done <<<"$(own_pid_files)"
+  [ -d "$LIMA_DIR/_networks" ] && [ ! -L "$LIMA_DIR/_networks" ] || return 0
+  for d in "$LIMA_DIR"/*/; do
+    d=${d%/}
+    case "${d##*/}" in _*) continue ;; esac
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
+    live_pid_file "$d/ha.pid" && net_ok=""
+  done
+  [ -n "$net_ok" ] || return 0
+  for d in "$LIMA_DIR"/_networks/*/; do
+    d=${d%/}
+    [ -d "$d" ] && [ ! -L "$d" ] || continue
+    for f in "$d"/usernet_*.pid; do stale_check "$f"; done
+  done
+}
+
+# remove_stale REASON FILE PID -> removes a regular file and logs it.
+remove_stale() {
+  [ -f "$2" ] && [ ! -L "$2" ] || return 0
+  rm -f "$2" && echo "repair: removed $2 ($1, pid ${3:-none})" >&2
+}
+
+# The return code of repair_vm when a Lima process of the VM still runs.
+STILL_RUNS=4
+
+# The return code of repair_vm when it cannot remove a file that names
+# another process. It has stopped nothing then.
+REMOVE_FAILED=5
+
+# repair_vm -> removes the stale pid files and starts the VM again.
+#  1. Remove the files whose PID another process has, before the force stop.
+#     Else Lima sends SIGKILL to that process, and Colima sends SIGTERM.
+#     If a file stays, stop here: the force stop must not run.
+#  2. Stop the VM by force. A failure is logged, and the repair goes on.
+#  3. If a Lima process of the VM still runs, stop here.
+#  4. Remove the other stale files.
+#  5. Start the VM.
+repair_vm() {
+  local reason path pid f
+  while IFS=$'\t' read -r reason path pid; do
+    case "$reason" in
+      reused|invalid)
+        remove_stale "$reason" "$path" "$pid" || {
+          echo "repair: cannot remove $path" >&2
+          notify "Can't remove $(short_path "$path"). Nothing was stopped."
+          return "$REMOVE_FAILED"
+        } ;;
+    esac
+  done <<<"$(stale_files)"
+  colima stop --force || echo "repair: colima stop --force failed" >&2
+  while IFS= read -r f; do
+    [ -n "$f" ] && live_pid_file "$f" && return "$STILL_RUNS"
+  done <<<"$(instance_pid_files)"
+  while IFS=$'\t' read -r reason path pid; do
+    [ -n "$reason" ] && remove_stale "$reason" "$path" "$pid"
+  done <<<"$(stale_files)"
+  colima start
 }
 
 restart_vm() {
@@ -561,6 +767,37 @@ $after" || exit 2
     rm -f "$backup"
     ;;
 
+  # stale-files: prints the pid files of Lima and Colima that they cannot use, one per
+  # line: REASON<TAB>PATH<TAB>PID. It takes no lock and changes nothing.
+  stale-files) stale_files ;;
+
+  # repair: for a VM that does not start (a Lima pid file names a process
+  # that is gone or that is not Lima, or the pid file of the Colima daemon).
+  # Stops the VM by force, removes the stale pid files (see stale_files) and starts the VM.
+  repair)
+    lock_vm
+    [ -f "$CONFIG" ] || { notify "Can't repair $NAMED. Its colima.yaml does not exist."; exit 1; }
+    no_start_in_progress " If it hangs, stop it (Ctrl-C), then try again."
+    list=""
+    while IFS=$'\t' read -r reason path pid; do
+      [ -n "$path" ] && list=$(printf '%s\n- %s (%s)' "$list" "$(short_path "$path")" "$reason")
+    done <<<"$(stale_files)"
+    [ -n "$list" ] || list=$(printf '\nNo stale pid file was found.')
+    confirm "Repair $NAMED?
+
+ColimaBar removes the pid files that name another process, stops the VM by force, removes the other stale pid files and starts the VM. Running containers stop. Disks, images and volumes stay.
+$list" || exit 2
+    with_busy "Repairing" repair_vm
+    rc=$?
+    # repair_vm has given the reason for this code.
+    [ "$rc" -eq "$REMOVE_FAILED" ] && exit 1
+    if [ "$rc" -eq "$STILL_RUNS" ]; then
+      notify "The VM of $NAMED still runs. Nothing more was removed - $SEE_LOG"
+      exit 1
+    fi
+    [ "$rc" -eq 0 ] || { notify "Repair of $NAMED failed - $SEE_LOG"; exit 1; }
+    ;;
+
   copy-env)
     # ColimaBar's stable socket. While ColimaBar runs, it starts Colima on demand.
     # After ColimaBar quits, the path links to Colima's socket. It still reaches
@@ -682,7 +919,7 @@ $after" || exit 2
     if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
-    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|disk-shrink GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
+    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|disk-shrink GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
     echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta and k8s stop if the VM state differs" >&2
     exit 1 ;;

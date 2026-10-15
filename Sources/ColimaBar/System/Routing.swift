@@ -19,19 +19,43 @@ enum Routing {
         var launchd = false  // GUI apps get DOCKER_HOST
         var testcontainers = false  // ~/.testcontainers.properties docker.host
         var varRun = false  // /var/run/docker.sock -> stable socket
+        /// The raw values behind the flags above, for Doctor.
+        var launchdHost = ""  // launchctl getenv DOCKER_HOST
+        var testcontainersHost: String?  // docker.host in ~/.testcontainers.properties
     }
 
     /// Applies the routes that need no admin rights. Leaves things alone if the
     /// user has deliberately chosen some other daemon (a remote context, a
     /// custom testcontainers docker.host).
-    static func apply(selected: String) async {
+    /// Returns what it changed.
+    @discardableResult
+    static func apply(selected: String) async -> Applied {
+        var applied = Applied()
         let r = await ensureContext(selected: selected, launch: true)
         if r.ok || r.ours {
-            await applyLaunchd(contextIsOurs: r.ours)
+            applied.launchd = await applyLaunchd(contextIsOurs: r.ours)
         } else {
             log.error("left launchd DOCKER_HOST alone (the docker context check failed)")
         }
-        applyTestcontainers()
+        applied.testcontainers = applyTestcontainers()
+        return applied
+    }
+
+    /// The routes that `apply` changed.
+    struct Applied: Equatable {
+        var launchd = false
+        var testcontainers = false
+        var any: Bool { launchd || testcontainers }
+    }
+
+    /// True if `host` points to a daemon that is not ColimaBar's and not
+    /// Colima's (a remote host, Docker Desktop). ColimaBar leaves such a route.
+    /// An empty or missing host is not foreign.
+    nonisolated static func isForeignHost(_ host: String?, stableHost: String, home: String) -> Bool {
+        guard let host, !host.isEmpty, host != stableHost else { return false }
+        // Only a local socket can be Colima's: a remote host with a Colima-like path stays foreign.
+        guard host.hasPrefix("unix://") else { return true }
+        return DoctorRules.hostKind(host, home: home) != .colima
     }
 
     /// Ryuk (testcontainers' reaper) bind-mounts the docker socket path into a
@@ -42,26 +66,38 @@ enum Routing {
     /// Sets DOCKER_HOST for apps launched from the Dock or Finder (IDE test
     /// runners). Skipped when the user chose another daemon: a non-Colima
     /// context, or a DOCKER_HOST that points somewhere else.
-    private static func applyLaunchd(contextIsOurs: Bool) async {
+    /// Returns true if it set DOCKER_HOST.
+    @discardableResult
+    private static func applyLaunchd(contextIsOurs: Bool) async -> Bool {
         let cur = await Shell.run(["launchctl", "getenv", "DOCKER_HOST"], timeout: 5).out
             .trimmingCharacters(in: .whitespacesAndNewlines)
-        let foreign = !cur.isEmpty && cur != stableHost && !cur.contains("/colima/")
+        let foreign = isForeignHost(cur, stableHost: stableHost, home: Paths.home)
         guard contextIsOurs, !foreign else {
             log.info("left launchd DOCKER_HOST alone (another daemon is in use)")
-            return
+            return false
         }
+        var changed = false
         if cur != stableHost {
-            _ = await Shell.run(["launchctl", "setenv", "DOCKER_HOST", stableHost])
+            let set = await Shell.run(["launchctl", "setenv", "DOCKER_HOST", stableHost])
+            if set.ok {
+                changed = true
+            } else {
+                log.error("launchctl setenv DOCKER_HOST failed (exit \(set.status))")
+            }
         }
-        _ = await Shell.run(["launchctl", "setenv", "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", ryukSocket])
+        let ryuk = await Shell.run(["launchctl", "setenv", "TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", ryukSocket])
+        if !ryuk.ok { log.error("launchctl setenv TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE failed (exit \(ryuk.status))") }
+        return changed
     }
 
     static func status() async -> Status {
         var s = Status()
         s.context = currentContext().map(isOurs) ?? false
         let env = await Shell.run(["launchctl", "getenv", "DOCKER_HOST"], timeout: 5)
-        s.launchd = env.out.trimmingCharacters(in: .whitespacesAndNewlines) == stableHost
-        s.testcontainers = testcontainersHost() == stableHost
+        s.launchdHost = env.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        s.launchd = s.launchdHost == stableHost
+        s.testcontainersHost = testcontainersHost()
+        s.testcontainers = s.testcontainersHost == stableHost
         s.varRun =
             (try? FileManager.default.destinationOfSymbolicLink(atPath: "/var/run/docker.sock")) == Paths.proxySocket
         return s
@@ -178,6 +214,45 @@ enum Routing {
         return existing.contains(current) ? nil : contextName
     }
 
+    /// Creates the "colimabar" context if `names` lacks it, and adds it to
+    /// `names`. Returns false if the docker CLI failed.
+    private static func createOwnContext(ifMissingFrom names: inout Set<String>) async -> Bool {
+        guard !names.contains(contextName) else { return true }
+        let made = await Shell.run(
+            [
+                "docker", "context", "create", contextName,
+                "--description", "ColimaBar (auto-starts Colima)",
+                "--docker", "host=\(stableHost)",
+            ], timeout: 10)
+        guard made.ok else {
+            log.error("docker context create failed (exit \(made.status))")
+            return false
+        }
+        names.insert(contextName)
+        log.info("created docker context \(contextName, privacy: .public)")
+        return true
+    }
+
+    /// Switches the docker CLI to the "colimabar" context and creates it if
+    /// it is missing. The Doctor fix "Use colimabar" calls it. Unlike the
+    /// automatic check, it also leaves a context that the user chose.
+    static func useOwnContext() async -> Bool {
+        let ls = await Shell.run(["docker", "context", "ls", "--format", listFormat], timeout: 10)
+        guard ls.ok else {
+            log.error("docker context ls failed (exit \(ls.status)) for Doctor")
+            return false
+        }
+        var names = existingContexts(listing: ls.out)
+        guard await createOwnContext(ifMissingFrom: &names) else { return false }
+        let used = await Shell.run(["docker", "context", "use", contextName], timeout: 10)
+        if used.ok {
+            log.notice("switched the docker context to \(contextName, privacy: .public) (Doctor)")
+        } else {
+            log.error("docker context use \(contextName, privacy: .public) failed (exit \(used.status)) for Doctor")
+        }
+        return used.ok
+    }
+
     /// Creates the "colimabar" context if it is missing and switches to the
     /// context that `contextTarget` gives. `ours`: a ColimaBar context is
     /// current afterwards. `ok`: no step failed.
@@ -192,22 +267,7 @@ enum Routing {
             return (false, false)
         }
         var names = existingContexts(listing: ls.out)
-        var ok = true
-        if !names.contains(contextName) {
-            let made = await Shell.run(
-                [
-                    "docker", "context", "create", contextName,
-                    "--description", "ColimaBar (auto-starts Colima)",
-                    "--docker", "host=\(stableHost)",
-                ], timeout: 10)
-            if made.ok {
-                names.insert(contextName)
-                log.info("created docker context \(contextName, privacy: .public)")
-            } else {
-                ok = false
-                log.error("docker context create failed (exit \(made.status))")
-            }
-        }
+        var ok = await createOwnContext(ifMissingFrom: &names)
         var now = cur
         if let target = contextTarget(current: cur, existing: names, selected: selected, launch: launch),
             names.contains(target)
@@ -253,33 +313,44 @@ enum Routing {
 
     /// Sets docker.host unless the user already points it somewhere that
     /// isn't Colima.
-    private static func applyTestcontainers() {
-        let current = testcontainersHost()
-        if let current, current != stableHost, !current.contains("/colima/") { return }
-        guard current != stableHost else { return }
-        var lines = ((try? String(contentsOfFile: Paths.testcontainersProps, encoding: .utf8)) ?? "")
+    /// Returns true if it wrote the file. It never rewrites a file that it
+    /// cannot read as UTF-8 text.
+    @discardableResult
+    static func applyTestcontainers(path: String = Paths.testcontainersProps) -> Bool {
+        let existing: String
+        switch DockerConfigFile.read(path: path) {
+        case .missing:
+            existing = ""
+        case .unreadable:
+            log.error("cannot read \(path, privacy: .public); left it alone")
+            return false
+        case .data(let data):
+            guard let text = String(data: data, encoding: .utf8) else {
+                log.error("\(path, privacy: .public) is not UTF-8 text; left it alone")
+                return false
+            }
+            existing = text
+        }
+        let current = existing.split(separator: "\n").lazy.compactMap { dockerHostValue($0) }.first
+        if isForeignHost(current, stableHost: stableHost, home: Paths.home) { return false }
+        guard current != stableHost else { return false }
+        var lines =
+            existing
             .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
             .filter { dockerHostValue($0) == nil }
         while lines.last == "" { lines.removeLast() }
         lines.append("docker.host=\(stableHost)")
-        // Write through a symlink (dotfile managers) and keep the file's mode;
-        // an atomic write would replace the link with a plain file.
-        let fm = FileManager.default
-        let target =
-            (try? fm.destinationOfSymbolicLink(atPath: Paths.testcontainersProps))
-            .map {
-                $0.hasPrefix("/")
-                    ? $0
-                    : ((Paths.testcontainersProps as NSString).deletingLastPathComponent as NSString)
-                        .appendingPathComponent($0)
-            } ?? Paths.testcontainersProps
-        let mode = (try? fm.attributesOfItem(atPath: target))?[.posixPermissions]
+        // Write through a symlink (dotfile managers) and keep the file's mode.
+        let content = Data((lines.joined(separator: "\n") + "\n").utf8)
         do {
-            try (lines.joined(separator: "\n") + "\n").write(toFile: target, atomically: true, encoding: .utf8)
-            if let mode { try? fm.setAttributes([.posixPermissions: mode], ofItemAtPath: target) }
-            log.info("set testcontainers docker.host")
+            let target = try SymlinkWrite.write(content, to: path)
+            log.info("set testcontainers docker.host in \(target, privacy: .public)")
+            return true
         } catch {
-            log.error("couldn't write \(target, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            log.error(
+                "couldn't write \(path, privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+            return false
         }
     }
 

@@ -4,6 +4,10 @@
 
 This page lists the ColimaBar logs, fixes for common problems and the steps to report a bug.
 
+## Run Doctor first
+
+For many problems, open [Doctor](usage.md#doctor): click **Doctor…** in the right-click menu. Doctor checks the tools, the docker context, the routes, the shell, the registry login, the docker plugins, the VM status, the stale Lima files and the disk space. It offers a fix for most findings. Doctor only reads, so it is safe to run at any time.
+
 ## Logs
 
 | Log | Contents |
@@ -76,11 +80,19 @@ To fix it, do one of these steps:
 - Open ColimaBar again. Auto-start then starts the VM on the next docker command.
 - Run `colima start`.
 
+## Colima hangs or does not start
+
+If `colima start` hangs or fails, and `colima list` shows the profile as Broken, a pid file of Lima can be stale. Open Doctor and click **Repair profile 'NAME'…**. See [Repair](usage.md#repair) for the steps.
+
+Repair refuses while a `colima start` runs. If `colima start` hangs, stop it first (Ctrl-C). Then click **Repair profile 'NAME'…**.
+
+To check by hand, look at the pid files (`ha.pid`, `vz.pid`, `qemu.pid`, `krunkit.pid`) in the Lima folder of the profile, `~/.colima/_lima/colima` for `default`. Look also at `~/.colima/PROFILE/daemon/daemon.pid` (`~/.colima/default/daemon/daemon.pid` for `default`). For each file, run `ps -p PID`. If the process is not Lima (or `colima daemon` for the daemon file), or does not exist, remove the file. Do this before you run `colima stop --force`. Else Lima sends SIGKILL, and Colima sends SIGTERM, to that process.
+
 ## docker says context not found
 
 docker shows `context "colima": context not found`, or `colima-PROFILE` for a profile that is not `default`. `colima stop` deleted the context, but the docker config still names it.
 
-To fix it, run `docker context use colimabar`, then `docker ps`. While auto-start is on, ColimaBar repairs this itself within 15 seconds.
+To fix it, click **Use colimabar** in [Doctor](usage.md#doctor), or run `docker context use colimabar`, then `docker ps`. While auto-start is on, ColimaBar repairs this itself within 15 seconds.
 
 ## docker does not start Colima
 

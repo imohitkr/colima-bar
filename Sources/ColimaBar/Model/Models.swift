@@ -59,6 +59,9 @@ struct ProfileRow: Identifiable, Equatable {
     let memGB: Double
     /// "docker", "containerd" or "" when unknown.
     var runtime = ""
+    /// The raw status of `colima list`, for example "Running", "Stopped" or
+    /// "Broken". Doctor reads it.
+    var status = ""
 }
 
 struct Stat: Equatable {

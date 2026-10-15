@@ -24,6 +24,7 @@
 - **Auto-start**: run `docker`, a test suite or an IDE test while Colima is stopped. ColimaBar starts the VM, and the command continues.
 - **Live dashboard**: see containers by Compose project, with health, ports, CPU, memory and logs. Images, volumes and VM settings are one click away.
 - **Auto-stop**: ColimaBar can stop the VM when it is idle.
+- **Doctor**: one click checks the docker setup (context, routes, shell, plugins, VM and disk) and fixes common problems. **Repair** gets a Broken profile running again.
 - **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, one for each new version, and one the first time the icon hides.
 
 > [!NOTE]
