@@ -65,11 +65,20 @@ body:
     validations:
       required: true
   - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: |
+        In ColimaBar, open Doctor and click Report an Issue. ColimaBar saves a file named `ColimaBar-diagnostics-….txt` and fills in this form.
+        Drag the file into this box. Review the file first, because ColimaBar can miss a secret.
+    validations:
+      required: false
+  - type: textarea
     id: log
     attributes:
       label: Log lines
       description: |
-        Paste the relevant lines from `~/.cache/colima-bar/ctl.log`.
+        The diagnostics file has the ColimaBar log and `ctl.log`. If you do not attach it, paste the relevant lines from `~/.cache/colima-bar/ctl.log`.
         Remove secrets, tokens and private host names before you paste them.
       render: text
     validations:

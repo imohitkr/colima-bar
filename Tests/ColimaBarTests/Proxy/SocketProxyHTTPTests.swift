@@ -117,4 +117,39 @@ import Testing
         #expect(p.pingReply("POST /_ping HTTP/1.1") == nil)
         #expect(p.pingReply("GET /vX/_ping HTTP/1.1") == nil)
     }
+
+    @Test func logTargetHidesContainerAndImageNames() {
+        func target(_ line: String) -> String { SocketProxy.logTarget(line + " HTTP/1.1") }
+        #expect(target("POST /v1.54/containers/my-secret-db/start") == "POST /v1.54/containers/{name}/start")
+        #expect(target("DELETE /containers/abc123?force=1") == "DELETE /containers/{name}")
+        #expect(target("GET /v1.54/volumes/clientdata") == "GET /v1.54/volumes/{name}")
+        #expect(target("GET /v1.54/networks/corp-net") == "GET /v1.54/networks/{name}")
+        #expect(target("POST /v1.54/exec/9f8e7d/start") == "POST /v1.54/exec/{name}/start")
+        #expect(
+            target("GET /v1.54/images/registry.corp.example:5000/team/app:1.2/json")
+                == "GET /v1.54/images/{name}/json")
+        #expect(target("POST /v1.54/images/team/app:1.2/push") == "POST /v1.54/images/{name}/push")
+        #expect(target("DELETE /v1.54/images/team/app:1.2") == "DELETE /v1.54/images/{name}")
+    }
+
+    @Test func logTargetKeepsTheCollectionActions() {
+        func target(_ line: String) -> String { SocketProxy.logTarget(line + " HTTP/1.1") }
+        #expect(target("GET /v1.54/containers/json?all=1") == "GET /v1.54/containers/json")
+        #expect(target("POST /v1.54/containers/create?name=x") == "POST /v1.54/containers/create")
+        #expect(target("POST /v1.54/images/create?fromImage=a") == "POST /v1.54/images/create")
+        #expect(target("GET /v1.54/images/json") == "GET /v1.54/images/json")
+        #expect(target("GET /_ping") == "GET /_ping")
+        #expect(target("GET /v1.54/info") == "GET /v1.54/info")
+    }
+
+    @Test func logTargetSurvivesOddPaths() {
+        func target(_ line: String) -> String { SocketProxy.logTarget(line + " HTTP/1.1") }
+        #expect(target("GET /containers/x/") == "GET /containers/{name}/")
+        #expect(target("GET /") == "GET /")
+        #expect(target("GET containers/x") == "GET containers/{name}")
+        #expect(target("GET /v/containers/x") == "GET /v/containers/x")
+        let long = "/v1.54/images/" + String(repeating: "a/", count: 50_000) + "json"
+        #expect(target("GET " + long) == "GET /v1.54/images/{name}/json")
+        #expect(!target("GET /v1.54/containers/\u{FFFD}\u{1F600}/start").isEmpty)
+    }
 }

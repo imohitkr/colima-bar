@@ -36,7 +36,7 @@ User guides live in `docs/`. `README.md` is a short summary for users.
 
 ## Invariants
 
-Do not break the rules in [ARCHITECTURE.md](ARCHITECTURE.md#invariants). In short: a fixed popover size, fixed proxy socket paths and modes, working clients after quit, only ColimaBar's own docker contexts, fixed `colima-ctl.sh` exit codes, a plain LaunchAgent login item, the log `since` format, the readiness gate after a wake, and debug runs that change nothing.
+Do not break the rules in [ARCHITECTURE.md](ARCHITECTURE.md#invariants). In short: a fixed popover size, fixed proxy socket paths and modes, working clients after quit, only ColimaBar's own docker contexts, fixed `colima-ctl.sh` exit codes, a plain LaunchAgent login item, the log `since` format, the readiness gate after a wake, and debug runs that change nothing (a debug run may write only the diagnostics file that you choose).
 
 ## Tests
 

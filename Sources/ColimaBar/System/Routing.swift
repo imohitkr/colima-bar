@@ -22,6 +22,8 @@ enum Routing {
         /// The raw values behind the flags above, for Doctor.
         var launchdHost = ""  // launchctl getenv DOCKER_HOST
         var testcontainersHost: String?  // docker.host in ~/.testcontainers.properties
+        /// Why `launchctl getenv` gave no answer, or nil. An unset variable is no error.
+        var launchdError: String?
     }
 
     /// Applies the routes that need no admin rights. Leaves things alone if the
@@ -95,6 +97,7 @@ enum Routing {
         s.context = currentContext().map(isOurs) ?? false
         let env = await Shell.run(["launchctl", "getenv", "DOCKER_HOST"], timeout: 5)
         s.launchdHost = env.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !env.ok { s.launchdError = env.status == -1 || env.status == 127 ? "not found" : "exit \(env.status)" }
         s.launchd = s.launchdHost == stableHost
         s.testcontainersHost = testcontainersHost()
         s.testcontainers = s.testcontainersHost == stableHost

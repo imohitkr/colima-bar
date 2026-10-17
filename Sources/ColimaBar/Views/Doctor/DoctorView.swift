@@ -50,13 +50,25 @@ struct DoctorView: View {
     }
 
     private var bottomBar: some View {
-        HStack(spacing: 8) {
-            Button("Repair profile '\(model.profile)'…") { model.applyFix(.repair) }
-                .disabled(!canRepair)
-                .hint(model.isDebug ? Help.doctorDebug : Help.doctorRepair)
-            Text(model.config == nil ? "This profile has no colima.yaml." : "Use it when the VM does not start.")
-                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            Spacer(minLength: 0)
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Button("Repair profile '\(model.profile)'…") { model.applyFix(.repair) }
+                    .disabled(!canRepair)
+                    .hint(model.isDebug ? Help.doctorDebug : Help.doctorRepair)
+                Text(model.config == nil ? "This profile has no colima.yaml." : "Use it when the VM does not start.")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 8) {
+                Button("Save Diagnostics…") { DiagnosticsPanel.save(model: model, report: false) }
+                    .disabled(model.isSavingDiagnostics)
+                    .hint(Help.saveDiagnostics)
+                Button("Report an Issue…") { DiagnosticsPanel.save(model: model, report: true) }
+                    .disabled(model.isSavingDiagnostics)
+                    .hint(Help.reportIssue)
+                if model.isSavingDiagnostics { ProgressView().controlSize(.small) }
+                Spacer(minLength: 0)
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }

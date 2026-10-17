@@ -48,7 +48,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `NewProfileForm`: the values and checks of the New Profile form.
 - `ProfileDelete`: when a delete is refused, its warning text and the profile to select after it.
 - `CtlAction`: the actions of `colima-ctl.sh`.
-- Doctor, see [Doctor](#doctor): `DoctorCheck` (the ten checks), `DoctorResult` (a status, a detail and an optional `DoctorFix`), `DoctorFix`, `DoctorInputs` (everything the checks read), `DoctorRules` and `DoctorRules+Docker` (the pure rules: inputs in, results out), `DoctorReport` (the results of one run, its summary and its plain text), `ColimaModel+Doctor` (`runDoctor()`, `applyFix(_:)`, `repairProfile()`, `currentDoctorReport`, `doctorHint`). The upgrade guard has `VersionChange`, `GoodStarts`, `UpgradeGuard` and `ColimaModel+Upgrade`, see [Upgrade guard](#upgrade-guard). The parsers and rules have their own types: `ToolVersions`, `ShellStartupScan`, `DockerConfig`, `StaleLimaFile`, `DiskSpace`.
+- Diagnostics, see [Diagnostics](#diagnostics): `DiagnosticsPart`, `DiagnosticsSection`, `DiagnosticsBundle` (the file text and its limits), `Redactor`, `ColimaConfigSummary`, `CrashReportDigest` and `ColimaModel+Diagnostics`. Doctor, see [Doctor](#doctor): `DoctorCheck` (the ten checks), `DoctorResult` (a status, a detail and an optional `DoctorFix`), `DoctorFix`, `DoctorInputs` (everything the checks read), `DoctorRules` and `DoctorRules+Docker` (the pure rules: inputs in, results out), `DoctorReport` (the results of one run, its summary and its plain text), `ColimaModel+Doctor` (`runDoctor()`, `applyFix(_:)`, `repairProfile()`, `currentDoctorReport`, `doctorHint`). The upgrade guard has `VersionChange`, `GoodStarts`, `UpgradeGuard` and `ColimaModel+Upgrade`, see [Upgrade guard](#upgrade-guard). The parsers and rules have their own types: `ToolVersions`, `ShellStartupScan`, `DockerConfig`, `StaleLimaFile`, `DiskSpace`.
 - `BusyMarker`: reads the busy marker (label and owner PID) and decides if it is stale.
 - `DFGate`: allows one `/system/df` call at a time.
 - `LatestOnly`: drops results of overlapping calls that arrive out of order.
@@ -67,6 +67,8 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `Paths`: all file paths. `colimaDir` and `limaDir` find the Colima folder and Lima's folder with the rule in [Actions and `colima-ctl.sh`](#actions-and-colima-ctlsh). The model checks both folders again on each status refresh and each heartbeat tick.
 - `Shell`: runs `colima`, `colima-ctl.sh` and other tools, and opens iTerm or Terminal.
 - `Routing`: sets and checks the docker routes. `Routing.useOwnContext()` is the Doctor fix **Use colimabar**.
+- `DiagnosticsProbe`: all the I/O of the diagnostics file (the tools, the log, the log files, the crash reports, the own socket of Colima, the file write). It reads only.
+- `IssueLink`: the URL of the bug report form with the fields filled in.
 - `DoctorProbe`: all the I/O of Doctor (tool versions, `docker context ls`, the shell files, the docker config file, plugin folders, `colima-ctl.sh stale-files`, `df`). It reads only.
 - `DockerConfigFile`: edits the docker config file for a Doctor fix: a private backup `config.json.colimabar-YYYYMMDD-HHMMSS`, then a write through a symlink.
 - `ProcessProbe`: the start time of a process by PID (`sysctl`), for the busy marker.
@@ -86,11 +88,11 @@ The log windows. `LogStore` holds the live state for one container. If the conta
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Doctor/` has `DoctorView` (the Doctor page) and `DoctorRow` (one check). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Doctor/` has `DoctorView` (the Doctor page), `DoctorRow` (one check) and `DiagnosticsPanel` (the save panel of the diagnostics file). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
 
 ### `Support/`
 
-Small helpers with no app state: `Parse` (for example `colima.yaml` lookup), byte formatting, bounded concurrency and `SymlinkWrite` (writes to the target of a symlink and keeps the mode; `Routing` and `DockerConfigFile` use it). `Logger+ColimaBar` creates loggers in the unified log subsystem `com.imohitkr.ColimaBar`.
+Small helpers with no app state: `Parse` (for example `colima.yaml` lookup and the clean-up of a value), `Deadline` (a time limit for an async operation), byte formatting, bounded concurrency and `SymlinkWrite` (writes to the target of a symlink and keeps the mode; `Routing` and `DockerConfigFile` use it). `Logger+ColimaBar` creates loggers in the unified log subsystem `com.imohitkr.ColimaBar`.
 
 ### Other files
 
@@ -241,7 +243,20 @@ Doctor checks the setup of the selected profile. It runs only on request: the **
 - **UI.** `ViewState.showDoctor` makes `DashboardView` show `DoctorView` between the header and the hint bar. The page scrolls inside the fixed popover size. Entry points: the System tab, the stopped screen (only when `colima list` shows the profile Broken or its last start failed, `ColimaModel.doctorHint`) and the right-click menu.
 - **Debug runs.** A debug run may run the checks (they only read). It makes no fix and no repair: the buttons are disabled and `applyFix` and `repairProfile` check `isDebug`. `COLIMABAR_DOCTOR=1` with `--snapshot` opens the Doctor page.
 - **Upgrade row.** `DoctorRules.upgrade` compares `DoctorInputs.lastGoodVersions` with the versions of `tools`. It has no fix, see [Upgrade guard](#upgrade-guard).
-- **Later features.** `DoctorReport.text(home:version:)` is plain text for a diagnostics bundle: it shows the home folder as `~` and holds no secrets.
+- **Diagnostics.** `DoctorReport.text(home:version:)` is the Doctor part of the diagnostics file. See [Diagnostics](#diagnostics).
+
+### Diagnostics
+
+**Save Diagnostics…** and **Report an Issue…** (the Doctor page, and the right-click menu for the second) write one plain text file, `ColimaBar-diagnostics-YYYYMMDD-HHMMSS.txt`. The user chooses the place in an `NSSavePanel`, which gives access without a Desktop permission prompt. The file has the mode 0600 and at most 2 MB. It is text, not an archive, so the user can read it.
+
+- **Parts.** `DiagnosticsPart` lists them in file order, each with a time-out and a cap. `DiagnosticsProbe` reads them. `ColimaModel.collectDiagnostics()` runs all at once, each in `Deadline.run`, so a part that does not answer fails alone with its reason. `Deadline` uses unstructured tasks, because a task group would wait for `Shell.run`, which ignores a cancel. The winner of the race cancels the timer task. A late process ends at its own `Shell.run` time-out. A part can end as ok, skipped, failed or partial (a reason says what is missing). Every part ends before the 20 s cap. `colima status` and the engine part run only while the VM runs.
+- **No start.** The parts use no proxy socket. The engine request goes to the own socket of Colima (`Paths.socket`), only while the VM runs. The tools used do not call the daemon: `docker --version` and `docker context ls`.
+- **Doctor.** A fresh report is reused. Else the file runs Doctor next to the other parts, or waits for a run in progress.
+- **Redaction.** `DiagnosticsBundle.render` runs `Redactor` once over the final text, so no part can skip it, and it runs off the main actor. `IssueLink` redacts first, then cuts each line. The rules include the names in docker request lines (`RequestPath`: the proxy log hides them too) and the host names of registries (`DoctorResult.shareDetail`). `Redactor` is pure: it gets the home folder, the user names and the names of the Mac as input (`DiagnosticsProbe.redactor()`). The rules are in its doc comment.
+- **Limits of the data.** `colima.yaml` shows the values of a fixed list of simple keys (`ColimaConfigSummary`). A crash report keeps a fixed list of keys (`CrashReportDigest`). There is no container name, image, volume, variable or `/info`.
+- **Issue link.** `IssueLink` fills the fields `macos`, `colimabar`, `colima`, `runtime` and `diagnostics` of `bug_report.yml`. It uses RFC 3986 unreserved characters only and has at most 4,000 bytes. It drops lines from the end of `diagnostics` first and never cuts the versions.
+- **One at a time.** `isSavingDiagnostics` guards the run. The buttons and the menu item are disabled meanwhile. A write failure sends a notification with the reason. A debug run prints it on stderr and exits with 1.
+- **Debug runs.** A debug run may save the file. `--diagnostics PATH` does it without a panel, opens nothing and quits.
 
 ### Upgrade guard
 
@@ -320,7 +335,7 @@ Live stats stream only while a dashboard is on screen. Saved-log streams open on
 
 ### Debug runs
 
-`--snapshot`, `--popover` and `--notify-test` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover`, `--notify-test` and `--diagnostics` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It may write the diagnostics file that the user chose. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 
@@ -335,7 +350,7 @@ Do not break these rules.
 - **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
 - **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
-- **Debug runs.** `--snapshot`, `--popover` and `--notify-test` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
+- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
 
 ## Testing
 

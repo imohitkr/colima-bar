@@ -21,4 +21,16 @@ enum Parse {
         }
         return nil
     }
+
+    /// The value of a colima.yaml line, cleaned: no inline comment (`4 # four
+    /// cores`), no surrounding blanks and no matching quotes.
+    static func scalar(_ raw: String) -> String {
+        var v = raw
+        if let hash = v.range(of: " #") { v = String(v[..<hash.lowerBound]) }
+        v = v.trimmingCharacters(in: .whitespaces)
+        if v.count >= 2, let q = v.first, q == "\"" || q == "'", v.last == q {
+            v = String(v.dropFirst().dropLast())
+        }
+        return v
+    }
 }

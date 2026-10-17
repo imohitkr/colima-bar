@@ -213,4 +213,19 @@ import Testing
         #expect(r.status == .warning && r.fix == nil)
         #expect(r.detail.contains("brew install docker-buildx docker-compose"))
     }
+
+    @Test func aMissingCredHelperHidesTheRegistryHostsInTheSharedText() throws {
+        let c = DockerConfig(credHelpers: [
+            "123.dkr.ecr.eu-west-1.amazonaws.com": "ecr-login", "gcr.io": "gcloud",
+        ])
+        let r = try result(.credentials, creds(c, available: ["osxkeychain"]))
+        #expect(r.detail.contains("gcr.io"))
+        #expect(!r.sharedDetail.contains("amazonaws") && !r.sharedDetail.contains("gcr.io"))
+        #expect(r.sharedDetail.contains("2 registries"))
+    }
+
+    @Test func aResultWithNoPrivateNameSharesItsDetail() {
+        let r = DoctorResult(.credentials, .ok, "fine")
+        #expect(r.sharedDetail == "fine")
+    }
 }

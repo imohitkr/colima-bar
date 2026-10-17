@@ -73,13 +73,16 @@ extension SocketProxy {
         return length
     }
 
-    /// The method and path of a request line, without the query string.
-    /// A query can carry secrets (`POST /build?buildargs=...`), so only this
-    /// part goes to the log.
+    /// The method and path of a request line, without the query string and
+    /// with the names hidden. A query can carry secrets
+    /// (`POST /build?buildargs=...`), and a path can name a container or an
+    /// image (`/containers/NAME/start`). The diagnostics file copies the log,
+    /// so only the shape of the request goes to the log.
     static func logTarget(_ requestLine: String) -> String {
         let parts = requestLine.split(separator: " ", maxSplits: 2)
         guard parts.count >= 2 else { return parts.first.map { String($0.prefix(16)) } ?? "" }
-        return "\(parts[0]) \(parts[1].split(separator: "?", maxSplits: 1).first ?? "")"
+        let path = String(parts[1].split(separator: "?", maxSplits: 1).first ?? "")
+        return "\(parts[0]) \(RequestPath.hideNames(path))"
     }
 
     /// Whether an HTTP request line starts long-running work on the daemon.

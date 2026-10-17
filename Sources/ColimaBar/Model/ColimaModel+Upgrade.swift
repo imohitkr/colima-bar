@@ -6,7 +6,7 @@ import Foundation
 extension ColimaModel {
     /// The records of good starts. A problem with the saved text goes in the
     /// log once per launch, without the content.
-    private func goodStarts() -> GoodStarts {
+    func goodStarts() -> GoodStarts {
         let (all, problem) = GoodStarts.decodeChecked(Defaults.string(.goodStartVersions))
         if let problem, !goodStartsProblemLogged {
             goodStartsProblemLogged = true

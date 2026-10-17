@@ -42,6 +42,8 @@ final class ColimaModel {
     private(set) var doctorReport: DoctorReport?
     /// A Doctor check or fix runs now.
     private(set) var isDoctorRunning = false
+    /// A diagnostics file is being collected and saved. One at a time.
+    private(set) var isSavingDiagnostics = false
     /// A Doctor run was asked for while another one ran (a profile switch).
     /// The running one starts once more when it ends.
     @ObservationIgnored var isDoctorRunQueued = false
@@ -1481,6 +1483,9 @@ final class ColimaModel {
     }
 
     func setDoctorRunning(_ on: Bool) { set(\.isDoctorRunning, on) }
+
+    /// `ColimaModel+Diagnostics` sets the flag through this function.
+    func setSavingDiagnostics(_ on: Bool) { set(\.isSavingDiagnostics, on) }
 
     // MARK: - Profiles
 

@@ -14,7 +14,7 @@ If the docs do not answer your question, open a [question](https://github.com/im
 
 ## Report a bug or suggest a feature
 
-- **Bug report**: something does not work as the docs describe. Open a [bug report](https://github.com/imohitkr/colima-bar/issues/new?template=bug_report.yml).
+- **Bug report**: something does not work as the docs describe. In ColimaBar, open Doctor and click **Report an Issue…**. It saves a diagnostics file and opens the [bug report](https://github.com/imohitkr/colima-bar/issues/new?template=bug_report.yml) form with the versions filled in. Review the file before you attach it.
 - **Feature request**: an idea for a new feature. Read the [roadmap](docs/roadmap.md) first, then open a [feature request](https://github.com/imohitkr/colima-bar/issues/new?template=feature_request.yml).
 
 This is a volunteer project. There is no fixed response time.
