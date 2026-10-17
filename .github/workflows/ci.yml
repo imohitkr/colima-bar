@@ -53,6 +53,15 @@ jobs:
       - name: Build app
         run: ./build.sh
 
+      # Only the test build of the in-app update has the hook that moves the
+      # update check to a local server. A release build must not have it.
+      - name: No update test hook in the build
+        run: |
+          if grep -aq COLIMABAR_UPDATE_BASE build/ColimaBar.app/Contents/MacOS/ColimaBar; then
+            echo "The binary has the update test hook." >&2
+            exit 1
+          fi
+
   # The same Swift format check as `make lint`. The rules are in .swift-format.
   # The official Swift image on Linux costs less than a macOS runner.
   lint:
@@ -126,6 +135,10 @@ jobs:
           ./build.sh dmg
           cp build/ColimaBar-*.dmg ColimaBar.dmg
           ditto -c -k --keepParent build/ColimaBar.app ColimaBar.zip
+          if grep -aq COLIMABAR_UPDATE_BASE build/ColimaBar.app/Contents/MacOS/ColimaBar; then
+            echo "The binary has the update test hook." >&2
+            exit 1
+          fi
 
       # Lets users check a download with
       # `gh attestation verify ColimaBar.zip --repo imohitkr/colima-bar`.
@@ -145,3 +158,25 @@ jobs:
           gh release create "$GITHUB_REF_NAME" ColimaBar.dmg ColimaBar.zip \
             --title "ColimaBar $GITHUB_REF_NAME" --generate-notes --draft
           gh release edit "$GITHUB_REF_NAME" --draft=false
+
+      # In-app updates trust the digest that GitHub lists for each asset, and
+      # only an immutable release keeps its files. Check both after publish.
+      - name: Check the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          immutable=$(gh api "repos/$GH_REPO/releases/tags/$GITHUB_REF_NAME" --jq '.immutable')
+          if [ "$immutable" != true ]; then
+            echo "The release is not immutable." >&2
+            exit 1
+          fi
+          for f in ColimaBar.dmg ColimaBar.zip; do
+            listed=$(gh api "repos/$GH_REPO/releases/tags/$GITHUB_REF_NAME" \
+              --jq ".assets[] | select(.name == \"$f\") | .digest")
+            local_digest="sha256:$(shasum -a 256 "$f" | cut -d ' ' -f 1)"
+            if [ "$listed" != "$local_digest" ]; then
+              echo "The digest of $f on GitHub ($listed) is not the digest of the built file ($local_digest)." >&2
+              exit 1
+            fi
+          done

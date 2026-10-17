@@ -65,4 +65,35 @@ import Testing
         defer { kill(pid, SIGKILL) }
         #expect(kill(pid, 0) == 0)
     }
+
+    @Test func aCancellableRunStopsItsChildWhenTheTaskIsCancelled() async {
+        let started = Date()
+        let task = Task { await Shell.run(["sleep", "300"], timeout: 600, cancellable: true) }
+        try? await Task.sleep(for: .milliseconds(300))
+        task.cancel()
+        let r = await task.value
+        #expect(!r.ok)
+        #expect(Date().timeIntervalSince(started) < 30)
+    }
+
+    @Test func aCancellableRunInACancelledTaskDoesNotStartTheChild() async {
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await Shell.run(["sh", "-c", "echo started"], cancellable: true)
+        }
+        let r = await task.value
+        #expect(r.out.isEmpty)
+        #expect(!r.ok)
+    }
+
+    @Test func aRunThatIsNotCancellableIgnoresACancelOfTheTask() async {
+        // The default keeps the old behavior for every other caller.
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await Shell.run(["sh", "-c", "sleep 0.5; echo done"])
+        }
+        let r = await task.value
+        #expect(r.ok)
+        #expect(r.out.contains("done"))
+    }
 }

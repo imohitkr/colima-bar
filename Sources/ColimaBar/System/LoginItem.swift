@@ -101,10 +101,13 @@ enum LoginItem {
     }
 
     /// True for a path inside /Applications or ~/Applications that macOS
-    /// did not translocate (a copy run from a DMG or Downloads is not).
+    /// did not translocate (a copy run from a DMG or Downloads is not). A
+    /// bundle whose name starts with a dot is not installed: an update uses
+    /// such names (`.ColimaBar-update.app`) for its staged and old copies.
     nonisolated static func isInstalled(_ path: String) -> Bool {
         (path.hasPrefix("/Applications/") || path.hasPrefix("\(Paths.home)/Applications/"))
             && !path.contains("/AppTranslocation/")
+            && !((path as NSString).lastPathComponent.hasPrefix("."))
     }
 
     /// Loads the job. Right after a bootout, launchd can still be removing

@@ -10,7 +10,7 @@ ColimaBar is a menu bar app for [Colima](https://github.com/abiosoft/colima). It
 2. **Auto-start.** It runs a proxy on a unix socket, the stable socket. All docker clients use that socket. While the VM is down, the first real docker request starts Colima. Each docker profile also has its own proxy socket, the profile socket, which starts that profile.
 3. **Auto-stop.** It can stop the VM of each running profile after an idle time.
 
-ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
+ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
 
 ColimaBar gets its data from three sources:
 
@@ -28,7 +28,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 ### `App/`
 
-`AppDelegate` owns the menu bar icon, the popover, the dashboard window, the right-click menu (`showMenu()`) and the debug flags. It also makes sure that only one instance runs. `AppDelegate+Relaunch` restarts the app after an update replaced its bundle. `MainMenu` adds the Edit and Window menus. `Snapshot` renders the debug screenshots.
+`AppDelegate` owns the menu bar icon, the popover, the dashboard window, the right-click menu (`showMenu()`) and the debug flags. It also makes sure that only one instance runs. `AppDelegate+Relaunch` restarts the app after an update replaced its bundle (`relaunchIfUpdated(reveal:)` in `AppDelegate`). `MainMenu` adds the Edit and Window menus. `Snapshot` renders the debug screenshots.
 
 ### `Model/`
 
@@ -77,7 +77,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `Notifier` and `AlertThrottle`: notifications and their rate limit.
 - `SystemPowerObserver`: reports system sleep and the end of it. It also reports changes of the power state: the charger (`notify_register_dispatch` with `kIOPSNotifyPowerSource`), Low Power Mode and the thermal state. It is the only place that subscribes to power events.
 - `PowerState`: on battery, Low Power Mode and a hot Mac, and the heartbeat saving that follows (`PowerState.Saving`). `read()` is the only part that calls IOKit and `ProcessInfo`.
-- `Updater`, `Version`, `ReleaseLink`: the daily release check.
+- `Updater`, `Version`, `ReleaseLink`: the daily release check. `Updater+Install` is the in-app install, see [In-app update](#in-app-update). Its parts are `InstallSource`, `ReleaseInfo`, `ReleaseDigest`, `UpdateDownload`, `UpdateVerifier`, `AttestationCheck`, `BundleSwap`, `UpdatePolicy` and `UpdateError`. `UpdateTestHooks` exists only in a test build.
 - `Defaults`: `UserDefaults` access.
 - `ColimaDirWatcher`: watches the Colima folder, Lima's folder and their subfolders. Lima's folder can be outside the Colima folder (`LIMA_HOME`).
 - `FileLimit`: raises the open file limit.
@@ -88,7 +88,7 @@ The log windows. `LogStore` holds the live state for one container. If the conta
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Doctor/` has `DoctorView` (the Doctor page), `DoctorRow` (one check) and `DiagnosticsPanel` (the save panel of the diagnostics file). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Dashboard/` also has `UpdateAlert` (the dialogs of an update). `Doctor/` has `DoctorView` (the Doctor page), `DoctorRow` (one check) and `DiagnosticsPanel` (the save panel of the diagnostics file). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
 
 ### `Support/`
 
@@ -301,7 +301,7 @@ ColimaBar does not use `SMAppService`. launchd ties an `SMAppService` agent to t
 
 ### Notifications
 
-Notifications go out for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Exit codes 0, 130, 137 and 143 are a normal stop (`ColimaModel.ignoredExitCodes`). Containers with the label `org.testcontainers=true` do not send alerts. Two other notifications go out once: one for each new version, and one the first time the icon hides. A third goes out after a good auto-start with a risky Colima or Lima change since the last good start (see the upgrade guard). Its click opens the release notes. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. The checks after a system sleep send a notification with a **Restart** button (category `PROFILE`) when Docker does not answer or the clock fix fails. A click on its banner does nothing. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
+Notifications go out for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Exit codes 0, 130, 137 and 143 are a normal stop (`ColimaModel.ignoredExitCodes`). Containers with the label `org.testcontainers=true` do not send alerts. Two other notifications go out once: one for each new version, and one the first time the icon hides. After an in-app update, the new version sends one more. A third goes out after a good auto-start with a risky Colima or Lima change since the last good start (see the upgrade guard). Its click opens the release notes. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. The checks after a system sleep send a notification with a **Restart** button (category `PROFILE`) when Docker does not answer or the clock fix fails. A click on its banner does nothing. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
 
 **Saved logs.** Docker removes an auto-remove container (`docker run --rm`) and its logs right after it dies. While the option is on (`Defaults.Key.keepRemovedLogs`, off by default) and crash alerts are on, `RemovedLogKeeper` does this for the selected profile:
 
@@ -314,7 +314,23 @@ The buffers are not observed. The model publishes only `savedLogIDs`, the set of
 
 ### Update check
 
-`Updater` asks the GitHub releases API one time each day. It builds the release link from the tag and accepts only release pages of this repository.
+`Updater` asks the GitHub releases API one time each day. It builds the release link from the tag and accepts only release pages of this repository. `ReleaseInfo.parse` reads the answer. It rejects drafts and prereleases, and never uses `html_url` or `browser_download_url`.
+
+### In-app update
+
+`InstallSource.detect` decides what the update button does. The first rule that fits wins: a debug run, a version that is not exactly X.Y.Z (a development build), Homebrew (the Caskroom link points to the bundle, or the Caskroom folder exists and the bundle is `/Applications/ColimaBar.app`), a copy that is not installed (`LoginItem.isInstalled`), a read-only volume, a folder or bundle that the user cannot write (or another owner, or a symlink). Only a copy that passes all rules updates itself (`selfUpdate`). Homebrew shows the `brew upgrade` command. The others open the release page.
+
+The install runs in `Updater+Install`. Any failure before the swap stops it, and nothing in the Applications folder has changed:
+
+1. The user confirms (`UpdateAlert`). The alert says if `gh` can check the attestation. `ColimaModel.updateActivity` and `UpdatePolicy.blocker` decide if a restart is allowed now.
+2. `UpdateDownload` downloads `ColimaBar.zip` of the exact tag into `~/.cache/colima-bar/update/<uuid>` (`Paths.updateDir`, mode `0700`). It uses an ephemeral session, follows redirects only to `ReleaseLink.downloadHosts` (`allowsRedirect`), stops when the file passes the size that the API lists, and hashes with CryptoKit while it writes.
+3. `UpdateVerifier` compares the size and the digest, runs `AttestationCheck` (`gh attestation verify` with the flags of `install.sh`; it is skipped only if the dialog said that `gh` cannot run it, and it stops the update if the dialog promised it and `gh` fails to run it later; a cancel stops the running tool with SIGTERM through `Shell.run(cancellable: true)`), unpacks with `ditto` (one entry, `ColimaBar.app`, at most 100 MB), runs `codesign --verify --deep --strict` with the requirement `identifier "com.imohitkr.ColimaBar"`, checks the plist (`plistProblem`) and the script, and removes the quarantine flag from the unpacked copy and reads the flags again.
+4. `BundleSwap.prepare` copies the app beside the target (`.ColimaBar-update.app`) if the unpacked copy is on another volume. `BundleSwap.commit` swaps the new and the old bundle with `renamex_np(RENAME_SWAP)` (two renames if the file system cannot swap), checks the version on disk, swaps back if it is wrong, and moves the old bundle to `update/previous` (across volumes it copies it, or gives it the hidden name `.ColimaBar-old.app`). If the old bundle cannot go back, `commit` throws `rollbackFailed(path)`, and the work folder stays until the path is gone (`Defaults.Key.recoveryPath`). After any other failure, a cancel or a time-out, `BundleSwap.discard` removes the staged copy. `LoginItem.isInstalled` rejects names that start with a dot, so a staged or old copy never counts as installed. The swap is the only step that touches the Applications folder. It renames; it never writes into the running bundle, so the running binary keeps its inode.
+5. The last busy check, `Defaults.Key.installedVersion`, the swap and the restart (`relaunchIfUpdated(reveal: false)`) run on the main actor with no `await` between them. The agent restarts with `exit(EX_TEMPFAIL)` and KeepAlive. A copy that was started by hand opens a new instance with `--replace` and quits when that call ends (so the "no `await`" claim holds only for the agent). While the phase is `installing`, `ColimaModel.run` refuses VM actions, and a proxy wake waits for up to 10 seconds. If the new instance cannot start, `Updater.relaunchDidFail` shows a notice and drops the offer. On shutdown, the proxy sockets become symlinks to the Colima sockets, so clients keep working. The new copy binds the sockets again, and the readiness gate is unchanged. During about 2 seconds, a docker command does not start a stopped VM, and open connections close.
+
+At launch, `Updater.finishInstall` shows one notification if `installedVersion` is the running version. In every case it removes the key and the update folder, which holds the previous version. A failed check or swap (`UpdateError.usesReleasePageAfter`) changes the button to the release page until the next launch. A network error, a cancel and busy work keep the install button.
+
+A debug run never updates: `detect` gives `debugRun`, and `install()` checks `isDebugRun`. A test build (`COLIMABAR_UPDATE_TEST=1 ./build.sh`) compiles `UpdateTestHooks`. It reads `COLIMABAR_UPDATE_BASE=http://127.0.0.1:PORT` and moves the API and the download to a local server. A release build must not have it. CI checks the binary for that name. See [CONTRIBUTING.md](CONTRIBUTING.md#test-build-for-the-in-app-update) and [SECURITY.md](SECURITY.md).
 
 ### Performance and limits
 
@@ -350,7 +366,8 @@ Do not break these rules.
 - **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
 - **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
-- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
+- **Replace the bundle only by rename.** An in-app update swaps the whole bundle with `renamex_np` (`BundleSwap`). It never writes into the running bundle, and it changes nothing in the Applications folder before the download passes every check.
+- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It never downloads or installs an update. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
 
 ## Testing
 

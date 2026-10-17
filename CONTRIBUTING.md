@@ -35,6 +35,18 @@ CI uses these lint tools: `swift format` from Swift 6.4.0 (the `swift:6.4.0` ima
 
 The version comes from `git describe --tags`. Without a tag, the version is the commit hash.
 
+### Test build for the in-app update
+
+To try the in-app update without a release, make a test build:
+
+```sh
+COLIMABAR_UPDATE_TEST=1 COLIMABAR_BUILD_VERSION=0.9.0 ./build.sh
+```
+
+`COLIMABAR_BUILD_VERSION` sets the version of the app. `COLIMABAR_UPDATE_TEST=1` compiles the hook `UpdateTestHooks.swift` with `-DCOLIMABAR_UPDATE_TEST`. In that build only, `COLIMABAR_UPDATE_BASE=http://127.0.0.1:PORT` moves the release API (`/releases/latest`) and the download (`/releases/download/TAG/ColimaBar.zip`) to a local server. No other host or scheme works. A release build must not contain the hook: CI checks the binary for the name `COLIMABAR_UPDATE_BASE`.
+
+Test in a separate macOS user, because the build has its own login item and proxy sockets. Put the 0.9.0 test build in `~/Applications`. Make a `ColimaBar.zip` of a build with version 0.9.1 and a `releases/latest` JSON file with the tag, `"immutable": true`, and the `size` and `digest` of the zip. Serve both with `python3 -m http.server --bind 127.0.0.1`, and run `launchctl setenv COLIMABAR_UPDATE_BASE http://127.0.0.1:PORT`. Never use `make install` or a real release for this test. Unit tests need none of this: they use fake bundles in temporary folders and never touch `/Applications`.
+
 ### Debug flags
 
 The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test` or `--diagnostics` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
@@ -71,7 +83,7 @@ Each source file holds one type, or one type and its small private helpers. The 
 ## Coding conventions
 
 - Use Swift 6.4 and SwiftPM, in the Swift 6 language mode. Do not add third-party dependencies.
-- Use only Apple frameworks: AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement and IOKit (`notify` is part of libSystem).
+- Use only Apple frameworks: AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit and CryptoKit (`notify` is part of libSystem).
 - Draw graphs with SwiftUI `Shape` or `Path`. Do not use Swift Charts or `Canvas`, because they use a lot of graphics memory.
 - Keep UI state in the `@Observable` `ColimaModel`. Assign a property only when its value changes. This keeps the popover still and the redraws small.
 - Write tests with [Swift Testing](https://developer.apple.com/documentation/testing) (`@Suite`, `@Test`, `#expect`). Do not use XCTest.
@@ -137,9 +149,9 @@ Before the tag, the maintainer does these checks:
 The maintainer then makes the release:
 
 1. The maintainer pushes a tag `vX.Y.Z` on `main`.
-2. CI runs the tests and builds `ColimaBar.dmg` and `ColimaBar.zip`.
+2. CI runs the tests and builds `ColimaBar.dmg` and `ColimaBar.zip`. It stops if the binary has the update test hook.
 3. CI signs a build provenance attestation for both files.
-4. CI publishes the GitHub release with generated notes.
+4. CI publishes the GitHub release with generated notes. Then it checks that the release is immutable and that the digest of each asset on GitHub is the digest of the built file. The in-app update trusts that digest.
 5. Within 6 hours, a workflow in imohitkr/homebrew-tap verifies the attestation of `ColimaBar.zip` and updates the cask.
 
 Before the tag, the maintainer moves the `[Unreleased]` entries in `CHANGELOG.md` to a new version section.

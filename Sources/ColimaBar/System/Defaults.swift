@@ -28,6 +28,13 @@ enum Defaults {
         /// The tool versions at the last good start of each profile, as JSON
         /// (`GoodStarts`). It is machine state, not a setting.
         case goodStartVersions
+        /// The version that an in-app update installed. The new copy reads
+        /// it once at launch, shows one notification and removes the key.
+        case installedVersion
+        /// The path of the old bundle after a failed update that could not
+        /// put it back. The launch clean-up keeps the update folder and the
+        /// hidden copies while this path exists.
+        case recoveryPath
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

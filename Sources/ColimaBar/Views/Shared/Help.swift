@@ -144,13 +144,31 @@ enum Help {
 
     // App
     static let checkUpdates =
-        "Ask GitHub one time each day if a newer ColimaBar release exists. ColimaBar sends one notification for a new version. Then it shows a button at the bottom of the dashboard."
+        "Ask GitHub one time each day if a newer ColimaBar release exists. ColimaBar sends one notification for a new version. Then it shows a button at the bottom of the dashboard. ColimaBar installs an update only after you click that button."
     static let uninstallConfirm =
         "ColimaBar opens a terminal window (iTerm or Terminal) and runs its uninstall script. The script removes the app, the login item and ColimaBar's docker routes. Docker clients then connect to Colima directly. Colima, your containers and your images stay."
     static func version(_ v: String) -> String { "ColimaBar \(v). Click to check for a new version." }
-    static func update(_ v: String) -> String {
-        "ColimaBar \(v) is available. Click to open the release page and download it."
+    static func install(_ v: String) -> String {
+        "ColimaBar \(v) is available. Click to download it, check it, replace this copy and restart. ColimaBar asks first."
     }
+    static func brewUpdate(_ v: String) -> String {
+        "ColimaBar \(v) is available. Homebrew installed this copy. Click to see the brew command that updates it."
+    }
+    static func updateLink(_ v: String, reason: String) -> String {
+        "ColimaBar \(v) is available. ColimaBar cannot install it, because \(reason). Click to open the release page."
+    }
+    static let cancelUpdate =
+        "Stop the update. ColimaBar deletes the download and keeps this version. After the install starts, you cannot cancel it."
+    static let installConfirm =
+        "ColimaBar replaces this copy and restarts. For about 2 seconds, a docker command does not start a stopped VM. Open connections, for example docker logs -f, close. Running containers continue."
+    static let updateChecking =
+        "ColimaBar checks the download: the size, the digest, the signature and the version. It has not changed this copy yet. Click the cross to stop."
+    static func updateWaiting(_ why: String) -> String {
+        "ColimaBar waits to restart. \(why). The restart starts when this ends. Click the cross to stop."
+    }
+    static let updateInstalling = "ColimaBar replaces this copy and restarts now. You cannot stop it."
+    static let updateInProgress =
+        "ColimaBar is installing an update. Wait until it ends, or click the cross at the bottom of the dashboard to stop it."
     static let notify =
         "Send an alert when a container exits with an error, runs out of memory or fails its healthcheck. ColimaBar ignores testcontainers containers. Failed actions always send an alert."
     static let keepRemovedLogs =

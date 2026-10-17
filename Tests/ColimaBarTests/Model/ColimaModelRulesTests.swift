@@ -187,6 +187,13 @@ import Testing
         #expect(back.profiles == ["work"])
     }
 
+    @Test func theUpdateActivityLabelsAnActionWithoutAMarkerWithAnEmptyLabel() {
+        #expect(ColimaModel.updateBusyLabel(marker: nil, actionsInFlight: 0) == nil)
+        #expect(ColimaModel.updateBusyLabel(marker: "Restarting", actionsInFlight: 0) == "Restarting")
+        #expect(ColimaModel.updateBusyLabel(marker: "Restarting", actionsInFlight: 2) == "Restarting")
+        #expect(ColimaModel.updateBusyLabel(marker: nil, actionsInFlight: 1) == "")
+    }
+
     @Test func anyRunningActionBlocksAutoStop() {
         #expect(!ColimaModel.blocksAutoStop(busyMarker: nil, actionsInFlight: 0))
         #expect(ColimaModel.blocksAutoStop(busyMarker: "Restarting", actionsInFlight: 0))

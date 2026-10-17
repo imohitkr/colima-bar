@@ -8,6 +8,9 @@
 # verifies the download and stops when the check fails. If gh cannot verify the download,
 # the installer prints a notice and continues. Set COLIMABAR_REQUIRE_VERIFY=1
 # to stop in that case too.
+# The installer also compares the SHA-256 digest of the download with the digest
+# that the GitHub API lists for the release file. If the API does not answer,
+# it prints a notice and continues.
 # curl does not mark its downloads as quarantined, so macOS opens the app
 # without the Gatekeeper prompt that a browser download gets.
 set -euo pipefail
@@ -38,6 +41,22 @@ version_at_least() {
   (( 10#$a1 != 10#$b1 )) && { (( 10#$a1 > 10#$b1 )); return; }
   (( 10#$a2 != 10#$b2 )) && { (( 10#$a2 > 10#$b2 )); return; }
   (( 10#$a3 >= 10#$b3 ))
+}
+
+# Prints the SHA-256 digest (64 hex digits) that the release JSON file $1 lists
+# for the asset ColimaBar.zip. Prints nothing if the file has no such asset.
+listed_digest() {
+  local i name digest
+  for i in $(seq 0 49); do
+    name=$(plutil -extract "assets.$i.name" raw -o - "$1" 2>/dev/null) || return 0
+    if [ "$name" = ColimaBar.zip ]; then
+      digest=$(plutil -extract "assets.$i.digest" raw -o - "$1" 2>/dev/null) || return 0
+      if [[ "$digest" =~ ^sha256:([0-9a-fA-F]{64})$ ]]; then
+        echo "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]'
+      fi
+      return 0
+    fi
+  done
 }
 
 # Everything runs inside main, so a partly downloaded script does nothing.
@@ -124,6 +143,26 @@ main() {
     exit 1
   fi
 
+  # The API lists a SHA-256 digest for each asset of a release. The digest
+  # shows that the download is whole and is the file that GitHub stores.
+  # It does not show who built the file (see the attestation check below).
+  if curl --proto '=https' --tlsv1.2 -fsS -H 'Accept: application/vnd.github+json' \
+    -o "$tmp/release.json" "https://api.github.com/repos/$repo/releases/tags/$version" 2>/dev/null; then
+    local want have
+    want=$(listed_digest "$tmp/release.json")
+    have=$(shasum -a 256 "$tmp/ColimaBar.zip" | cut -d ' ' -f 1)
+    if [ -z "$want" ]; then
+      echo "Did not check the SHA-256 digest (the release lists none for ColimaBar.zip)."
+    elif [ "$want" != "$have" ]; then
+      echo "The download does not match the SHA-256 digest that GitHub lists for it. Stopping." >&2
+      exit 1
+    else
+      echo "The SHA-256 digest matches the one that GitHub lists."
+    fi
+  else
+    echo "Did not check the SHA-256 digest (the GitHub API did not answer)."
+  fi
+
   # CI attaches a build provenance attestation to each release file. It
   # proves that the release workflow (ci.yml) of this repo built the file on
   # a GitHub-hosted runner, from the requested tag when one is set.
@@ -162,10 +201,17 @@ main() {
   ditto -x -k "$tmp/ColimaBar.zip" "$tmp"
   [ -d "$tmp/ColimaBar.app" ] || { echo "The download does not contain ColimaBar.app." >&2; exit 1; }
   # Corruption check only. The ad-hoc signature does not prove who built the app.
-  codesign --verify --deep "$tmp/ColimaBar.app" 2>/dev/null || {
-    echo "The downloaded app is damaged (invalid signature). Stopping." >&2
+  # The requirement checks that the code identifier is the one of ColimaBar.
+  codesign --verify --deep --strict -R '=identifier "com.imohitkr.ColimaBar"' "$tmp/ColimaBar.app" || {
+    echo "The downloaded app is damaged or is not ColimaBar (invalid signature). Stopping." >&2
     exit 1
   }
+  local app_version
+  app_version=$(plutil -extract CFBundleShortVersionString raw -o - "$tmp/ColimaBar.app/Contents/Info.plist" 2>/dev/null) || app_version=""
+  if [ "$app_version" != "${version#v}" ]; then
+    echo "The downloaded app has version ${app_version:-unknown}, not ${version#v}. Stopping." >&2
+    exit 1
+  fi
   xattr -dr com.apple.quarantine "$tmp/ColimaBar.app" 2>/dev/null || true
 
   if pgrep -U "$(id -u)" -xq ColimaBar; then
@@ -190,6 +236,10 @@ main() {
   if [ -d "$other" ]; then
     echo "Removing the other copy at $other"
     rm -rf "$other" || echo "Could not remove $other. Delete it by hand." >&2
+  fi
+
+  if [ -d /opt/homebrew/Caskroom/colima-bar ] || [ -d /usr/local/Caskroom/colima-bar ]; then
+    echo "Notice: Homebrew also has ColimaBar. Its next upgrade replaces this copy. To use Homebrew only, run: brew upgrade --cask colima-bar"
   fi
 
   mkdir -p "$dest"

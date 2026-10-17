@@ -25,6 +25,33 @@ enum ReleaseLink {
             }
     }
 
+    /// The download URL of `ColimaBar.zip` for `tag`. It uses the exact tag,
+    /// never `latest`. Nil if the tag is not exactly vX.Y.Z (or X.Y.Z).
+    static func download(tag: String) -> URL? {
+        guard isReleaseTag(tag) else { return nil }
+        #if COLIMABAR_UPDATE_TEST
+            if let base = UpdateTestHooks.base {
+                return URL(string: "\(base.absoluteString)/releases/download/\(tag)/ColimaBar.zip")
+            }
+        #endif
+        return URL(string: "https://github.com/imohitkr/colima-bar/releases/download/\(tag)/ColimaBar.zip")
+    }
+
+    /// The hosts that a download may redirect to. GitHub sends release files
+    /// to its own asset hosts.
+    static let downloadHosts: Set<String> = [
+        "github.com", "release-assets.githubusercontent.com", "objects.githubusercontent.com",
+    ]
+
+    /// True for a redirect of a download that may go on: https, one of
+    /// `downloadHosts`, with no user info and no port.
+    static func allowsRedirect(to url: URL) -> Bool {
+        guard let c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
+        return c.scheme?.lowercased() == "https"
+            && c.host.map { downloadHosts.contains($0.lowercased()) } == true
+            && c.user == nil && c.password == nil && c.port == nil
+    }
+
     static func isTrusted(_ url: URL) -> Bool {
         guard let c = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         // "%2e%2e" is ".." to a browser: check each segment in decoded form.

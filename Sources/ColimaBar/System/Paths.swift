@@ -21,6 +21,9 @@ enum Paths {
     static let proxySocket = "\(cacheDir)/docker.sock"
     /// The folder of the proxy sockets of each profile (`PROFILE.sock`).
     static let profilesDir = "\(cacheDir)/profiles"
+    /// The work folder of an in-app update: the download, the unpacked copy
+    /// and the previous version. The next launch after an update removes it.
+    static let updateDir = "\(cacheDir)/update"
     /// The proxy socket of one profile, or nil if the name is invalid or the
     /// path is too long for a unix socket (see ProfileSocket).
     static func profileSocket(_ profile: String) -> String? { ProfileSocket.path(dir: profilesDir, profile: profile) }

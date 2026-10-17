@@ -55,6 +55,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // isn't lost.
         Notifier.shared.install()
         model.dismissPopover = { [weak self] in self?.popover.performClose(nil) }
+        Updater.shared.activity = { [weak self] in self?.model.updateActivity ?? UpdatePolicy.Activity() }
+        Updater.shared.relaunch = { [weak self] in self?.relaunchIfUpdated(reveal: false) ?? false }
         Notifier.shared.onAlert = { [weak self] title, body, ctr in
             self?.model.record(title, body, containerID: ctr?.id)
         }
@@ -120,6 +122,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         if !Self.isDebugRun {
             LoginItem.migrate()
             registerLoginItemOnce()
+            Updater.shared.finishInstall()
             Updater.shared.start()
         }
         // An older copy restarted into this one after an update while the
@@ -378,11 +381,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         let ver = NSMenuItem(title: "ColimaBar \(Self.version)", action: nil, keyEquivalent: "")
         ver.isEnabled = false
         menu.addItem(ver)
-        if let r = Updater.shared.available {
-            add("Download ColimaBar \(r.version)…", #selector(openUpdate))
-        } else {
-            add("Check for Updates…", #selector(checkUpdates))
-        }
+        addUpdateItems(to: menu)
         add("Uninstall ColimaBar…", #selector(uninstall))
         add("Quit ColimaBar", #selector(quit), key: "q")
         item.menu = menu
@@ -414,7 +413,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     @objc private func toggleAutoStart() { model.autoStart.toggle() }
     @objc private func toggleHideIcon() { model.hideIconWhenStopped.toggle() }
     @objc private func checkUpdates() { Task { await Updater.shared.check(manual: true) } }
-    @objc private func openUpdate() { Updater.shared.openReleasePage() }
+    @objc private func startUpdate() {
+        Task { await Updater.shared.startUpdate() }
+    }
+    @objc private func cancelUpdate() { Updater.shared.cancel() }
+
+    /// The update items of the right-click menu: the action for the offer,
+    /// or the progress with Cancel Update, or Check for Updates.
+    private func addUpdateItems(to menu: NSMenu) {
+        func add(_ title: String, _ sel: Selector?) {
+            let i = NSMenuItem(title: title, action: sel, keyEquivalent: "")
+            i.target = self
+            i.isEnabled = sel != nil
+            menu.addItem(i)
+        }
+        let updater = Updater.shared
+        guard let r = updater.available else {
+            add("Check for Updates…", #selector(checkUpdates))
+            return
+        }
+        switch updater.phase {
+        case .idle:
+            switch updater.offer {
+            case .install: add("Install ColimaBar \(r.version)…", #selector(startUpdate))
+            case .homebrew: add("Update ColimaBar \(r.version) with Homebrew…", #selector(startUpdate))
+            case .link: add("Download ColimaBar \(r.version)…", #selector(startUpdate))
+            }
+        case .downloading(let share):
+            add("Downloading ColimaBar \(r.version)… \(Int(share * 100))%", nil)
+            add("Cancel Update", #selector(cancelUpdate))
+        case .verifying:
+            add("Checking ColimaBar \(r.version)…", nil)
+            add("Cancel Update", #selector(cancelUpdate))
+        case .waiting:
+            add("Waiting to install ColimaBar \(r.version)…", nil)
+            add("Cancel Update", #selector(cancelUpdate))
+        case .installing:
+            add("Installing ColimaBar \(r.version)…", nil)
+        }
+    }
 
     /// Runs the bundled uninstall.sh in Terminal after a confirmation. It runs
     /// outside this process: removing the login item stops this process, and
@@ -471,7 +508,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// reopen asked: `--reveal` for a copy started by hand, and a UserDefaults
     /// request for the agent (launchd starts it without arguments).
     /// Returns true if a restart has begun.
-    private func relaunchIfUpdated() -> Bool {
+    /// `reveal: false` is for an update that the user started: the new
+    /// instance then does not reveal the icon or open the dashboard.
+    private func relaunchIfUpdated(reveal: Bool = true) -> Bool {
         guard !Self.isDebugRun, !relaunching else { return false }
         let onDisk = Self.onDiskVersion(of: Bundle.main.bundleURL)
         let restart = Self.restart(running: Self.version, onDisk: onDisk, isAgent: Self.isLaunchAgent)
@@ -482,14 +521,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         )
         // Also for a copy started by hand: if the agent takes over from the
         // new instance, the agent reads it.
-        Defaults.set(Date().timeIntervalSince1970, .revealOnLaunch)
+        if reveal { Defaults.set(Date().timeIntervalSince1970, .revealOnLaunch) }
         if restart == .agent {
             NSApp.terminate(nil)
             return true
         }
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.createsNewApplicationInstance = true
-        cfg.arguments = ["--replace", "--reveal"]
+        cfg.arguments = reveal ? ["--replace", "--reveal"] : ["--replace"]
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: cfg) { [weak self] _, error in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -497,9 +536,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     // Keep this copy running, so the proxy stays up.
                     self.log.error("couldn't start the new version: \(error.localizedDescription, privacy: .public)")
                     self.relaunching = false
+                    // An update that the user started: tell the user, and do
+                    // not offer the same install again.
+                    if reveal { Updater.shared.phase = .idle } else { Updater.shared.relaunchDidFail() }
                     Defaults.remove(.revealOnLaunch)
-                    if self.model.iconHidden { self.model.revealIcon = true }
-                    self.reveal()
+                    if reveal {
+                        if self.model.iconHidden { self.model.revealIcon = true }
+                        self.reveal()
+                    }
                     return
                 }
                 NSApp.terminate(nil)

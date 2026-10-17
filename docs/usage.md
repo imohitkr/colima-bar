@@ -199,7 +199,7 @@ From left to right, the footer has these controls:
 - **Copy button**: an `export DOCKER_HOST=…` line for the ColimaBar socket, copied to the clipboard.
 - **Config button**: `colima.yaml` in your text editor.
 - **Log button**: the Colima logs in Console.
-- **Version**: the ColimaBar version. Click it to check for a new version. An **Update** button appears next to it when a new version is available.
+- **Version**: the ColimaBar version. Click it to check for a new version. When a new version is available, a button appears next to it: **Install *version*** (ColimaBar installs it after you confirm), or **Update *version*** (for a Homebrew copy it shows the `brew` command, for other copies it opens the release page). While ColimaBar installs, the button shows a progress bar with a cancel button, then **Checking…**, **Waiting…** (while a VM action, a docker build, pull or push, an auto-start, Doctor or a diagnostics save runs; the cancel button still works) and **Installing…** (you cannot cancel it). During an install, a click on the version or on **Check for Updates…** shows "An update is in progress". See [Update](install.md#update).
 - **Window, refresh and quit buttons**.
 
 ### Keyboard shortcuts
@@ -219,7 +219,7 @@ Right-click or Control-click the menu bar icon for these menu items:
 - **Auto-start Colima on Demand**
 - **Hide Icon While Colima Is Stopped**
 - **ColimaBar *version*** (shows the version only)
-- **Check for Updates…**, or **Download ColimaBar *version*…** when an update is available
+- **Check for Updates…**. When an update is available, the item is **Install ColimaBar *version*…**, **Update ColimaBar *version* with Homebrew…** or **Download ColimaBar *version*…**. During an install, the menu shows the progress and **Cancel Update**.
 - **Uninstall ColimaBar…** (see [Uninstall](uninstall.md))
 - **Quit ColimaBar**
 
@@ -258,7 +258,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - An action fails.
 - Auto-start started a profile after a Colima or Lima upgrade. A click opens the release notes. See [Upgrade warning](#upgrade-warning).
 - A Doctor fix of the docker context, the routes or the docker config file ends. The notification gives the result. The Doctor checks send none.
-- A new version is available. ColimaBar sends one notification for each new version. See [Update](install.md#update).
+- A new version is available. ColimaBar sends one notification for each new version. After an in-app update, the new version sends one more notification with a link to the release notes. See [Update](install.md#update).
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.
 - After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).
 

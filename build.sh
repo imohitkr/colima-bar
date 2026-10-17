@@ -15,9 +15,17 @@ APP=build/ColimaBar.app
 ID=com.imohitkr.ColimaBar
 VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo dev)
 VERSION=${VERSION#v}
+# A test build for the in-app update: COLIMABAR_BUILD_VERSION=0.9.0 sets the
+# version, and COLIMABAR_UPDATE_TEST=1 adds the hook that moves the update
+# check to a local server (see CONTRIBUTING.md). Release builds use neither.
+VERSION=${COLIMABAR_BUILD_VERSION:-$VERSION}
+FLAGS=()
+if [ "${COLIMABAR_UPDATE_TEST:-}" = 1 ]; then
+  FLAGS+=(-Xswiftc -DCOLIMABAR_UPDATE_TEST)
+fi
 
-swift build -c release --product ColimaBar
-BIN=$(swift build -c release --show-bin-path)/ColimaBar
+swift build -c release --product ColimaBar ${FLAGS[@]+"${FLAGS[@]}"}
+BIN=$(swift build -c release --show-bin-path ${FLAGS[@]+"${FLAGS[@]}"})/ColimaBar
 
 mkdir -p Resources
 [ -f Resources/AppIcon.icns ] || swift scripts/make-icon.swift Resources/AppIcon.icns

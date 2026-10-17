@@ -137,6 +137,24 @@ ColimaBar reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launch
 
 Apple does not notarize ColimaBar. If you use the disk image, follow the [Open Anyway steps](install.md#the-disk-image). As an alternative, use [the installer](install.md#the-installer). macOS does not block its download.
 
+## An update does not install
+
+ColimaBar tells you why in a notification. A failed update leaves the old app in place.
+
+- **The download does not match the size or the SHA-256 digest.** The download was damaged or changed. Click the notification and download the update from the release page.
+- **gh attestation verify failed.** The file does not match a build of this repository. Do not use it. Report it as described in [SECURITY.md](../SECURITY.md).
+- **The signature or the version of the app is wrong.** ColimaBar installs only an app with the code identifier `com.imohitkr.ColimaBar` and the version of the release.
+- **macOS blocked the change to the app folder.** Since macOS 13, App Management can stop an app from changing another app. Open System Settings > Privacy & Security > App Management and turn on ColimaBar. Or install the update with [the installer](install.md#the-installer).
+- **A VM action, a docker build, pull or push, or Doctor did not end in time.** Try again when the work ends.
+- **ColimaBar could not run the build attestation check.** The confirmation dialog promised the check, but `gh` could not run it (no network, a time-out or a login problem). Nothing changed. Try again later.
+- **There is not enough free disk space.** The update needs the size of the download plus about 200 MB (up to about 250 MB) in `~/.cache/colima-bar`.
+- **ColimaBar could not put the old version back.** This is rare: the swap failed, and the old app could not go back to its place. The notification gives the path of the old app. Quit ColimaBar. Move that app to `/Applications/ColimaBar.app` (or to the folder of the app that you use). Until you move it, ColimaBar keeps that folder and does not delete it. If you cannot find the app, use [the installer](install.md#the-installer).
+- **The new version is installed, but ColimaBar did not restart.** Quit ColimaBar and open it again.
+
+After a failed check or a failed swap, the button opens the release page until you start ColimaBar again. ColimaBar installs nothing in a debug run, and from a copy that is not in `/Applications` or `~/Applications`.
+
+To go back to an older version, run the installer with that version. See [Install a specific release](install.md#install-a-specific-release).
+
 ## ColimaBar does not start when you log in
 
 - ColimaBar turns on the login item only when you open it from an Applications folder. A copy that runs from the disk image or from Downloads does not turn it on.

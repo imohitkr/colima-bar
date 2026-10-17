@@ -378,6 +378,31 @@ final class ColimaModel {
         if d.unhealthy != unhealthyCount { unhealthyCount = d.unhealthy }
     }
 
+    /// What runs now that an in-app update must not interrupt (see
+    /// UpdatePolicy.blocker): the busy marker or action of any profile, the
+    /// colima-ctl.sh actions, the wakes, the open docker transfers, a Doctor
+    /// run (a fix or a repair too) and a diagnostics save.
+    var updateActivity: UpdatePolicy.Activity {
+        var names = Set(profiles.map(\.name))
+        names.insert(profile)
+        names.formUnion(profileActions.keys)
+        names.formUnion(actionsInFlight.keys)
+        var labels: [String] = []
+        for p in names.sorted() {
+            if let label = Self.updateBusyLabel(marker: readBusy(p), actionsInFlight: actionsInFlight[p] ?? 0) {
+                labels.append(label)
+            }
+        }
+        let transfers = proxy.activeTransfers() + names.reduce(0) { $0 + profileProxies.activeTransfers($1) }
+        return UpdatePolicy.Activity(
+            busyLabels: labels, transfers: transfers, wakes: wakes.count, doctorRunning: isDoctorRunning,
+            savingDiagnostics: isSavingDiagnostics)
+    }
+
+    /// True from the swap of an in-app update until this copy quits or the
+    /// restart fails. No new VM action or proxy wake starts then.
+    var updateRestarting: Bool { Updater.shared.phase == .installing }
+
     /// Called on quit: the stable socket becomes a symlink to Colima's, so
     /// docker clients keep working without ColimaBar.
     func shutdown() {
@@ -781,6 +806,10 @@ final class ColimaModel {
     /// profile of a profile socket; nil means the selected profile (the
     /// stable socket). Two calls for the same profile share one wake.
     func wakeForProxy(profile target: String? = nil) async -> Bool {
+        // An update swaps the bundle and restarts: a start now would run in
+        // the copy that is about to quit. Wait for the restart (10 s at most,
+        // in case it does not happen).
+        for _ in 0..<100 where updateRestarting { try? await Task.sleep(for: .milliseconds(100)) }
         let p = target ?? profile
         if let running = wakes[p] { return await running.task.value }
         wakeToken += 1
@@ -1399,6 +1428,8 @@ final class ColimaModel {
     /// the busy marker and notifications), then refreshes. `profile` is the
     /// profile to act on; nil means the selected profile.
     func run(_ action: CtlAction, _ args: String..., profile target: String? = nil) {
+        // The old copy quits at once after the swap of an update.
+        guard !updateRestarting else { return }
         let p = target ?? profile
         let running = isRunning(profile: p)
         if action.showsDialog(running: running) { dismissPopover() }
