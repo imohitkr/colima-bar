@@ -8,7 +8,8 @@ enum DoctorRules {
 
     static func evaluate(_ i: DoctorInputs) -> [DoctorResult] {
         [
-            tools(i), context(i), appRoutes(i), shellHost(i), credentials(i), plugins(i), vmStatus(i), staleFiles(i),
+            tools(i), upgrade(i), context(i), appRoutes(i), shellHost(i), credentials(i), plugins(i), vmStatus(i),
+            staleFiles(i),
             diskSpace(i),
         ]
     }
@@ -47,6 +48,31 @@ enum DoctorRules {
                 .tools, .warning, "\(list). Lima before 2.1 does not fix the VM clock after a sleep. Update Colima.")
         }
         return DoctorResult(.tools, .ok, list)
+    }
+
+    /// Compares the versions with the ones at the last good start. No fix: the
+    /// user backs up and reads the release notes.
+    static func upgrade(_ i: DoctorInputs) -> DoctorResult {
+        guard let last = i.lastGoodVersions else {
+            return DoctorResult(.upgrade, .skipped, "No good start of this profile is recorded yet.")
+        }
+        guard UpgradeGuard.canSave(last) else {
+            return DoctorResult(.upgrade, .skipped, "The record of the last good start is incomplete.")
+        }
+        let now = i.tools.versions
+        guard UpgradeGuard.canSave(now) else { return DoctorResult(.upgrade, .skipped, "See Tools.") }
+        let all = now.changed(from: last)
+        let risky = UpgradeGuard.riskyChanges(last: last, now: now)
+        if !risky.isEmpty {
+            return DoctorResult(
+                .upgrade, .warning,
+                "\(UpgradeGuard.list(all)) since the last good start. Back up important volumes and read the release notes before the next start."
+            )
+        }
+        if all.isEmpty {
+            return DoctorResult(.upgrade, .ok, "The same versions as at the last good start.")
+        }
+        return DoctorResult(.upgrade, .ok, "\(UpgradeGuard.list(all)) since the last good start.")
     }
 
     static func appRoutes(_ i: DoctorInputs) -> DoctorResult {

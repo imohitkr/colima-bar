@@ -41,6 +41,47 @@ import Testing
         #expect(try result(.tools, DoctorFixture.healthy()).detail == "colima 0.10.3, lima 2.2.1, docker 29.0.1")
     }
 
+    // MARK: upgrade
+
+    @Test func upgradeIsSkippedWithNoRecordOrUnknownVersions() throws {
+        var i = DoctorFixture.healthy()
+        i.lastGoodVersions = nil
+        #expect(try result(.upgrade, i).status == .skipped)
+        #expect(try result(.upgrade, i).detail == "No good start of this profile is recorded yet.")
+        i = DoctorFixture.healthy()
+        i.tools.versions.lima = "unknown"
+        let r = try result(.upgrade, i)
+        #expect(r.status == .skipped && r.detail == "See Tools.")
+    }
+
+    @Test func anIncompleteRecordIsSkippedNotOk() throws {
+        for last in [ToolVersions(colima: "0.10.3"), ToolVersions(colima: "0.10.3", lima: "x")] {
+            var i = DoctorFixture.healthy()
+            i.lastGoodVersions = last
+            i.tools.versions.colima = "0.11.0"
+            let r = try result(.upgrade, i)
+            #expect(r.status == .skipped && r.detail == "The record of the last good start is incomplete.")
+        }
+    }
+
+    @Test func aRiskyChangeIsAWarningWithNoFix() throws {
+        var i = DoctorFixture.healthy()
+        i.tools.versions.colima = "0.11.0"
+        let r = try result(.upgrade, i)
+        #expect(r.status == .warning && r.fix == nil)
+        #expect(r.detail.contains("Colima 0.10.3 → 0.11.0") && r.detail.contains("before the next start"))
+    }
+
+    @Test func noChangeOrASmallChangeIsOk() throws {
+        var i = DoctorFixture.healthy()
+        let same = try result(.upgrade, i)
+        #expect(same.status == .ok && same.detail == "The same versions as at the last good start.")
+        i.tools.versions.lima = "2.2.2"
+        i.tools.versions.macOS = "26.0.0"
+        let small = try result(.upgrade, i)
+        #expect(small.status == .ok && small.detail.contains("Lima 2.2.1 → 2.2.2") && small.detail.contains("macOS"))
+    }
+
     // MARK: appRoutes
 
     @Test func routesAreSkippedWhenAutoStartIsOff() throws {

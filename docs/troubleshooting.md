@@ -6,7 +6,19 @@ This page lists the ColimaBar logs, fixes for common problems and the steps to r
 
 ## Run Doctor first
 
-For many problems, open [Doctor](usage.md#doctor): click **Doctor…** in the right-click menu. Doctor checks the tools, the docker context, the routes, the shell, the registry login, the docker plugins, the VM status, the stale Lima files and the disk space. It offers a fix for most findings. Doctor only reads, so it is safe to run at any time.
+For many problems, open [Doctor](usage.md#doctor): click **Doctor…** in the right-click menu. Doctor checks the tools, the docker context, the routes, the shell, the registry login, the docker plugins, the Colima and Lima upgrade, the VM status, the stale Lima files and the disk space. It offers a fix for most findings. Doctor only reads, so it is safe to run at any time.
+
+## ColimaBar warns about an upgrade
+
+Colima or Lima has a new minor or major version, or an older version, since the last good start of the profile. A new version can change the VM disk. See [Upgrade warning](usage.md#upgrade-warning).
+
+1. Click **Release Notes**. Read the notes of Colima and Lima. ColimaBar starts nothing.
+2. Back up the data that you need.
+   - If the VM runs (Restart or a change of settings), copy a volume to a file. Run this in a folder in your home folder: `docker run --rm -v VOLUME:/data -v "$PWD":/backup alpine tar czf /backup/VOLUME.tgz -C /data .`
+   - If the VM is stopped, do not start it with `colima start`. That start is the risk that the dialog guards against. Copy the [Colima folder](#colimabar-uses-the-wrong-colima-folder) while the VM is stopped. On APFS, this makes a fast clone: `cp -cR ~/.colima ~/colima-backup`. Use your own Colima folder in place of `~/.colima`.
+3. Start the VM again in ColimaBar and click **Continue**.
+
+If you cancel, the dialog comes again at the next start. If the start fails after the upgrade, Doctor shows the change in the Upgrade row: the new version is the likely cause. To go back, install the old version from the release page of Colima or Lima on GitHub, and restore the backup if needed.
 
 ## Logs
 

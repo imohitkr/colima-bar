@@ -25,6 +25,9 @@ enum Defaults {
         /// new version for a reopen. The new copy then reveals the icon and
         /// opens the dashboard.
         case revealOnLaunch
+        /// The tool versions at the last good start of each profile, as JSON
+        /// (`GoodStarts`). It is machine state, not a setting.
+        case goodStartVersions
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

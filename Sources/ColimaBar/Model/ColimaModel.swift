@@ -193,7 +193,7 @@ final class ColimaModel {
     let proxy: SocketProxy
     /// One proxy for each docker profile (see ProfileProxies).
     let profileProxies: ProfileProxies
-    private let log = Logger(category: "model")
+    let log = Logger(category: "model")
     // Internal bookkeeping that no view reads: writes skip observation.
     /// Closes the dashboard popover, so a dialog is not hidden behind it.
     /// AppDelegate sets it.
@@ -215,6 +215,12 @@ final class ColimaModel {
     @ObservationIgnored private var lastPing = Date()
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
     @ObservationIgnored private(set) var isDebug = false
+    /// The upgrade guard seeded its record of good starts in this launch.
+    @ObservationIgnored var upgradeSeedTried = false
+    @ObservationIgnored var upgradeSeedRunning = false
+    /// The tools whose failed version probe the log has shown in this launch.
+    @ObservationIgnored var upgradeProbeLogged: Set<String> = []
+    @ObservationIgnored var goodStartsProblemLogged = false
     @ObservationIgnored private var isCheckingContext = false
     @ObservationIgnored private var contextCheckAgain = false
     /// The modification time of the docker config file at the last tick.
@@ -441,6 +447,8 @@ final class ColimaModel {
     }
 
     /// The busy marker of any profile, or an action this app runs for it.
+    func busyMarker(of p: String) -> String? { readBusy(p) }
+
     private func readBusy(_ p: String) -> String? {
         p == profile ? readBusy() : Self.readBusyMarker(p) ?? profileActions[p]
     }
@@ -525,6 +533,7 @@ final class ColimaModel {
                     status: $0.status)
             })
         syncProfiles()
+        seedGoodStarts()
         // `colima start` switches the docker context, and `colima stop`
         // deletes it. Check it when a profile starts or stops.
         if hadProfiles, Set(profiles.filter(\.isRunning).map(\.name)) != wasRunningNames { checkDockerContext() }
@@ -842,13 +851,17 @@ final class ColimaModel {
             guard await startInFlight() else { break }
             try? await Task.sleep(for: .seconds(1))
         }
+        var startedVersions: Task<ToolVersions, Never>?
         if !(await ready()) {
             if profileMissing() { return false }
             log.notice("auto-starting profile \(p, privacy: .public)")
             if p == profile { setBusyNow("Starting") } else { profileActions[p] = "Starting" }
+            // The versions are read next to the start, so the wake waits no longer.
+            let probed = Task { await probeVersions() }
             let r = await Shell.run(
                 [Paths.ctl, CtlAction.start.rawValue], timeout: 600,
                 extraEnv: ["COLIMABAR_PROFILE": p, "COLIMABAR_APP": "1"])
+            if r.ok, UpgradeGuard.started(in: r.out) { startedVersions = probed }
             // The selected profile can change during the start.
             if p == profile, localBusy == "Starting" { localBusy = nil }
             if profileActions[p] == "Starting" { profileActions[p] = nil }
@@ -872,6 +885,7 @@ final class ColimaModel {
                     }
                 }
                 Task { await refreshAll() }
+                if let startedVersions { recordGoodWake(p, versions: await startedVersions.value) }
                 return true
             }
             try? await Task.sleep(for: Self.readinessInterval)
@@ -886,6 +900,7 @@ final class ColimaModel {
     /// nothing either: it can come from a broken Colima install.
     private func syncProfiles() {
         guard !isDebug, !profiles.isEmpty else { return }
+        pruneGoodStarts(keeping: Set(profiles.map(\.name)))
         let wanted = Set(
             profiles.filter { Self.hasDockerSocket(runtime: $0.runtime) && ProfileName.isValid($0.name) }.map(\.name))
         // A VM action can delete a profile for a short time (disk shrink):
@@ -1406,8 +1421,29 @@ final class ColimaModel {
     ) async -> Bool {
         actionsInFlight[p, default: 0] += 1
         defer { actionsInFlight[p, default: 1] -= 1 }
-        let env = action.environment(profile: p, expectRunning: expectRunning)
+        // A start of a profile is good when the script exits with 0 and prints
+        // the marker of a start. A warning action reads the versions first: a
+        // risky change since the last good start makes the script ask. Another
+        // start action reads them next to the script, so it waits no longer.
+        let running = expectRunning ?? false
+        let starts = action.startsVM(running: running)
+        let warns = action.warnsAfterUpgrade(running: running)
+        var versions: ToolVersions?
+        var upgrade: (note: String, releaseNotes: [URL])?
+        var probed: Task<ToolVersions, Never>?
+        if warns {
+            let now = await probeVersions()
+            versions = now
+            upgrade = UpgradeGuard.warning(
+                action: action, running: running, profile: p, last: goodStart(for: p), now: now)
+            if upgrade != nil { dismissPopover() }
+        } else if starts {
+            probed = Task { await probeVersions() }
+        }
+        let env = action.environment(profile: p, expectRunning: expectRunning, upgrade: upgrade)
         let r = await Shell.run([Paths.ctl, action.rawValue] + args, timeout: 900, extraEnv: env)
+        if let probed { versions = await probed.value }
+        if starts, r.ok, UpgradeGuard.started(in: r.out), let versions { saveGoodStart(versions, p) }
         // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
         // lines when ColimaBar runs it, so they arrive as native alerts.
         var notified = false

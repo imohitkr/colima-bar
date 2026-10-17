@@ -90,6 +90,7 @@ Each check has a status: OK (green), warning (orange), problem (red) or skipped.
 | Check | What it looks at | Fix |
 |---|---|---|
 | Tools | colima, limactl and the docker CLI, with their versions. A missing colima or limactl is a problem. A missing docker CLI, or Lima before 2.1, is a warning. | None |
+| Upgrade | Colima and Lima compared with the last good start of the profile. A new minor or major version, or an older version, is a warning. A patch change and a macOS change are OK, and the detail lists them. Skipped while no good start is recorded, while the Colima or Lima version is unknown, and while the record is incomplete. See [Upgrade warning](#upgrade-warning). | None. Back up important volumes and read the release notes. |
 | Docker context | The current docker context. A context that does not exist is a problem. The `default` context and a `colima` context are a warning, because the docker CLI then skips auto-start. Another context, such as a remote one, is a warning with no fix. Skipped while auto-start is off. | **Use colimabar** |
 | App routes | The launchd `DOCKER_HOST` and `docker.host` in `~/.testcontainers.properties`. A route that is not set, or that points to another daemon, is a warning. ColimaBar leaves a route to another daemon. Skipped while auto-start is off. | **Set routes**, only for a route that is not set, and only when the docker context is a ColimaBar context, `default`, a `colima` context or a context that does not exist |
 | Shell DOCKER_HOST | `DOCKER_HOST` in the startup files of your login shell. Doctor reads the text of the files and runs nothing. A socket of Colima is a warning. A socket of Docker Desktop is a problem. For a full check, run `echo $DOCKER_HOST` in a new terminal. | **Copy line** copies the line for the ColimaBar socket. Paste it in place of the line in your file. |
@@ -100,6 +101,24 @@ Each check has a status: OK (green), warning (orange), problem (red) or skipped.
 | Disk space | Free space in the VM (only while it runs) and on the Mac. The VM is a problem at 95% used or under 2 GB free, and a warning at 85% used. The Mac is a problem under 5 GB free and a warning under 20 GB. | None. Use the cleanup buttons on the System tab. |
 
 **Use osxkeychain** and **Add folder** change the docker config file (`~/.docker/config.json`, or `$DOCKER_CONFIG/config.json`). First ColimaBar saves a backup next to the file, named `config.json.colimabar-YYYYMMDD-HHMMSS`. The backup is private to you. If the file is a symlink, ColimaBar writes through it. ColimaBar changes only `credsStore` or `cliPluginsExtraDirs` and keeps all other keys. If the file is not valid JSON, or ColimaBar cannot read it, ColimaBar changes nothing.
+
+#### Upgrade warning
+
+A new version of Colima or Lima can change the VM disk. ColimaBar records the versions of Colima and Lima (and of macOS, for Doctor) at the last good start of each profile. A start is good when ColimaBar started the VM and the start succeeded.
+
+Before a start that you begin in ColimaBar, it compares the versions with that record. A minor or major bump of Colima or Lima, or an older version, is a risky change. Then the popover closes and a dialog names the change. The dialog has three buttons:
+
+- **Cancel**: nothing starts. The dialog comes again at the next start.
+- **Release Notes**: ColimaBar opens the release page of each changed tool on GitHub and starts nothing. Opening the page counts as a cancel.
+- **Continue**: the start goes on. When it succeeds, the new versions become the record.
+
+The dialog shows for **Start**, **Restart**, and for a change of CPU, memory, Rosetta, Kubernetes or disk while the VM runs. It shows before the dialog of the change itself. **Repair…** and **Shrink…** do not show it: Doctor shows the change, and a shrink deletes the data anyway. A patch change and a macOS change show no dialog. Doctor lists them.
+
+Auto-start never waits for you. If you cancel the dialog while a docker command waits, auto-start still starts the VM, and the notification below comes. If an auto-start succeeds after a risky change, ColimaBar sends one notification, for example "Auto-start started profile work with Colima 0.11.0 (before: 0.10.3)". A click on it opens the release notes. Then the new versions become the record.
+
+When you install ColimaBar 0.9.0 or later, a running profile with no record gets one at the next `colima list`. Thus you get no warning at the first start. A profile that you delete loses its record. There is no setting to turn the warning off. It never blocks a start when ColimaBar cannot read a version. Then it writes the reason in the ColimaBar log, and it asks nothing.
+
+To keep the data of a volume before you continue, see [ColimaBar warns about an upgrade](troubleshooting.md#colimabar-warns-about-an-upgrade).
 
 #### Repair
 
@@ -220,6 +239,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 
 - A container exits with an error code, gets OOM-killed or becomes unhealthy. The notification has **View logs** and **Restart** buttons.
 - An action fails.
+- Auto-start started a profile after a Colima or Lima upgrade. A click opens the release notes. See [Upgrade warning](#upgrade-warning).
 - A Doctor fix of the docker context, the routes or the docker config file ends. The notification gives the result. The Doctor checks send none.
 - A new version is available. ColimaBar sends one notification for each new version. See [Update](install.md#update).
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.

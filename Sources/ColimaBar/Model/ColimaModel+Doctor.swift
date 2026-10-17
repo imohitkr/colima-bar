@@ -79,6 +79,7 @@ extension ColimaModel {
             selected: profiles.first { $0.name == p }, others: profiles, listFailed: !listed)
         inputs.dockerConfigUnreadable = DoctorProbe.dockerConfigUnreadable()
         inputs.tools = await tools
+        inputs.lastGoodVersions = goodStart(for: p)
         inputs.shell = await shell
         inputs.credentials = await credentials
         inputs.plugins = await plugins
