@@ -149,7 +149,11 @@ If **Hide Icon While Colima Is Stopped** is on, the icon hides while Colima is s
 
 ## Report a bug
 
-Open a [bug report](https://github.com/imohitkr/colima-bar/issues/new?template=bug_report.yml). Include this information:
+Open [Doctor](usage.md#doctor) and click **Report an Issue…** (the right-click menu has it too). ColimaBar then saves a [diagnostics file](usage.md#save-diagnostics-and-report-an-issue) and opens the bug report form with the versions filled in. Drag the file into the **Diagnostics** box.
+
+The file has the versions, the settings, the Doctor report, the output of `colima list` and `limactl list`, the logs and a digest of crash reports. It has no container names, images, volumes or environment variables. ColimaBar hides secrets, host names, your user name and your home folder, but it can miss one. Open the file and read it before you attach it.
+
+To report without the file, open a [bug report](https://github.com/imohitkr/colima-bar/issues/new?template=bug_report.yml). Include this information:
 
 - The macOS version.
 - The ColimaBar version. The dashboard footer and the right-click menu show it.

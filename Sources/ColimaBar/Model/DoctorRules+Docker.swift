@@ -107,7 +107,9 @@ extension DoctorRules {
         if !missing.isEmpty {
             return DoctorResult(
                 .credentials, .warning,
-                "credHelpers names a missing helper for \(missing.prefix(3).joined(separator: ", ")). docker fails for these registries."
+                "credHelpers names a missing helper for \(missing.prefix(3).joined(separator: ", ")). docker fails for these registries.",
+                shareDetail:
+                    "credHelpers names a missing helper for \(missing.count) \(missing.count == 1 ? "registry" : "registries"). docker fails for these registries."
             )
         }
         if let store = config.credsStore {

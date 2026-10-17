@@ -120,6 +120,22 @@ When you install ColimaBar 0.9.0 or later, a running profile with no record gets
 
 To keep the data of a volume before you continue, see [ColimaBar warns about an upgrade](troubleshooting.md#colimabar-warns-about-an-upgrade).
 
+#### Save diagnostics and report an issue
+
+The bottom of the Doctor page has **Save Diagnostics…** and **Report an Issue…**. **Report an Issue…** is also in the right-click menu. Both ask where to save a text file named `ColimaBar-diagnostics-YYYYMMDD-HHMMSS.txt`. The Desktop is the first choice. After the save, ColimaBar shows the file in Finder. **Report an Issue…** then opens the bug report form in your browser, with the versions and the Doctor summary filled in. Drag the file into the **Diagnostics** box of the form. If you click Cancel, ColimaBar saves nothing. While ColimaBar saves the file, the buttons are disabled.
+
+The file has:
+
+- the versions of ColimaBar, macOS, Colima, Lima and docker, and the model and memory of the Mac
+- the ColimaBar settings, the Colima and Lima folders, and the names of the folder variables that are set (not their values)
+- the state of the profile, with the number of containers (no names, images, volumes or variables)
+- the Doctor report, the good starts, the docker routes and the docker contexts
+- the output of `colima list`, `colima status` and `limactl list`, and the version of the engine (`colima status` and the engine only while the VM runs; `limactl list` always runs)
+- the values of the simple keys of `colima.yaml` (for example `cpu`, `memory` and `vmType`). For other keys, such as `env`, `provision` and `docker`, it shows only "set" or "empty".
+- the last 24 hours of the ColimaBar log, the end of `ctl.log`, the end of the Lima host agent log and a short digest of the crash reports of ColimaBar
+
+ColimaBar hides what it finds: private keys, tokens, passwords, host names, e-mail addresses, public IP addresses, MAC addresses, your user name, the name of your Mac, and your home folder (it shows `~`). ColimaBar can miss a secret. Open the file and read it before you share it. The file is private to you (mode 0600) and has at most 2 MB. Saving it only reads: it does not start the VM.
+
 #### Repair
 
 **Repair profile 'NAME'…** is at the bottom of the Doctor page. Use it when the VM does not start, or when Colima shows the profile as Broken. After a restart of the Mac, a pid file can name a process that now belongs to another program. Then `colima stop --force` would send SIGKILL (Lima) or SIGTERM (Colima) to that program, and Lima counts the profile as running.
@@ -198,6 +214,7 @@ Right-click or Control-click the menu bar icon for these menu items:
 - **Start Colima**, or **Restart Colima** and **Stop Colima** when the VM runs
 - **Open Dashboard Window**
 - **Doctor…** (opens the dashboard on the [Doctor](#doctor) page)
+- **Report an Issue…** (saves the [diagnostics file](#save-diagnostics-and-report-an-issue), then opens the bug report form). While the file is saved, the item is **Saving Diagnostics…** and is disabled.
 - **Launch at Login**
 - **Auto-start Colima on Demand**
 - **Hide Icon While Colima Is Stopped**

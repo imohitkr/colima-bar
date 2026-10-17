@@ -23,7 +23,8 @@ struct DoctorReport: Equatable, Sendable {
     func isStale(now: Date) -> Bool { now.timeIntervalSince(date) > Self.staleAfter }
 
     /// Plain text for a bug report. It shows the home folder as `~`. It holds
-    /// no secrets: the checks read only names, never registry logins.
+    /// no secrets: the checks read only names, never registry logins. It
+    /// shows no registry host (see `DoctorResult.sharedDetail`).
     func text(home: String, version: String) -> String {
         var lines = ["ColimaBar \(version), profile \(profile), \(summary)"]
         for r in results {
@@ -34,7 +35,7 @@ struct DoctorReport: Equatable, Sendable {
             case .problem: tag = "problem"
             case .skipped: tag = "skipped"
             }
-            lines.append("[\(tag)] \(r.check.title): \(r.detail)")
+            lines.append("[\(tag)] \(r.check.title): \(r.sharedDetail)")
         }
         return lines.joined(separator: "\n").replacingOccurrences(of: home, with: "~")
     }

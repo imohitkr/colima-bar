@@ -37,13 +37,14 @@ The version comes from `git describe --tags`. Without a tag, the version is the 
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover` or `--notify-test` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test` or `--diagnostics` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|
 | `--snapshot PATH [TAB]` | Opens the dashboard window, renders it to a PNG at `PATH`, then quits. `TAB` is `Containers`, `Images`, `Volumes` or `System`. |
 | `--popover [PATH]` | Opens the dashboard popover at launch. With `PATH`, it renders the popover to a PNG, then quits. |
 | `--notify-test` | Sends a test notification, then quits. |
+| `--diagnostics PATH` | Writes the [diagnostics file](docs/usage.md#save-diagnostics-and-report-an-issue) to `PATH`, then quits. It only reads, opens nothing and exits with 1 if it cannot write the file. The summary says "debug run". |
 | `--window` | Opens the dashboard window at launch. |
 
 `--snapshot` also reads these environment variables:

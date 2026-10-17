@@ -12,6 +12,13 @@ import Testing
         #expect(Paths.profileSocket("work") == Paths.profilesDir + "/work.sock")
     }
 
+    @Test func limaInstanceNamesFollowTheProfile() {
+        #expect(Paths.limaInstance("default") == "colima")
+        #expect(Paths.limaInstance("work") == "colima-work")
+        #expect(Paths.limaHostAgentLog("default", limaDir: "/l") == "/l/colima/ha.stderr.log")
+        #expect(Paths.limaHostAgentLog("work", limaDir: "/l") == "/l/colima-work/ha.stderr.log")
+    }
+
     @Test func dockerConfigUsesDockerConfigEnvOrHome() {
         #expect(Paths.dockerConfig(env: ["DOCKER_CONFIG": "/d"], home: "/h") == "/d/config.json")
         #expect(Paths.dockerConfig(env: [:], home: "/h") == "/h/.docker/config.json")

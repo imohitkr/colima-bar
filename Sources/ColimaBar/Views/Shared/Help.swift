@@ -172,6 +172,10 @@ enum Help {
     static let doctorDone = "Close Doctor and go back to the dashboard."
     static let doctorRepair =
         "Use this when the VM does not start or Colima reports it as Broken. ColimaBar removes the pid files that name another process, stops the VM by force, removes the other stale pid files and starts the VM. It asks first. Running containers stop. Disks, images and volumes stay."
+    static let saveDiagnostics =
+        "Save a text file about this Mac, Colima and ColimaBar. The file has no container data. Review it before you share it, because ColimaBar can miss a secret."
+    static let reportIssue =
+        "Save the diagnostics file, then open the bug report form with the versions filled in. Attach the file to the report."
     static let doctorDebug = "A debug run changes nothing."
     static func doctorFix(_ fix: DoctorFix) -> String {
         switch fix {

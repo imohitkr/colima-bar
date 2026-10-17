@@ -37,14 +37,7 @@ struct VMConfig: Equatable, Sendable {
         // to split at.
         let yaml = text.replacingOccurrences(of: "\r", with: "")
         func value(_ key: String, section: String? = nil) -> String? {
-            guard var v = Parse.yaml(yaml, key: key, section: section) else { return nil }
-            // An inline comment: "cpu: 4 # four cores".
-            if let hash = v.range(of: " #") { v = String(v[..<hash.lowerBound]) }
-            v = v.trimmingCharacters(in: .whitespaces)
-            if v.count >= 2, let q = v.first, q == "\"" || q == "'", v.last == q {
-                v = String(v.dropFirst().dropLast())
-            }
-            return v
+            Parse.yaml(yaml, key: key, section: section).map(Parse.scalar)
         }
         func number(_ key: String) -> Double? {
             guard let v = value(key), let d = Double(v), d.isFinite, d >= 0, d < Double(Int.max) else { return nil }

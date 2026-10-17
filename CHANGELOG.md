@@ -9,6 +9,11 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Added
 
 - Before the first start after a Colima or Lima upgrade, ColimaBar asks first and offers the release notes. Doctor shows the change in a new Upgrade check. See [Upgrade warning](docs/usage.md#upgrade-warning).
+- Doctor can save a diagnostics file and open a bug report with the versions filled in. **Save Diagnostics…** and **Report an Issue…** are at the bottom of the Doctor page. **Report an Issue…** is also in the right-click menu. The file is plain text, so you can read it first. It has no container data, and ColimaBar hides secrets, host names and your user name, but it can miss one. See [Save diagnostics and report an issue](docs/usage.md#save-diagnostics-and-report-an-issue). The debug flag `--diagnostics PATH` writes the file without the dialog.
+
+### Changed
+
+- The ColimaBar log no longer shows the names of containers, images, volumes and networks in the request lines of the proxy (for example `POST /containers/{name}/start`).
 
 ## [0.8.0] - 2026-10-16
 

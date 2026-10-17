@@ -130,6 +130,16 @@ enum Paths {
         return "\(colimaDir)/_lima"
     }
 
+    /// The Lima instance name of a profile, as in colima-ctl.sh: `colima` for
+    /// the default profile, else `colima-PROFILE`.
+    static func limaInstance(_ profile: String) -> String { profile == "default" ? "colima" : "colima-\(profile)" }
+    /// The stderr log of the Lima host agent of a profile.
+    static func limaHostAgentLog(_ profile: String, limaDir: String = Paths.limaDir) -> String {
+        "\(limaDir)/\(limaInstance(profile))/ha.stderr.log"
+    }
+    /// The folder of the crash reports of the user.
+    static let crashReportsDir = "\(home)/Library/Logs/DiagnosticReports"
+
     static func profileDir(_ profile: String) -> String { "\(colimaDir)/\(profile)" }
     static func config(_ profile: String) -> String { "\(profileDir(profile))/colima.yaml" }
     static func socket(_ profile: String) -> String { "\(profileDir(profile))/docker.sock" }

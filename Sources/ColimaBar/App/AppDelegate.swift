@@ -23,7 +23,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// Snapshot/debug runs sit beside the real instance and must not touch
     /// the proxy socket, docker routing or login items.
     static let isDebugRun = CommandLine.arguments.contains {
-        ["--snapshot", "--popover", "--notify-test"].contains($0)
+        ["--snapshot", "--popover", "--notify-test", "--diagnostics"].contains($0)
     }
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -130,6 +130,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             reveal(after: 1)
         }
         if CommandLine.arguments.contains("--window") { showWindow() }
+        // Debug: `--diagnostics PATH` writes the diagnostics file and quits.
+        // It reads only, opens nothing, and exits with 1 if it fails.
+        if let i = CommandLine.arguments.firstIndex(of: "--diagnostics") {
+            guard i + 1 < CommandLine.arguments.count else {
+                FileHandle.standardError.write(Data("--diagnostics needs a file path\n".utf8))
+                exit(1)
+            }
+            let path = CommandLine.arguments[i + 1]
+            Task {
+                let listed = await model.refreshStatus()
+                if let error = await model.saveDiagnostics(to: URL(fileURLWithPath: path), stateKnown: listed) {
+                    FileHandle.standardError.write(
+                        Data("could not write \(path): \(error.localizedDescription)\n".utf8))
+                    exit(1)
+                }
+                exit(0)
+            }
+            return
+        }
         // Debug: `--popover [PATH]` opens the popover on launch and, with a
         // path, renders it to a PNG and quits.
         if let i = CommandLine.arguments.firstIndex(of: "--popover") {
@@ -334,6 +353,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         menu.addItem(.separator())
         add("Open Dashboard Window", #selector(openWindowAction))
         add("Doctor…", #selector(openDoctor))
+        if model.isSavingDiagnostics {
+            let saving = NSMenuItem(title: "Saving Diagnostics…", action: nil, keyEquivalent: "")
+            saving.isEnabled = false
+            menu.addItem(saving)
+        } else {
+            add("Report an Issue…", #selector(reportIssue))
+        }
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = LoginItem.isEnabled ? .on : .off
@@ -383,6 +409,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         ui.showDoctor = true
         if !popover.isShown { togglePopover() }
     }
+    @objc private func reportIssue() { DiagnosticsPanel.save(model: model, report: true) }
     @objc private func quit() { NSApp.terminate(nil) }
     @objc private func toggleAutoStart() { model.autoStart.toggle() }
     @objc private func toggleHideIcon() { model.hideIconWhenStopped.toggle() }
