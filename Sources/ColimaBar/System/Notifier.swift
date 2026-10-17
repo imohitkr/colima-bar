@@ -188,7 +188,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let restart = Self.profileToRestart(userInfo: info, action: action)
         await MainActor.run {
             if let restart { self.onProfileRestart?(restart) }
-            if let link { NSWorkspace.shared.open(link) }
+            if let link, !NSWorkspace.shared.open(link) {
+                self.log.error("could not open the link of a notification")
+            }
             if !id.isEmpty {
                 // Clicking the banner itself also opens the logs.
                 self.onContainerAction?(

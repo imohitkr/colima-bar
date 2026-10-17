@@ -112,6 +112,58 @@ confirm() {
     -e 'end run' "$1" >/dev/null 2>&1
 }
 
+# upgrade_confirm -> 0 if ColimaBar passed no upgrade note, or if the user
+# clicked Continue. ColimaBar sets COLIMABAR_UPGRADE_NOTE when Colima or Lima
+# changed in a risky way since the last good start of this profile. "Release
+# Notes" opens the pages in COLIMABAR_RELEASE_NOTES, only on github.com and
+# only for the release page of Colima or Lima, then it returns 1, like
+# Cancel. Cancel, or no answer within 5 minutes, returns 1. If the dialog
+# cannot show (an AppleScript error, no GUI session), the script tells the
+# user and exits with 1.
+upgrade_confirm() {
+  [ -n "${COLIMABAR_UPGRADE_NOTE:-}" ] || return 0
+  local answer url rc
+  local pages_re='^https://github\.com/(abiosoft/colima|lima-vm/lima)/releases/tag/v[[:digit:]]+(\.[[:digit:]]+)*$'
+  answer=$(osascript -e 'on run argv' \
+    -e 'set r to display dialog (item 1 of argv) with title "Colima" buttons {"Cancel", "Release Notes", "Continue"} default button "Continue" cancel button "Cancel" with icon caution giving up after 300' \
+    -e 'if gave up of r then error number -128' \
+    -e 'return button returned of r' \
+    -e 'end run' "$COLIMABAR_UPGRADE_NOTE" 2>&1)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # Error -128 is Cancel, and the give-up of the dialog.
+    case "$answer" in *"(-128)"*) return 1 ;; esac
+    echo "upgrade dialog failed: $answer" >&2
+    notify "Couldn't show the upgrade dialog for $NAMED - $SEE_LOG"
+    exit 1
+  fi
+  case "$answer" in
+    Continue) return 0 ;;
+    "Release Notes")
+      for url in ${COLIMABAR_RELEASE_NOTES:-}; do
+        # One pattern for the whole URL: a tag like v0.11.0 and nothing else.
+        if [[ "$url" =~ $pages_re ]]; then
+          open "$url" || echo "couldn't open $url" >&2
+        fi
+      done
+      return 1 ;;
+  esac
+  return 1
+}
+
+# started_ok -> tells ColimaBar that the VM started. ColimaBar records the
+# versions of Colima and Lima only after this line.
+started_ok() {
+  # The first newline keeps the marker a line of its own after a partial line.
+  [ -z "${COLIMABAR_APP:-}" ] || printf '\nCOLIMABAR_STARTED\n'
+}
+
+# start_vm [ARGS...] -> colima start, then the marker of a good start.
+# shellcheck disable=SC2120 # only profile-create passes flags for colima start
+start_vm() {
+  colima start "$@" && started_ok
+}
+
 # etime_seconds ETIME -> the seconds in the output of `ps -o etime=`
 # ([[DD-]HH:]MM:SS).
 etime_seconds() {
@@ -301,7 +353,8 @@ shrink_disk() {
   # Create only the profile folder, inside a Colima folder that still exists.
   [ -d "$COLIMA_DIR" ] || return 1
   mkdir -p "$PROFILE_DIR" && cp -p "$1" "$CONFIG" || return 1
-  colima start || return 1
+  # shellcheck disable=SC2119 # no flags: a plain colima start
+  start_vm || return 1
   if [ -n "${2:-}" ]; then
     colima stop || return "$RESTOP_FAILED"
   fi
@@ -607,25 +660,29 @@ repair_vm() {
   while IFS=$'\t' read -r reason path pid; do
     [ -n "$reason" ] && remove_stale "$reason" "$path" "$pid"
   done <<<"$(stale_files)"
-  colima start
+  # shellcheck disable=SC2119 # no flags: a plain colima start
+  start_vm
 }
 
 restart_vm() {
   if vm_up; then
     colima stop || return 1
   fi
-  colima start
+  # shellcheck disable=SC2119 # no flags: a plain colima start
+  start_vm
 }
 
 case "$1" in
   start)
     lock_vm
-    with_busy "Starting $PROFILE" colima start || { notify "Start of $NAMED failed - $SEE_LOG"; exit 1; } ;;
+    upgrade_confirm || exit 2
+    with_busy "Starting $PROFILE" start_vm || { notify "Start of $NAMED failed - $SEE_LOG"; exit 1; } ;;
   stop)
     lock_vm
     with_busy "Stopping $PROFILE" colima stop || { notify "Stop of $NAMED failed - $SEE_LOG"; exit 1; } ;;
   restart)
     lock_vm
+    upgrade_confirm || exit 2
     with_busy "Restarting" restart_vm || { notify "Restart of $NAMED failed - $SEE_LOG"; exit 1; } ;;
 
   # resources CPU MEM_GB. CPU is a whole number. MEM_GB is a whole or
@@ -646,6 +703,7 @@ case "$1" in
     lock_vm
     vm_state
     if [ "$VM_UP" = 1 ]; then
+      upgrade_confirm || exit 2
       confirm "Restart the Colima VM of $NAMED with ${cpu} CPU / ${mem} GB RAM? $(running_count) running container(s) will stop." || exit 2
       set_key cpu "$cpu"
       set_key memory "$mem"
@@ -663,6 +721,7 @@ case "$1" in
     lock_vm
     vm_state
     if [ "$VM_UP" = 1 ]; then
+      upgrade_confirm || exit 2
       confirm "Turn Rosetta (amd64 emulation) $2 for $NAMED? Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
       set_key rosetta "$val"
       with_busy "Rosetta $2" restart_vm || { notify "Rosetta change of $NAMED failed - $SEE_LOG"; exit 1; }
@@ -679,6 +738,7 @@ case "$1" in
     lock_vm
     vm_state
     if [ "$VM_UP" = 1 ]; then
+      upgrade_confirm || exit 2
       mem_note=""
       # The note shows the value of colima.yaml, for example 2.5.
       mem_raw=$(yaml_value memory)
@@ -706,6 +766,7 @@ case "$1" in
     lock_vm
     no_start_in_progress
     if vm_up; then
+      upgrade_confirm || exit 2
       confirm "Grow the Colima disk of $NAMED to $2 GB? A disk cannot shrink in place: to make it smaller later, all Docker data must be deleted. Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
       set_key disk "$2"
       with_busy "Growing disk to $2 GB" restart_vm || { notify "Disk resize of $NAMED failed - $SEE_LOG"; exit 1; }
@@ -841,7 +902,7 @@ $list" || exit 2
       exit 1
     fi
     lock_vm
-    with_busy "Creating $PROFILE" colima start --cpu "$cpu" --memory "$mem" --disk "$disk" --runtime "$rt" \
+    with_busy "Creating $PROFILE" start_vm --cpu "$cpu" --memory "$mem" --disk "$disk" --runtime "$rt" \
       || { notify "Creating $NAMED failed - $SEE_LOG"; exit 1; }
     ;;
 
@@ -922,5 +983,6 @@ $list" || exit 2
     echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|disk-shrink GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
     echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta and k8s stop if the VM state differs" >&2
+    echo "env: COLIMABAR_UPGRADE_NOTE and COLIMABAR_RELEASE_NOTES make start, restart and the config actions ask after an upgrade" >&2
     exit 1 ;;
 esac

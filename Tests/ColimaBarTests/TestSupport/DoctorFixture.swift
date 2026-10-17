@@ -16,7 +16,8 @@ enum DoctorFixture {
         i.tools = .init(
             colimaPath: "/opt/homebrew/bin/colima", limactlPath: "/opt/homebrew/bin/limactl",
             dockerPath: "/opt/homebrew/bin/docker",
-            versions: ToolVersions(colima: "0.10.3", lima: "2.2.1", docker: "29.0.1"))
+            versions: ToolVersions(colima: "0.10.3", lima: "2.2.1", docker: "29.0.1", macOS: "15.6.1"))
+        i.lastGoodVersions = ToolVersions(colima: "0.10.3", lima: "2.2.1", macOS: "15.6.1")
         i.context = .init(current: "colimabar", existing: ["default", "colimabar"])
         i.routes = .init(launchdHost: stableHost, testcontainersHost: stableHost)
         i.shell = .init(name: "zsh", found: nil)

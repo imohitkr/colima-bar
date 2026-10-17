@@ -4,9 +4,10 @@ import Foundation
 enum Help {
     // VM
     static let restart =
-        "Restart the Colima VM. Running containers stop. Only containers with a restart policy start again."
+        "Restart the Colima VM. Running containers stop. Only containers with a restart policy start again. After a Colima or Lima upgrade, ColimaBar asks first."
     static let stopVM = "Stop the Colima VM and all its containers. This frees the CPU and memory that the VM uses."
-    static let startVM = "Start the Colima VM with the settings in colima.yaml."
+    static let startVM =
+        "Start the Colima VM with the settings in colima.yaml. After a Colima or Lima upgrade, ColimaBar asks first."
     static let subtitle =
         "The CPUs, memory and disk of the VM, its architecture, and how the VM shares your Mac files (virtiofs is the fast native option)."
 
@@ -191,6 +192,8 @@ enum Help {
     static func doctorCheck(_ check: DoctorCheck) -> String {
         switch check {
         case .tools: "The versions of colima, Lima and docker."
+        case .upgrade:
+            "Colima and Lima compared with the last good start of this profile. A new minor or major version, or an older one, can change the VM disk. Back up important volumes first."
         case .context: "The docker context that the docker CLI uses."
         case .appRoutes: "The routes for apps and testcontainers."
         case .shellHost: "DOCKER_HOST in the startup files of your shell."

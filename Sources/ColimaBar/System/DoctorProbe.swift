@@ -23,13 +23,38 @@ enum DoctorProbe {
         }
         let v = await ToolVersions(
             colima: version(paths.colima, colima), lima: version(paths.limactl, lima),
-            docker: version(paths.docker, docker))
+            docker: version(paths.docker, docker),
+            macOS: ToolVersions.macOS(ProcessInfo.processInfo.operatingSystemVersion))
         return DoctorInputs.Tools(
             colimaPath: paths.colima, limactlPath: paths.limactl, dockerPath: paths.docker, versions: v)
     }
 
-    /// The versions alone. A later upgrade guard can save them at each good start.
-    static func versions() async -> ToolVersions { await tools().versions }
+    /// Why a version probe gave no version: nil if it did.
+    static func versionProblem(_ r: Shell.Result) -> String? {
+        switch r.status {
+        case 0: ToolVersions.version(in: r.out) == nil ? "unknown output" : nil
+        case -1: "not found"
+        case 15: "timed out"
+        default: "exit \(r.status)"
+        }
+    }
+
+    /// The versions that the upgrade guard compares and records: Colima and
+    /// Lima (both run at once) and macOS. The docker CLI is not read. A tool
+    /// that did not run has no version (nil), and `problems` says why.
+    static func versions(timeout: TimeInterval = 5) async -> (versions: ToolVersions, problems: [String: String]) {
+        async let colima = Shell.run(["colima", "--version"], timeout: timeout)
+        async let lima = Shell.run(["limactl", "--version"], timeout: timeout)
+        func version(_ r: Shell.Result) -> String? { r.ok ? ToolVersions.version(in: r.out) ?? "unknown" : nil }
+        let (c, l) = await (colima, lima)
+        var problems: [String: String] = [:]
+        if let why = versionProblem(c) { problems["colima"] = why }
+        if let why = versionProblem(l) { problems["limactl"] = why }
+        let v = ToolVersions(
+            colima: version(c), lima: version(l),
+            macOS: ToolVersions.macOS(ProcessInfo.processInfo.operatingSystemVersion))
+        return (v, problems)
+    }
 
     /// The names of the docker contexts that exist, or nil if the docker CLI failed.
     static func existingContexts() async -> Set<String>? {

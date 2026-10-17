@@ -7,6 +7,12 @@ import Foundation
 /// (and `kubectl`) instead of the real tools: no dialog reaches the screen, and no VM or
 /// docker context changes. Each stub appends its arguments to `log`.
 ///
+/// `STUB_OSASCRIPT_OUT` is the text that the stub `osascript` prints, the
+/// button of a dialog with several buttons ("Continue", "Release Notes").
+/// `STUB_OSASCRIPT_ERR` is the text that it prints to stderr, for example
+/// "execution error: User canceled. (-128)".
+/// The stub `open` logs its arguments and opens nothing.
+///
 /// Stub exit codes: `STUB_OSASCRIPT_EXIT` (default 0: the user clicked OK)
 /// and `STUB_COLIMA_STATUS` for `colima status` (default 1: stopped).
 /// If `STUB_DELETE_DIR` is set, `colima delete` removes that folder, like
@@ -60,8 +66,12 @@ final class ScriptSandbox {
             "osascript",
             """
             printf 'osascript %s\\n' "$*" >> "\(log)"
+            [ -n "${STUB_OSASCRIPT_OUT:-}" ] && printf '%s\\n' "$STUB_OSASCRIPT_OUT"
+            [ -n "${STUB_OSASCRIPT_ERR:-}" ] && printf '%s\\n' "$STUB_OSASCRIPT_ERR" >&2
             exit "${STUB_OSASCRIPT_EXIT:-0}"
             """)
+        // The release notes button opens a page. The stub only logs the URL.
+        try stub("open", "printf 'open %s\\n' \"$*\" >> \"\(log)\"\nexit 0")
         try stub(
             "colima",
             """

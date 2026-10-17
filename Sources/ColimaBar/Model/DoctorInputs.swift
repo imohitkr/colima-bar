@@ -11,6 +11,8 @@ struct DoctorInputs: Equatable, Sendable {
     /// The stable socket as a docker host, for example `unix:///Users/me/.cache/colima-bar/docker.sock`.
     var stableHost = ""
     var tools = Tools()
+    /// The versions at the last good start of the profile. Nil if none is recorded.
+    var lastGoodVersions: ToolVersions?
     var context = DockerContext()
     var routes = Routes()
     var shell = ShellInput()

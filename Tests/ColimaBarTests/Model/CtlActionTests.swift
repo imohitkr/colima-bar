@@ -159,4 +159,85 @@ import Testing
         #expect(CtlAction.diskShrink.rawValue == "disk-shrink")
         #expect(try scriptActions().contains("disk-shrink"))
     }
+
+    // MARK: upgrade guard
+
+    @Test func onlyAStartThatLeavesAFreshVMCounts() {
+        #expect(CtlAction.start.startsVM(running: false))
+        #expect(!CtlAction.start.startsVM(running: true))
+        for a in [CtlAction.restart, .repair, .profileCreate, .diskShrink] {
+            #expect(a.startsVM(running: true) && a.startsVM(running: false), "\(a.rawValue)")
+        }
+        for a in [CtlAction.resources, .rosetta, .k8s, .disk] {
+            #expect(a.startsVM(running: true), "\(a.rawValue)")
+            #expect(!a.startsVM(running: false), "\(a.rawValue)")
+        }
+        for a in [CtlAction.stop, .autoStop, .profileDelete, .prune, .logs] {
+            #expect(!a.startsVM(running: true) && !a.startsVM(running: false), "\(a.rawValue)")
+        }
+    }
+
+    @Test func warningActionsAreStartsThatTheUserBegins() {
+        for a in CtlAction.allCases {
+            for running in [true, false] where a.warnsAfterUpgrade(running: running) {
+                #expect(a.startsVM(running: running), "\(a.rawValue)")
+            }
+        }
+        #expect(CtlAction.start.warnsAfterUpgrade(running: false))
+        #expect(CtlAction.restart.warnsAfterUpgrade(running: true))
+        #expect(CtlAction.resources.warnsAfterUpgrade(running: true))
+        #expect(!CtlAction.resources.warnsAfterUpgrade(running: false))
+        for a in [CtlAction.repair, .diskShrink, .profileCreate] {
+            #expect(!a.warnsAfterUpgrade(running: true) && !a.warnsAfterUpgrade(running: false), "\(a.rawValue)")
+        }
+    }
+
+    @Test func theUpgradeNoteGoesInTheEnvironmentOnlyForWarningActions() {
+        let up = (
+            note: "Colima changed.",
+            releaseNotes: [URL(string: "https://github.com/abiosoft/colima/releases/tag/v0.11.0")!]
+        )
+        let start = CtlAction.start.environment(profile: "work", expectRunning: false, upgrade: up)
+        #expect(start["COLIMABAR_UPGRADE_NOTE"] == "Colima changed.")
+        #expect(start["COLIMABAR_RELEASE_NOTES"] == "https://github.com/abiosoft/colima/releases/tag/v0.11.0")
+        let stopped = CtlAction.resources.environment(profile: "work", expectRunning: false, upgrade: up)
+        #expect(stopped["COLIMABAR_UPGRADE_NOTE"] == nil)
+        let repair = CtlAction.repair.environment(profile: "work", expectRunning: true, upgrade: up)
+        #expect(repair["COLIMABAR_UPGRADE_NOTE"] == nil)
+        let none = CtlAction.start.environment(profile: "work", expectRunning: false)
+        #expect(none["COLIMABAR_UPGRADE_NOTE"] == nil && none["COLIMABAR_RELEASE_NOTES"] == nil)
+    }
+
+    /// The top-level actions of scripts/colima-ctl.sh that call `upgrade_confirm`.
+    private func scriptActionsWithAnUpgradeDialog() throws -> Set<String> {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent()
+        let script = try String(
+            contentsOf: root.appendingPathComponent("scripts/colima-ctl.sh"), encoding: .utf8)
+        let lines = script.components(separatedBy: "\n")
+        let start = try #require(lines.firstIndex(of: #"case "$1" in"#))
+        let end = try #require(lines[start...].firstIndex(of: "esac"))
+        var current: [String] = []
+        var found: Set<String> = []
+        for line in lines[start..<end] {
+            if line.hasPrefix("  "), !line.hasPrefix("   "), let paren = line.firstIndex(of: ")") {
+                let label = line.dropFirst(2)[..<paren]
+                current =
+                    label.allSatisfy({ $0.isLowercase || $0.isNumber || $0 == "-" || $0 == "|" })
+                    ? label.split(separator: "|").map(String.init) : []
+            }
+            if line.contains("upgrade_confirm ||") { found.formUnion(current) }
+        }
+        return found
+    }
+
+    @Test func actionsThatWarnAfterAnUpgradeMatchTheScript() throws {
+        let script = try scriptActionsWithAnUpgradeDialog()
+        #expect(script.contains("start") && script.contains("disk"))  // the parser found the calls
+        let warns = Set(
+            CtlAction.allCases.filter { $0.warnsAfterUpgrade(running: true) || $0.warnsAfterUpgrade(running: false) }
+                .map(\.rawValue))
+        #expect(warns == script)
+    }
 }

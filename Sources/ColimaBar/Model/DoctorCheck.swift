@@ -1,6 +1,7 @@
 /// The checks of Doctor, in the order that Doctor shows them.
 enum DoctorCheck: String, CaseIterable, Sendable {
     case tools
+    case upgrade
     case context
     case appRoutes
     case shellHost
@@ -13,6 +14,7 @@ enum DoctorCheck: String, CaseIterable, Sendable {
     var title: String {
         switch self {
         case .tools: "Tools"
+        case .upgrade: "Upgrade"
         case .context: "Docker context"
         case .appRoutes: "App routes"
         case .shellHost: "Shell DOCKER_HOST"

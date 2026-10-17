@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Before the first start after a Colima or Lima upgrade, ColimaBar asks first and offers the release notes. Doctor shows the change in a new Upgrade check. See [Upgrade warning](docs/usage.md#upgrade-warning).
+
 ## [0.8.0] - 2026-10-16
 
 ### Added

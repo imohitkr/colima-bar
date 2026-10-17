@@ -91,11 +91,42 @@ enum CtlAction: String, CaseIterable, Sendable {
         showsDialog(running: true) != showsDialog(running: false)
     }
 
+    /// A good run of this action leaves the VM freshly started. `running` is
+    /// the VM state before the action. `start` counts only for a stopped VM.
+    /// A config change counts only while the VM runs: then the script restarts it.
+    func startsVM(running: Bool) -> Bool {
+        switch self {
+        case .start: !running
+        case .restart, .repair, .profileCreate, .diskShrink: true
+        case .resources, .rosetta, .k8s, .disk: running
+        default: false
+        }
+    }
+
+    /// The script asks again after an upgrade of Colima or Lima, for a start
+    /// that the user begins in the menu. `repair` has its own dialog and a
+    /// Doctor row, `diskShrink` deletes the data anyway and `profileCreate`
+    /// has no record.
+    func warnsAfterUpgrade(running: Bool) -> Bool {
+        switch self {
+        case .start, .restart, .resources, .rosetta, .k8s, .disk: startsVM(running: running)
+        default: false
+        }
+    }
+
     /// The environment that ColimaBar gives the script. `expectRunning` is
     /// the VM state that `run` used for `showsDialog(running:)`. It goes in
     /// `COLIMABAR_EXPECT_RUNNING` (1 or 0) only for an action that checks it.
-    func environment(profile: String, expectRunning: Bool?) -> [String: String] {
+    /// `upgrade` is the note and the release-notes pages of a risky upgrade.
+    /// It goes in only for an action that warns after an upgrade.
+    func environment(
+        profile: String, expectRunning: Bool?, upgrade: (note: String, releaseNotes: [URL])? = nil
+    ) -> [String: String] {
         var env = ["COLIMABAR_PROFILE": profile, "COLIMABAR_APP": "1"]
+        if let upgrade, warnsAfterUpgrade(running: expectRunning ?? false) {
+            env["COLIMABAR_UPGRADE_NOTE"] = upgrade.note
+            env["COLIMABAR_RELEASE_NOTES"] = upgrade.releaseNotes.map(\.absoluteString).joined(separator: " ")
+        }
         if let expectRunning, checksExpectedState {
             env["COLIMABAR_EXPECT_RUNNING"] = expectRunning ? "1" : "0"
         }
