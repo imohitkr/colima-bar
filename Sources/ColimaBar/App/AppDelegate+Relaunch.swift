@@ -31,6 +31,12 @@ extension AppDelegate {
         return Version.isNewer(mine, than: other)
     }
 
+    /// The notification "ColimaBar X is installed" shows once, at the first
+    /// launch of the version that an in-app update installed.
+    nonisolated static func installedNoticeDue(installed: String?, running: String) -> Bool {
+        installed != nil && installed == running
+    }
+
     /// A reveal request counts for 60 s. An older one is from a restart
     /// that failed or was long ago.
     nonisolated static func revealRequestIsFresh(_ requestedAt: Double?, now: Double) -> Bool {

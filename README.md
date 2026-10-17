@@ -86,7 +86,7 @@ The [Usage guide](docs/usage.md) describes the icon, each tab and each menu item
 
 ## Update
 
-If you use Homebrew, run `brew upgrade --cask colima-bar`. If you use the installer, run it again. ColimaBar checks for a new version each day and shows an **Update** button in the dashboard when one is available.
+If you use Homebrew, run `brew upgrade --cask colima-bar`. If you use the installer, run it again. ColimaBar checks for a new version each day and shows a button in the dashboard when one is available. For a copy that it can replace, the button is **Install**. It downloads the release, checks it, replaces the app and restarts, after you confirm.
 
 ## Uninstall
 

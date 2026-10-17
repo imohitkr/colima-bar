@@ -90,6 +90,7 @@ The app has an ad-hoc code signature. This signature only shows that the app is 
 If the [GitHub CLI](https://cli.github.com) (`gh`) 2.68 or later is installed and logged in to github.com, the installer verifies the download before it installs it. The check makes sure that the release workflow of this repository built the file from the release tag.
 
 - If the check fails, the installer stops.
+- The installer also compares the SHA-256 digest of the download with the digest that the GitHub API lists for the release file. It stops if they differ. If the API does not answer, it tells you and continues. It then checks the signature (with the code identifier of ColimaBar) and the version of the app.
 - If `gh` cannot do the check, the installer tells you that it did not verify the download. Then it continues. This occurs when `gh` is missing, older than 2.68 or not logged in.
 
 To stop in that second case too, set `COLIMABAR_REQUIRE_VERIFY=1`:
@@ -131,12 +132,42 @@ The docker CLI needs no setup. If your `~/.zshrc` sets `DOCKER_HOST`, replace th
 ColimaBar checks GitHub for a new release one time each day. When a new version is available, ColimaBar does two things:
 
 - It sends one notification for that version.
-- It shows an **Update** button in the dashboard footer. The button opens the release page.
+- It shows a button in the dashboard footer. The button depends on how you installed ColimaBar.
+
+| How you installed ColimaBar | The button | What a click does |
+|---|---|---|
+| The installer, the disk image, or a build in `/Applications` or `~/Applications` that you can write to | **Install *version*** | ColimaBar asks first. Then it downloads the release, checks it, replaces itself and restarts. See [Install an update in the app](#install-an-update-in-the-app). |
+| Homebrew | **Update *version*** | ColimaBar shows `brew upgrade --cask colima-bar && open -a ColimaBar`. You can copy it or run it in Terminal. |
+| A copy that runs from a disk image or Downloads, a read-only disk, a folder that you cannot write to, or a development build | **Update *version*** | The release page opens. Download the update there. |
+
+To check now, click the version in the dashboard footer, or choose **Check for Updates…** in the right-click menu. To turn off the daily check, clear **Check for new versions daily** on the System tab. ColimaBar never installs an update without your click.
+
+The first in-app update is from version 0.9.0 to the next release. If you use an older version, update it one time with the installer, Homebrew or the disk image.
+
+### Install an update in the app
+
+When you click **Install**, ColimaBar asks for a confirmation. Click **Install and Restart**.
+
+1. ColimaBar downloads `ColimaBar.zip` of that exact release from GitHub. The footer shows the progress. Click the cancel button to stop.
+2. ColimaBar checks the download. See [What the update checks](#what-the-update-checks). If a check fails, ColimaBar changes nothing and tells you why. The button then opens the release page until you start ColimaBar again.
+3. If a VM action, a docker build, pull or push, an auto-start, Doctor or a diagnostics save runs when you click, ColimaBar does not start and says "ColimaBar cannot restart now". If such work starts after your click, ColimaBar waits for up to 2 minutes (the footer shows **Waiting…**). Then it does not install and tells you.
+4. ColimaBar replaces its own app and restarts. For about 2 seconds, a docker command does not start a stopped VM. Open connections, for example `docker logs -f`, close. Running containers continue.
+5. The new version shows one notification with a link to the release notes.
+
+ColimaBar keeps the old app in `~/.cache/colima-bar/update/previous` until the new version starts. A failed or cancelled update leaves no copy in the Applications folder. If the old app cannot go back after a failed swap, ColimaBar tells you where it is. See [the troubleshooting page](troubleshooting.md#an-update-does-not-install). To go back to an older version, run the installer with `COLIMABAR_VERSION`. See [Install a specific release](#install-a-specific-release).
+
+### What the update checks
+
+- The release is immutable, and the size and SHA-256 digest of `ColimaBar.zip` come from the GitHub API. ColimaBar compares them with the file that it downloaded.
+- If `gh` 2.68 or later is installed and logged in, ColimaBar runs the same `gh attestation verify` check as [the installer](#what-the-installer-checks). If the check fails, ColimaBar stops. If `gh` cannot run it when you confirm, the dialog says so, and the update goes on with the digest check. If `gh` could run it then but cannot run it later (for example, no network or a time-out), ColimaBar stops and keeps the **Install** button. Click it again later.
+- The zip must hold only `ColimaBar.app`. The app must have a valid signature with the code identifier `com.imohitkr.ColimaBar`, the version of the release, a newer version than the running one, and `colima-ctl.sh`.
+
+These checks rest on TLS and GitHub. The digest shows that the file is whole and is the file that GitHub stores. Immutable releases keep the files of a tag. Only the attestation shows that the release workflow of this repository built the file. The ad-hoc signature shows integrity, not the author. Homebrew is stronger: the cask holds the SHA-256 in a separate repository, and the tap checks the attestation. See [SECURITY.md](../SECURITY.md).
+
+### Update with the installer, Homebrew or the disk image
 
 If you use Homebrew, run `brew upgrade --cask colima-bar`.
 
-If you use [the installer](#the-installer), run it again. The installer quits ColimaBar, replaces the app in the same folder and opens it again.
+If you use [the installer](#the-installer), run it again. The installer quits ColimaBar, replaces the app in the same folder and opens it again. It also compares the SHA-256 digest of the download with the one that GitHub lists.
 
 If you use the disk image, download it again and replace the app in Applications.
-
-To check now, click the version in the dashboard footer, or choose **Check for Updates…** in the right-click menu. To turn off the daily check, clear **Check for new versions daily** on the System tab.

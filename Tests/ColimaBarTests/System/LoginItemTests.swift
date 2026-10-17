@@ -20,6 +20,13 @@ import Testing
         #expect(LoginItem.plistIsOutdated(old, exe: exe))
     }
 
+    @Test func aHiddenStagedOrOldCopyIsNotInstalled() {
+        #expect(!LoginItem.isInstalled("/Applications/.ColimaBar-update.app"))
+        #expect(!LoginItem.isInstalled("\(Paths.home)/Applications/.ColimaBar-old.app"))
+        // A renamed copy in the folder still counts.
+        #expect(LoginItem.isInstalled("/Applications/ColimaBar 2.app"))
+    }
+
     @Test func installedPaths() {
         #expect(LoginItem.isInstalled("/Applications/ColimaBar.app"))
         #expect(LoginItem.isInstalled("\(Paths.home)/Applications/ColimaBar.app"))

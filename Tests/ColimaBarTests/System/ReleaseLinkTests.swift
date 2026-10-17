@@ -69,4 +69,42 @@ import Testing
         #expect(trusted("https://github.com/imohitkr/colima-bar/releases/tag/v1.0.0"))
         #expect(trusted("https://github.com/imohitkr/colima-bar/releases/tag/v1.0.0..1"))
     }
+
+    @Test func buildsTheDownloadUrlFromTheExactTag() {
+        #expect(
+            ReleaseLink.download(tag: "v0.9.1")?.absoluteString
+                == "https://github.com/imohitkr/colima-bar/releases/download/v0.9.1/ColimaBar.zip")
+        #expect(
+            ReleaseLink.download(tag: "0.9.1")?.absoluteString
+                == "https://github.com/imohitkr/colima-bar/releases/download/0.9.1/ColimaBar.zip")
+    }
+
+    @Test func noDownloadUrlForOtherTags() {
+        for t in ["latest", "", "v0.9", "v0.9.1/../x", "v0.9.1-rc1", "v0.9.1?x=1", "../v0.9.1", "v0.9.1 "] {
+            #expect(ReleaseLink.download(tag: t) == nil, "\(t)")
+        }
+    }
+
+    @Test func redirectsGoOnlyToAssetHostsOverHttps() {
+        func ok(_ s: String) -> Bool { ReleaseLink.allowsRedirect(to: URL(string: s)!) }
+        #expect(ok("https://release-assets.githubusercontent.com/github-production-release-asset/1?x=y"))
+        #expect(ok("https://objects.githubusercontent.com/x"))
+        #expect(ok("https://github.com/imohitkr/colima-bar/releases/download/v0.9.1/ColimaBar.zip"))
+        #expect(ok("HTTPS://Release-Assets.GitHubUsercontent.com/x"))
+    }
+
+    @Test func redirectsRefuseOtherHostsSchemesPortsAndUserInfo() {
+        func ok(_ s: String) -> Bool { ReleaseLink.allowsRedirect(to: URL(string: s)!) }
+        #expect(!ok("http://github.com/x"))
+        #expect(!ok("http://release-assets.githubusercontent.com/x"))
+        #expect(!ok("https://evil.example/x"))
+        #expect(!ok("https://github.com.evil.example/x"))
+        #expect(!ok("https://githubusercontent.com/x"))
+        #expect(!ok("https://evilrelease-assets.githubusercontent.com/x"))
+        #expect(!ok("https://github.com:8443/x"))
+        #expect(!ok("https://user@github.com/x"))
+        #expect(!ok("https://user:pw@objects.githubusercontent.com/x"))
+        #expect(!ok("https://127.0.0.1/x"))
+        #expect(!ok("file:///etc/passwd"))
+    }
 }

@@ -52,4 +52,11 @@ import Testing
         #expect(!AppDelegate.revealRequestIsFresh(now + 30, now: now))  // clock went back
         #expect(!AppDelegate.revealRequestIsFresh(nil, now: now))
     }
+
+    @Test func installedNoticeShowsOnlyForTheInstalledVersion() {
+        #expect(AppDelegate.installedNoticeDue(installed: "0.9.1", running: "0.9.1"))
+        #expect(!AppDelegate.installedNoticeDue(installed: "0.9.1", running: "0.9.0"))  // the swap did not take effect
+        #expect(!AppDelegate.installedNoticeDue(installed: nil, running: "0.9.1"))  // a normal launch
+        #expect(!AppDelegate.installedNoticeDue(installed: "0.9.1", running: "dev"))
+    }
 }

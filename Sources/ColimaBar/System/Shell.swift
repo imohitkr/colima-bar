@@ -10,6 +10,33 @@ final class OutputBuffer: @unchecked Sendable {
     var string: String { lock.withLock { String(decoding: data, as: UTF8.self) } }
 }
 
+/// Holds a running child so a Task cancellation can stop it. `lock` guards
+/// the fields. `@unchecked Sendable` for that reason.
+final class ProcessHandle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var process: Process?
+    private var cancelled = false
+
+    /// Sets the child. If `cancel()` came first, it stops the child at once.
+    func attach(_ p: Process) {
+        let stop = lock.withLock { () -> Bool in
+            process = p
+            return cancelled
+        }
+        if stop { p.terminate() }
+    }
+
+    func cancel() {
+        let p = lock.withLock { () -> Process? in
+            cancelled = true
+            return process
+        }
+        if let p, p.isRunning { p.terminate() }
+    }
+
+    var isCancelled: Bool { lock.withLock { cancelled } }
+}
+
 /// Runs CLI tools with a pinned environment, so every call targets the same VM
 /// as an interactive `colima` command, even when launched from Finder/launchd.
 enum Shell {
@@ -55,12 +82,36 @@ enum Shell {
     /// even if an orphaned grandchild still holds the stdout pipe.
     /// colima-ctl.sh's stderr goes to Paths.ctlLog; other tools' is dropped,
     /// or read with stdout when `includeStderr` is true.
+    /// With `cancellable` true, a cancel of the calling Task sends SIGTERM to
+    /// the child (the in-app update uses it). The default keeps the old
+    /// behavior: the child runs on until it exits or the time limit ends.
     static func run(
         _ args: [String], timeout: TimeInterval = 20, extraEnv: [String: String] = [:],
-        includeStderr: Bool = false
+        includeStderr: Bool = false, cancellable: Bool = false
+    ) async -> Result {
+        guard cancellable else {
+            return await runProcess(
+                args, timeout: timeout, extraEnv: extraEnv, includeStderr: includeStderr, handle: nil)
+        }
+        let handle = ProcessHandle()
+        return await withTaskCancellationHandler {
+            await runProcess(
+                args, timeout: timeout, extraEnv: extraEnv, includeStderr: includeStderr, handle: handle)
+        } onCancel: {
+            handle.cancel()
+        }
+    }
+
+    private static func runProcess(
+        _ args: [String], timeout: TimeInterval, extraEnv: [String: String], includeStderr: Bool,
+        handle: ProcessHandle?
     ) async -> Result {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
+                if handle?.isCancelled == true {
+                    cont.resume(returning: Result(status: -1, out: ""))
+                    return
+                }
                 let p = Process()
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
                 p.arguments = args
@@ -93,6 +144,7 @@ enum Shell {
                     cont.resume(returning: Result(status: -1, out: ""))
                     return
                 }
+                handle?.attach(p)
                 if exited.wait(timeout: .now() + timeout) == .timedOut {
                     p.terminate()
                     if exited.wait(timeout: .now() + 10) == .timedOut {

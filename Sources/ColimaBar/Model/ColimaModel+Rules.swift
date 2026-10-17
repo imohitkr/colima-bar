@@ -94,6 +94,13 @@ extension ColimaModel {
         }
     }
 
+    /// The busy label of a profile for `updateActivity`: the busy marker, or
+    /// an empty label for an action that this app runs without a marker, or
+    /// nil if the profile is not busy.
+    nonisolated static func updateBusyLabel(marker: String?, actionsInFlight: Int) -> String? {
+        marker ?? (actionsInFlight > 0 ? "" : nil)
+    }
+
     /// A profile is not idle while a VM action runs (its busy marker) or
     /// while any colima-ctl.sh action that ColimaBar started still runs.
     /// For example, a prune can wait minutes for its dialog, then needs the VM.
