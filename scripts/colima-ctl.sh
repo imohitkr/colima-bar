@@ -159,6 +159,7 @@ started_ok() {
 }
 
 # start_vm [ARGS...] -> colima start, then the marker of a good start.
+# shellcheck disable=SC2120 # only profile-create passes flags for colima start
 start_vm() {
   colima start "$@" && started_ok
 }
@@ -352,6 +353,7 @@ shrink_disk() {
   # Create only the profile folder, inside a Colima folder that still exists.
   [ -d "$COLIMA_DIR" ] || return 1
   mkdir -p "$PROFILE_DIR" && cp -p "$1" "$CONFIG" || return 1
+  # shellcheck disable=SC2119 # no flags: a plain colima start
   start_vm || return 1
   if [ -n "${2:-}" ]; then
     colima stop || return "$RESTOP_FAILED"
@@ -658,6 +660,7 @@ repair_vm() {
   while IFS=$'\t' read -r reason path pid; do
     [ -n "$reason" ] && remove_stale "$reason" "$path" "$pid"
   done <<<"$(stale_files)"
+  # shellcheck disable=SC2119 # no flags: a plain colima start
   start_vm
 }
 
@@ -665,6 +668,7 @@ restart_vm() {
   if vm_up; then
     colima stop || return 1
   fi
+  # shellcheck disable=SC2119 # no flags: a plain colima start
   start_vm
 }
 
