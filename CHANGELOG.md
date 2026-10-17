@@ -6,16 +6,18 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-10-17
+
 ### Added
 
 - Before the first start after a Colima or Lima upgrade, ColimaBar asks first and offers the release notes. Doctor shows the change in a new Upgrade check. See [Upgrade warning](docs/usage.md#upgrade-warning).
 - Doctor can save a diagnostics file and open a bug report with the versions filled in. **Save Diagnostics…** and **Report an Issue…** are at the bottom of the Doctor page. **Report an Issue…** is also in the right-click menu. The file is plain text, so you can read it first. It has no container data, and ColimaBar hides secrets, host names and your user name, but it can miss one. See [Save diagnostics and report an issue](docs/usage.md#save-diagnostics-and-report-an-issue). The debug flag `--diagnostics PATH` writes the file without the dialog.
-- ColimaBar can install its own updates. For a copy that it can replace (the installer, the disk image, or a build in `/Applications` or `~/Applications`), the footer button is **Install *version*** and the right-click item is **Install ColimaBar *version*…**. After you confirm, ColimaBar downloads the release, checks the size, the SHA-256 digest, the build attestation (if `gh` is installed and logged in) and the signature, replaces its own app by rename, and restarts. If a VM action, a docker build, pull or push, an auto-start, Doctor or a diagnostics save runs at the click, ColimaBar says "ColimaBar cannot restart now". It waits for such work that starts later. If `gh` could run the attestation check at the confirmation but cannot run it later, ColimaBar stops. A failed or cancelled update leaves no copy in the Applications folder. If the old app cannot go back after a failed swap, ColimaBar says where it is. A Homebrew copy shows the `brew upgrade` command with **Copy Command** and **Run in Terminal**. Other copies open the release page. The first in-app update is from 0.9.0. See [Update](docs/install.md#update).
+- ColimaBar can install its own updates. For a copy that it can replace (the installer, the disk image, or a build in `/Applications` or `~/Applications`), the footer button is **Install *version*** and the right-click item is **Install ColimaBar *version*…**. After you confirm, ColimaBar downloads the release, checks the size, the SHA-256 digest, the build attestation (if `gh` is installed and logged in) and the signature, replaces its own app by rename, and restarts. If a VM action, a docker build, pull or push, an auto-start, Doctor or a diagnostics save runs at the click, ColimaBar says "ColimaBar cannot restart now". It waits for such work that starts later. If `gh` could run the attestation check at the confirmation but cannot run it later, ColimaBar stops. A failed or cancelled update leaves no copy in the Applications folder. If the old app cannot go back after a failed swap, ColimaBar says where it is. A Homebrew copy shows the `brew upgrade` command with **Copy Command** and **Run in Terminal**. Other copies say why ColimaBar cannot install, then offer the release page. The first in-app update is from 0.9.0. See [Update](docs/install.md#update).
 - The installer compares the SHA-256 digest of the download with the one that the GitHub API lists. It also checks the code identifier and the version of the app, and tells you when Homebrew also has ColimaBar.
-- CI checks after each release that it is immutable, that the digest of each asset is the digest of the built file, and that the binary has no update test hook. `COLIMABAR_UPDATE_TEST=1 ./build.sh` makes a test build for the update. See [CONTRIBUTING.md](CONTRIBUTING.md#test-build-for-the-in-app-update).
 
 ### Changed
 
+- CI checks that each release is immutable and that the SHA-256 digest that GitHub lists for each file is the digest of the built file.
 - The ColimaBar log no longer shows the names of containers, images, volumes and networks in the request lines of the proxy (for example `POST /containers/{name}/start`).
 
 ## [0.8.0] - 2026-10-16
@@ -202,7 +204,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/imohitkr/colima-bar/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/imohitkr/colima-bar/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/imohitkr/colima-bar/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/imohitkr/colima-bar/compare/v0.6.0...v0.7.0

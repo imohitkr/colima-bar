@@ -57,7 +57,7 @@ macOS does not show the "Apple could not verify" prompt for this download. If Co
 Set `COLIMABAR_VERSION` to the release tag. The installer supports v0.4.0 and later.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_VERSION=v0.8.0 bash
+curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_VERSION=v0.9.0 bash
 ```
 
 ## The disk image
@@ -138,7 +138,7 @@ ColimaBar checks GitHub for a new release one time each day. When a new version 
 |---|---|---|
 | The installer, the disk image, or a build in `/Applications` or `~/Applications` that you can write to | **Install *version*** | ColimaBar asks first. Then it downloads the release, checks it, replaces itself and restarts. See [Install an update in the app](#install-an-update-in-the-app). |
 | Homebrew | **Update *version*** | ColimaBar shows `brew upgrade --cask colima-bar && open -a ColimaBar`. You can copy it or run it in Terminal. |
-| A copy that runs from a disk image or Downloads, a read-only disk, a folder that you cannot write to, or a development build | **Update *version*** | The release page opens. Download the update there. |
+| A copy that runs from a disk image or Downloads, a read-only disk, a folder that you cannot write to, or a development build | **Update *version*** | ColimaBar says why it cannot install the update. Click **Open Release Page** and download it there. |
 
 To check now, click the version in the dashboard footer, or choose **Check for Updates…** in the right-click menu. To turn off the daily check, clear **Check for new versions daily** on the System tab. ColimaBar never installs an update without your click.
 
