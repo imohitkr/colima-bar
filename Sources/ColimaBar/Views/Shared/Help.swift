@@ -162,7 +162,7 @@ enum Help {
     static let installConfirm =
         "ColimaBar replaces this copy and restarts. For about 2 seconds, a docker command does not start a stopped VM. Open connections, for example docker logs -f, close. Running containers continue."
     static let updateChecking =
-        "ColimaBar checks the download: the size, the digest, the signature and the version. It has not changed this copy yet. Click the cross to stop."
+        "ColimaBar checks the download: the size, the digest, the build attestation (if gh can run it), the signature and the version. It has not changed this copy yet. Click the cross to stop."
     static func updateWaiting(_ why: String) -> String {
         "ColimaBar waits to restart. \(why). The restart starts when this ends. Click the cross to stop."
     }

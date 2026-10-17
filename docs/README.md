@@ -4,12 +4,12 @@ These guides are for people who use ColimaBar. For a short overview, read the [p
 
 | Page | Contents |
 |---|---|
-| [Install](install.md) | Requirements, Homebrew, the installer, the disk image, download checks, the build from source and updates. |
-| [Use](usage.md) | The menu bar icon, the stopped screen and its VM settings, the dashboard tabs, disk shrink, settings export and import, Doctor, Repair and the diagnostics file, the right-click menu, keyboard shortcuts, notifications, system sleep, saved logs and profiles. |
+| [Install](install.md) | Requirements, Homebrew, the installer, the disk image, download checks, the build from source, updates, the in-app update and what it checks. |
+| [Use](usage.md) | The menu bar icon, the stopped screen and its VM settings, the dashboard tabs, disk shrink, settings export and import, Doctor and the upgrade warning, Repair and the diagnostics file, the right-click menu, keyboard shortcuts, notifications, system sleep, saved logs and profiles. |
 | [Auto-start](auto-start.md) | The ColimaBar socket, the profile sockets, the shell snippet, what happens when ColimaBar quits, and the docker routes. |
 | [Auto-stop](auto-stop.md) | Stop the VM after an idle time, what counts as activity, system sleep, and a shorter idle time on battery and in Low Power Mode. |
 | [Uninstall](uninstall.md) | The menu item, the uninstall script, what it removes and what stays. |
-| [Troubleshooting](troubleshooting.md) | Run Doctor first, where the logs are, common problems such as a Broken profile and Repair, and how to report a bug. |
+| [Troubleshooting](troubleshooting.md) | Run Doctor first, an upgrade warning, where the logs are, common problems such as a Broken profile and Repair, an update that does not install, and how to report a bug. |
 | [Roadmap](roadmap.md) | Features that are planned. They have no target version yet. |
 
 Contributors: read [ARCHITECTURE.md](../ARCHITECTURE.md) for the design and [CONTRIBUTING.md](../CONTRIBUTING.md) to build and test.

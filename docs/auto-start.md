@@ -82,6 +82,9 @@ Auto-start does not start the VM in these cases:
 
 - The profile uses the containerd runtime. This runtime has no Docker daemon.
 - The profile is not `default`, and you deleted it. ColimaBar sends the notification "Profile NAME doesn't exist, so it wasn't started."
+- ColimaBar restarts after an in-app update. For about 2 seconds, a docker request does not start a stopped VM.
+
+Auto-start never shows the upgrade warning. After a risky Colima or Lima change, it starts the VM and sends one notification. See [Upgrade warning](usage.md#upgrade-warning).
 
 If the start fails, the docker client gets an error. See [Auto-start fails](troubleshooting.md#auto-start-fails).
 

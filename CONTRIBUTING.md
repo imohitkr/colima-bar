@@ -56,7 +56,7 @@ The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--no
 | `--snapshot PATH [TAB]` | Opens the dashboard window, renders it to a PNG at `PATH`, then quits. `TAB` is `Containers`, `Images`, `Volumes` or `System`. |
 | `--popover [PATH]` | Opens the dashboard popover at launch. With `PATH`, it renders the popover to a PNG, then quits. |
 | `--notify-test` | Sends a test notification, then quits. |
-| `--diagnostics PATH` | Writes the [diagnostics file](docs/usage.md#save-diagnostics-and-report-an-issue) to `PATH`, then quits. It only reads, opens nothing and exits with 1 if it cannot write the file. The summary says "debug run". |
+| `--diagnostics PATH` | Writes the [diagnostics file](docs/usage.md#save-diagnostics-and-report-an-issue) to `PATH`, then quits. It only reads, opens nothing and exits with 1 if it cannot write the file. The header of the file shows "(debug run)" after the version. |
 | `--window` | Opens the dashboard window at launch. |
 
 `--snapshot` also reads these environment variables:
