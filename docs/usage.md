@@ -54,7 +54,8 @@ The live tiles show the total CPU and memory of all containers as a share of the
 - Click the name or the image of a container to open its [Inspect page](#inspect-a-container).
 - A running container has logs, shell, restart and stop buttons. **Remove…** is in its ••• menu.
 - A stopped container has logs, start and remove buttons.
-- The shell opens in iTerm, or in Terminal when iTerm is not installed.
+- The shell opens in iTerm, or in Terminal when iTerm is not installed. If the container has no shell, the terminal tells you to use **Debug shell**.
+- **Debug shell** is in the ••• menu of a running container and on its Inspect page. It opens a shell in a new container that shares the processes and the network of the container. Use it for an image that has no shell, for example a distroless image. The new container uses the image `busybox:latest`. On the first use, docker downloads the image. In the shell, `ps` shows the processes of the container, and its files are in `/proc/1/root`. The new container has the `SYS_PTRACE` capability and no other extra right. While it runs, it shows as a row named `colimabar-debug-` and the first 12 characters of the container ID. If you choose **Debug shell** again, you get a second shell in the same container. When you close the window, or when the container stops, the new container ends and docker removes it. To use another image, for example `nicolaka/netshoot`, run `defaults write com.imohitkr.ColimaBar debugShellImage nicolaka/netshoot`. A custom image must start a shell by default (`busybox` and `nicolaka/netshoot` do). The setting is not in the settings file. If the name is not valid, ColimaBar uses busybox and sends a notification.
 - The ••• menu of a Compose project opens the project folder and runs docker compose. See [Compose projects](#compose-projects).
 - The ••• menu of a container opens **Inspect…**. It also copies the name, ID, image or an exec command. It also opens ports. **Logs in Terminal** follows the logs in iTerm, or in Terminal when iTerm is not installed.
 - You can filter the list and show running containers only.
@@ -69,7 +70,7 @@ If Docker removed the container, the window shows the lines that ColimaBar saved
 
 ### Inspect a container
 
-Click the name or the image of a container, or choose **Inspect…** in its ••• menu. The page replaces the tabs while the VM runs. **Done** (or the Escape key) closes it, and **Logs** opens the log window. The page reads the container again every 2 seconds. If the container is gone, the page says so.
+Click the name or the image of a container, or choose **Inspect…** in its ••• menu. The page replaces the tabs while the VM runs. **Done** (or the Escape key) closes it, and **Logs** opens the log window. The page reads the container again every 2 seconds. If the container is gone, the page says so. For a running container, **Debug shell** opens a [debug shell](#containers-tab).
 
 The page has these sections: image (with the digest), state, health, command, environment, labels, networks, mounts, ports and resources. A limit of 0 shows as "No limit".
 

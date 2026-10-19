@@ -60,6 +60,8 @@ final class ColimaModel {
     /// The last lines that `docker compose` printed, for each project key. In
     /// memory only: the output can name values of the project.
     private(set) var composeOutput: [String: [String]] = [:]
+    /// The last invalid `debugShellImage` value that ColimaBar told the user about.
+    @ObservationIgnored var debugImageWarned: String?
     /// The last port forwarding check of each running profile, from
     /// `ColimaModel+NetworkHealth`. It changes only when the report changes.
     private(set) var portHealth: [String: PortHealth.Report] = [:]
@@ -1490,7 +1492,9 @@ final class ColimaModel {
         // testcontainers' containers are torn down (often non-zero) on every
         // test run; their failures already show up in the test output.
         let isTestcontainer = attrs["org.testcontainers"] == "true"
-        if notifyOnCrash, ev.Type == "container", !isTestcontainer, let id = ev.Actor?.ID {
+        // A debug shell container ends with the exit code of its shell: that is no crash.
+        let isDebugSidecar = DebugShell.isSidecar(name: attrs["name"])
+        if notifyOnCrash, ev.Type == "container", !isTestcontainer, !isDebugSidecar, let id = ev.Actor?.ID {
             let name = attrs["name"] ?? "container"
             let ctr = ContainerRef(id: id, name: name)
             if action == "oom" {
@@ -1502,7 +1506,7 @@ final class ColimaModel {
             }
         }
         let reaction = Self.reaction(type: ev.Type ?? "", action: action)
-        if reaction.contains(.savedLogs), let id = ev.Actor?.ID {
+        if reaction.contains(.savedLogs), !isDebugSidecar, let id = ev.Actor?.ID {
             keeper.event(action: action, id: id, attributes: attrs)
         }
         if reaction.contains(.disk) { diskDirty = true }

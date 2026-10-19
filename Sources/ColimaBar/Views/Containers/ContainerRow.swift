@@ -75,6 +75,11 @@ struct ContainerRow: View {
                 Button("Inspect…") { ui.inspectID = c.id }
                 Divider()
                 Button("Logs in Terminal") { model.terminal(.containerLogs, c.name) }
+                if c.state == "running" {
+                    Button("Debug shell") { model.debugShell(c) }
+                        .disabled(model.isDebug)
+                        .hint(model.isDebug ? Help.debugShellDebug : Help.debugShell)
+                }
                 Divider()
                 Button("Copy name") { Pasteboard.copy(c.name) }
                 Button("Copy ID") { Pasteboard.copy(String(c.id.prefix(12))) }

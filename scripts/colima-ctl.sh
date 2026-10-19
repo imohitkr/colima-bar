@@ -1037,7 +1037,7 @@ $list" || exit 2
     # Colima, but it does not start Colima.
     printf 'export DOCKER_HOST=unix://%s' "$HOME/.cache/colima-bar/docker.sock" | pbcopy ;;
 
-  # Per-container actions: ctr-start|ctr-stop|ctr-restart|ctr-rm|ctr-logs|ctr-shell NAME
+  # Per-container actions: ctr-start|ctr-stop|ctr-restart|ctr-rm|ctr-logs|ctr-shell NAME, ctr-debug ID IMAGE
   # "--" ends the options, so a name that starts with "-" is not read as a flag.
   ctr-start)   docker start -- "$2" >/dev/null || { notify "Failed to start $2"; exit 1; } ;;
   # A clean stop first (up to 10 s), so the container can shut down properly.
@@ -1047,7 +1047,58 @@ $list" || exit 2
   ctr-stop)    docker stop -- "$2" >/dev/null || { notify "Failed to stop $2"; exit 1; } ;;
   ctr-restart) docker restart -- "$2" >/dev/null || { notify "Failed to restart $2"; exit 1; } ;;
   ctr-logs)    exec docker logs -f --tail 200 -- "$2" ;;
-  ctr-shell)   exec docker exec -it -- "$2" sh -c 'command -v bash >/dev/null && exec bash || exec sh' ;;
+  # A container with no shell (for example a distroless image) makes the probe fail
+  # with "executable file not found". Then the script points to ctr-debug.
+  # Other probe errors fall through: the real exec shows them.
+  ctr-shell)
+    # Docker 29 prints the OCI error on stdout, older versions on stderr: read both.
+    # `sh -c :` prints nothing when the container has a shell.
+    probe=$(docker exec -- "$2" sh -c : 2>&1)
+    case "$probe" in
+      *"executable file not found"*)
+        printf 'Container %s has no shell.\n' "$2"
+        printf 'In ColimaBar, open the ••• menu of the container and choose Debug shell.\n'
+        exit 1 ;;
+    esac
+    exec docker exec -it -- "$2" sh -c 'command -v bash >/dev/null && exec bash || exec sh' ;;
+  # ctr-debug ID IMAGE: a shell in a new container (IMAGE) that shares the processes and
+  # the network of container ID. ID is the full ID of 64 hex characters, never a name.
+  # The lists are written out, not as ranges: a range depends on the locale.
+  ctr-debug)
+    id="${2:-}"; img="${3:-}"
+    hex=0123456789abcdef
+    first=abcdefghijklmnopqrstuvwxyz0123456789
+    rest=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._/:@-
+    # Remove every allowed character. Nothing may be left.
+    bad_id="${id//[$hex]/}"
+    if [ "${#id}" -ne 64 ] || [ -n "$bad_id" ]; then
+      notify "Debug shell failed: the container ID is not valid."; exit 1
+    fi
+    bad_img="${img//[$rest]/}"
+    case "$img" in
+      "") bad_img=x ;;
+      [$first]*) ;;
+      *) bad_img=x ;;
+    esac
+    if [ "${#img}" -gt 255 ] || [ -n "$bad_img" ]; then
+      notify "Debug shell failed: the image name is not valid."; exit 1
+    fi
+    name="colimabar-debug-${id:0:12}"
+    # A sidecar of this container already runs: open a second shell in it.
+    state=$(docker inspect --type container -f '{{.State.Running}}' -- "$name" 2>/dev/null)
+    if [ "$state" = "true" ]; then
+      exec docker exec -it -- "$name" sh
+    fi
+    # A stopped sidecar of an earlier run keeps the name: remove it first.
+    if [ "$state" = "false" ]; then
+      if docker rm -- "$name" >/dev/null 2>&1; then
+        printf 'Removed an old debug container.\n'
+      fi
+    fi
+    printf 'Debug shell for container %s, image %s.\n' "${id:0:12}" "$img"
+    printf 'ps shows the processes of the container. Its files are in /proc/1/root.\n'
+    printf 'On the first use, docker downloads the image.\n'
+    exec docker run --rm -it --name "$name" --pid "container:$id" --network "container:$id" --cap-add SYS_PTRACE "$img" ;;
   # Compose projects: compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...
   # Not VM actions: no lock and no busy marker. Only down asks first.
   compose-pull) compose_check "${@:2}"; compose_run pull "${@:2}" ;;

@@ -66,7 +66,11 @@ struct InspectView: View {
             if let detail { Circle().fill(dot(detail)).frame(width: 7, height: 7) }
             Text("Inspect · \(name)").font(.headline).lineLimit(1).truncationMode(.middle)
             Spacer(minLength: 4)
-            // The Debug shell button goes here.
+            if let c = model.container(withID: id), c.state == "running", !gone {
+                Button("Debug shell") { model.debugShell(c) }
+                    .disabled(model.isDebug)
+                    .hint(model.isDebug ? Help.debugShellDebug : Help.debugShell)
+            }
             if !gone { Button("Logs") { model.openLogs(id: id, name: name) }.hint(Help.logs) }
             Button("Done") { ui.inspectID = nil }
                 .keyboardShortcut(.cancelAction)
