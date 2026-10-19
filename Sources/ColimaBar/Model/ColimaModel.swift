@@ -73,6 +73,8 @@ final class ColimaModel {
     private(set) var networkCheckErrors: [String: String] = [:]
     /// A diagnostics file is being collected and saved. One at a time.
     private(set) var isSavingDiagnostics = false
+    /// The volume backup or restore that runs now, or nil. One at a time.
+    private(set) var volumeTransfer: VolumeTransfer?
     /// A Doctor run was asked for while another one ran (a profile switch).
     /// The running one starts once more when it ends.
     @ObservationIgnored var isDoctorRunQueued = false
@@ -254,6 +256,13 @@ final class ColimaModel {
     @ObservationIgnored private var lastPing = Date()
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
     @ObservationIgnored private(set) var isDebug = false
+    /// The runner of the volume transfer that runs now.
+    @ObservationIgnored var volumeRunner: VolumeBackupRunner?
+    /// The profile of that transfer, and why it stopped if the VM or the profile changed.
+    @ObservationIgnored var volumeProfile: String?
+    @ObservationIgnored var volumeStop: VolumeTransferStop?
+    /// The profiles whose leftover helper containers were removed in this launch.
+    @ObservationIgnored var helperSwept: Set<String> = []
     /// The upgrade guard seeded its record of good starts in this launch.
     @ObservationIgnored var upgradeSeedTried = false
     @ObservationIgnored var upgradeSeedRunning = false
@@ -330,11 +339,12 @@ final class ColimaModel {
     /// read-only model counts as a debug run, so it never starts a proxy,
     /// changes a route or a context, or writes a setting. The command never
     /// calls `start()`. Assigning `profile` here runs no `didSet`.
-    init(profile named: String? = nil, readOnly: Bool = false) {
+    /// `dockerAPI` is for tests: a fake daemon instead of the socket of the profile.
+    init(profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil) {
         let p = named ?? Defaults.string(.profile) ?? "default"
         profile = p
         isDebug = readOnly
-        let client = DockerAPI(socketPath: Paths.socket(p))
+        let client = dockerAPI ?? DockerAPI(socketPath: Paths.socket(p))
         api = client
         keeper = RemovedLogKeeper(api: client)
         proxy = SocketProxy(upstream: Paths.socket(p))
@@ -673,7 +683,7 @@ final class ColimaModel {
                 requestDF()
             }
         } else {
-            clearVMData()
+            clearVMData(because: .vmStopped)
         }
         return true
     }
@@ -695,7 +705,8 @@ final class ColimaModel {
         address && ipAddress.isEmpty && !unavailable
     }
 
-    private func clearVMData() {
+    private func clearVMData(because: VolumeTransferStop) {
+        stopVolumeTransferForVMChange(because)
         events?.cancel()
         events = nil
         resetDF()
@@ -727,7 +738,7 @@ final class ColimaModel {
     /// socket of the selected profile, and forgets the data of the old socket.
     private func retargetSocket() {
         generation += 1
-        clearVMData()
+        clearVMData(because: .profileChanged)
         for h in statStreams.values { h.cancel() }
         statStreams = [:]
         latest = [:]
@@ -760,7 +771,8 @@ final class ColimaModel {
         guard let r = await api.get("/containers/json?all=1"), r.ok, gen == generation, state == .running,
             let list = try? JSONDecoder().decode([APIContainer].self, from: r.body)
         else { return false }
-        let mapped = list.map { c in
+        // The helper containers of a volume backup are not the user's containers.
+        let mapped = Self.visibleContainers(list).map { c in
             Container(
                 id: c.Id, name: c.Names.first.map { String($0.drop { $0 == "/" }) } ?? String(c.Id.prefix(12)),
                 image: c.Image, state: c.State, status: c.Status,
@@ -772,6 +784,7 @@ final class ColimaModel {
         set(\.containers, mapped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
         syncStatStreams()
         await refreshComposeIssues()
+        sweepHelperLeftoversOnce()
         return true
     }
 
@@ -1493,7 +1506,8 @@ final class ColimaModel {
         // test run; their failures already show up in the test output.
         let isTestcontainer = attrs["org.testcontainers"] == "true"
         // A debug shell container ends with the exit code of its shell: that is no crash.
-        let isDebugSidecar = DebugShell.isSidecar(name: attrs["name"])
+        // The helper container of a volume backup never runs, but it is no crash either.
+        let isDebugSidecar = Self.isInternalContainer(name: attrs["name"], attributes: attrs)
         if notifyOnCrash, ev.Type == "container", !isTestcontainer, !isDebugSidecar, let id = ev.Actor?.ID {
             let name = attrs["name"] ?? "container"
             let ctr = ContainerRef(id: id, name: name)
@@ -1533,6 +1547,10 @@ final class ColimaModel {
     func run(_ action: CtlAction, _ args: String..., profile target: String? = nil) {
         // The old copy quits at once after the swap of an update.
         guard !updateRestarting else { return }
+        if action == .diskShrink, volumeTransfer != nil {
+            notify("Wait until the volume backup or restore ends, then shrink the disk.")
+            return
+        }
         let p = target ?? profile
         let running = isRunning(profile: p)
         if action.showsDialog(running: running) { dismissPopover() }
@@ -1642,6 +1660,7 @@ final class ColimaModel {
 
     /// `ColimaModel+Diagnostics` sets the flag through this function.
     func setSavingDiagnostics(_ on: Bool) { set(\.isSavingDiagnostics, on) }
+    func setVolumeTransfer(_ transfer: VolumeTransfer?) { set(\.volumeTransfer, transfer) }
 
     // MARK: - Profiles
 
@@ -1695,6 +1714,10 @@ final class ColimaModel {
         // An action of the profile can start while the confirmation is open.
         if readBusy(p) != nil || profileActions[p] != nil || (p == profile && busy != nil) {
             Notifier.shared.post("Wait until the action of the profile \(p) ends, then delete it.")
+            return
+        }
+        if volumeTransfer != nil {
+            Notifier.shared.post("Wait until the volume backup or restore ends, then delete the profile \(p).")
             return
         }
         if let refusal = ProfileDelete.refusal(profile: p, selected: profile, isRunning: isRunning(profile: p)) {

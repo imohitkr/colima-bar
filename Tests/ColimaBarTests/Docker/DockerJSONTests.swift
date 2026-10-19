@@ -35,6 +35,26 @@ import Testing
         #expect(none.SystemTime == nil)
     }
 
+    @Test func infoDecodesTheArchitecture() throws {
+        let info = try JSONDecoder().decode(APIInfo.self, from: Data(#"{"Architecture":"aarch64"}"#.utf8))
+        #expect(info.Architecture == "aarch64")
+    }
+
+    @Test func volumeDecodesItsFacts() throws {
+        let json =
+            #"{"Name":"pg","Driver":"local","Labels":{"a":"b"},"CreatedAt":"2026-01-01T00:00:00Z","Mountpoint":"/x"}"#
+        let v = try JSONDecoder().decode(APIVolume.self, from: Data(json.utf8))
+        #expect(
+            v.Name == "pg" && v.Driver == "local" && v.Labels == ["a": "b"] && v.CreatedAt == "2026-01-01T00:00:00Z")
+        let bare = try JSONDecoder().decode(APIVolume.self, from: Data(#"{"Name":"x","Labels":null}"#.utf8))
+        #expect(bare.Labels == nil && bare.Driver == nil)
+    }
+
+    @Test func createReplyGivesTheID() throws {
+        let r = try JSONDecoder().decode(APIIdResponse.self, from: Data(#"{"Id":"abc","Warnings":[]}"#.utf8))
+        #expect(r.Id == "abc")
+    }
+
     @Test func containerDecodesFromAPI() throws {
         let json = """
             [{"Id":"abc123","Names":["/web"],"Image":"nginx","State":"running","Status":"Up 1 minute",
@@ -64,5 +84,16 @@ import Testing
         #expect(st.ip_address == "192.168.64.3" && st.mount_type == "virtiofs")
         let none = try JSONDecoder().decode(ColimaStatusJSON.self, from: Data(#"{"driver":"x"}"#.utf8))
         #expect(none.ip_address == nil)
+    }
+
+    @Test func aPlainLocalVolumeCanBeReplaced() throws {
+        func volume(_ json: String) throws -> APIVolume {
+            try JSONDecoder().decode(APIVolume.self, from: Data(json.utf8))
+        }
+        #expect(try volume(#"{"Name":"a","Driver":"local","Options":null}"#).isPlain)
+        #expect(try volume(#"{"Name":"a","Driver":"local","Options":{}}"#).isPlain)
+        #expect(try volume(#"{"Name":"a"}"#).isPlain)
+        #expect(try !volume(#"{"Name":"a","Driver":"local","Options":{"type":"nfs"}}"#).isPlain)
+        #expect(try !volume(#"{"Name":"a","Driver":"other"}"#).isPlain)
     }
 }

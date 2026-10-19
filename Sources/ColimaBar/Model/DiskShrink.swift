@@ -25,7 +25,8 @@ enum DiskShrink {
     /// while the VM is stopped. `running` is the VM state: a stopped VM
     /// starts once to create the new disk, then stops again.
     static func warning(
-        profile: String, from: Int, to: Int, usage: [DFRow], kubernetes: Bool, running: Bool
+        profile: String, from: Int, to: Int, usage: [DFRow], kubernetes: Bool, running: Bool,
+        volumes: [String] = []
     ) -> String {
         let deletes =
             "Colima cannot shrink a disk in place. Thus ColimaBar deletes the VM of the profile \(profile) and its \(from) GB disk."
@@ -44,8 +45,40 @@ enum DiskShrink {
             lines.append("Total: \(ByteFormat.bytes(usage.reduce(0) { $0 + $1.size }))")
         }
         if kubernetes { lines.append("The Kubernetes cluster and its data are also deleted.") }
+        if let advice = backupAdvice(running: running, volumes: volumes) { lines += ["", advice] }
         lines += ["", "To continue, type the profile name: \(profile)"]
         return lines.joined(separator: "\n")
+    }
+
+    /// The most volume names that the warning lists.
+    static let listedVolumes = 8
+
+    /// The line about volume backups. While the VM runs, it names the named
+    /// volumes (at most 8, then "and N more"), or it is nil if there are none.
+    /// A stopped VM shows no volumes, so the line only says what to do.
+    static func backupAdvice(running: Bool, volumes: [String]) -> String? {
+        guard running else { return "To keep volume data, start the VM and back up the volumes first." }
+        guard !volumes.isEmpty else { return nil }
+        let shown = volumes.prefix(listedVolumes).joined(separator: ", ")
+        let more = volumes.count > listedVolumes ? " and \(volumes.count - listedVolumes) more" : ""
+        return "To keep volume data, back up the volumes first: \(shown)\(more)."
+    }
+
+    enum Answer: Equatable {
+        /// The user typed the profile name and clicked the destructive button.
+        case shrink
+        case cancel
+        /// The user chose **Back Up Volumes…**: the shrink stops.
+        case backUpVolumes
+    }
+
+    /// The answer for the button that the user clicked. `clicked` counts the
+    /// buttons from 0: the destructive button, then **Back Up Volumes…** if
+    /// the alert offers it, then **Cancel**. Without the typed profile name,
+    /// the destructive button gives no shrink.
+    static func answer(clicked: Int, typedOK: Bool, offersBackup: Bool) -> Answer {
+        if clicked == 0 { return typedOK ? .shrink : .cancel }
+        return offersBackup && clicked == 1 ? .backUpVolumes : .cancel
     }
 
     /// True when the typed text is the profile name. Only then can the user

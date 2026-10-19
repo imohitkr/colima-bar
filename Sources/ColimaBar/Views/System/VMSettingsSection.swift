@@ -152,7 +152,10 @@ struct VMSettingsSection: View {
                         }
                     }
                     .menuStyle(.borderlessButton).fixedSize().controlSize(.small)
-                    .hint(running ? Help.diskShrink : Help.diskShrinkWhenStopped)
+                    .disabled(model.volumeTransfer != nil)
+                    .hint(
+                        model.volumeTransfer != nil
+                            ? Help.shrinkBlockedByTransfer : (running ? Help.diskShrink : Help.diskShrinkWhenStopped))
                 }
             }
             .hint(running ? Help.disk : Help.diskWhenStopped)
@@ -182,12 +185,15 @@ struct VMSettingsSection: View {
         guard DiskShrink.isValid(size, current: from) else { return }
         // The popover would cover the alert.
         model.dismissPopover()
-        guard
-            ShrinkDiskAlert.confirm(
-                profile: p, from: from, to: size, usage: model.df, kubernetes: kubernetes, running: running),
-            p == model.profile
-        else { return }
-        model.run(.diskShrink, "\(size)", profile: p)
+        let answer = ShrinkDiskAlert.confirm(
+            profile: p, from: from, to: size, usage: model.df, kubernetes: kubernetes, running: running,
+            volumes: VolumeRow.named(model.volumes).map(\.name))
+        guard p == model.profile else { return }
+        switch answer {
+        case .shrink: model.run(.diskShrink, "\(size)", profile: p)
+        case .backUpVolumes: VolumeBackupPanel.backUpAll(model: model)
+        case .cancel: break
+        }
     }
 
     private func syncPickers() {

@@ -8,6 +8,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Added
 
+- Volume backup and restore. In the Volumes tab, click **•••** > **Back Up…** or **Restore from Backup…**. The header menu has **Restore to New Volume…** and **Back Up All…**. ColimaBar saves a plain `.tar` file with the mode `0600`, shows the progress and removes an incomplete file. It checks a file before it restores, refuses an unsafe archive and asks before it replaces a volume that has files. The Shrink dialog offers to back up the volumes first. See [Back up and restore volumes](docs/usage.md#back-up-and-restore-volumes).
 - Debug shell for containers that have no shell, for example distroless images. In the ••• menu of a running container, choose **Debug shell**. See [usage](docs/usage.md#containers-tab).
 - Inspect page. Click the name or the image of a container, or choose **Inspect…** in its ••• menu. The page shows the image and digest, state, health, command, environment, labels, networks, mounts, ports and limits. It hides values with secret names until you click the eye. A bind mount from your Mac opens in Finder, and a web port opens in your browser. See [Inspect a container](docs/usage.md#inspect-a-container).
 - Compose project menu. The ••• menu in the header of a project opens the project folder (also in Visual Studio Code) and runs **Pull Images**, **Up (Detached)** and **Down…** with docker compose. **Down…** asks first and keeps volumes and images. See [Compose projects](docs/usage.md#compose-projects).

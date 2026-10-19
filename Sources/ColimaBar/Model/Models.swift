@@ -105,4 +105,10 @@ struct VolumeRow: Identifiable, Equatable {
     let links: Int
     let project: String?
     let isAnonymous: Bool
+
+    /// The named volumes, sorted by name. A backup of all volumes and the
+    /// warning before a disk shrink use this list.
+    static func named(_ rows: [VolumeRow]) -> [VolumeRow] {
+        rows.filter { !$0.isAnonymous }.sorted { $0.name < $1.name }
+    }
 }

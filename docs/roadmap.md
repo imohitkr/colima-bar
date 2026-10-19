@@ -2,11 +2,7 @@
 
 [Docs index](README.md)
 
-These features are planned. They have no target version yet. The milestones are in the order that we plan to build them.
-
-## 1. Containers
-
-- Back up a volume to a file and restore it.
+These features are planned. They have no target version yet.
 
 ## Later
 

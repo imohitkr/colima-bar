@@ -32,4 +32,12 @@ import Testing
         #expect(ctr("Up 5 seconds (health: starting)").health == "health: starting")
         #expect(ctr("Up 3 days").health == nil)
     }
+
+    @Test func theNamedVolumesLeaveOutAnonymousOnesAndAreSortedByName() {
+        func row(_ name: String, anonymous: Bool = false) -> VolumeRow {
+            VolumeRow(name: name, size: 1, links: 0, project: nil, isAnonymous: anonymous)
+        }
+        let rows = [row("b"), row(String(repeating: "f", count: 64), anonymous: true), row("a")]
+        #expect(VolumeRow.named(rows).map(\.name) == ["a", "b"])
+    }
 }

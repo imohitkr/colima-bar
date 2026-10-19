@@ -14,7 +14,7 @@ Colima or Lima has a new minor or major version, or an older version, since the 
 
 1. Click **Release Notes**. Read the notes of Colima and Lima. ColimaBar starts nothing.
 2. Back up the data that you need.
-   - If the VM runs (Restart or a change of settings), copy a volume to a file. Run this in a folder in your home folder: `docker run --rm -v VOLUME:/data -v "$PWD":/backup alpine tar czf /backup/VOLUME.tgz -C /data .`
+   - If the VM runs (Restart or a change of settings), click **•••** next to the volume in the Volumes tab and choose **Back Up…**. To save all named volumes, choose **Back Up All…**. See [Back up and restore volumes](usage.md#back-up-and-restore-volumes). Or copy a volume with the docker CLI. Run this in a folder in your home folder: `docker run --rm -v VOLUME:/data -v "$PWD":/backup alpine tar czf /backup/VOLUME.tgz -C /data .`
    - If the VM is stopped, do not start it with `colima start`. That start is the risk that the dialog guards against. Copy the [Colima folder](#colimabar-uses-the-wrong-colima-folder) while the VM is stopped. On APFS, this makes a fast clone: `cp -cR ~/.colima ~/colima-backup`. Use your own Colima folder in place of `~/.colima`.
 3. Start the VM again in ColimaBar and click **Continue**.
 
@@ -106,6 +106,21 @@ If the notification says that the stop failed, the new disk exists and the VM ru
 2. Run `colima start --profile PROFILE`.
 
 The containers, images and volumes are gone after the delete. You cannot get them back.
+
+## A volume restore fails
+
+Read the notification. It gives the reason. ColimaBar changes nothing before it has checked the whole file. See [Back up and restore volumes](usage.md#back-up-and-restore-volumes).
+
+- **The file is not a complete tar archive.** The file is cut off, or it is not a tar file. Make the backup again.
+- **The file has an unsafe entry.** The archive has a path outside the volume, or a device. ColimaBar restores only archives that have `v/` as their root, such as its own backups and the output of `docker cp CONTAINER:/path` for a folder named `v`.
+- **The file is compressed.** ColimaBar accepts plain tar only. Run `gunzip FILE.tar.gz`, then restore the `.tar` file.
+- **Containers use volume NAME.** Remove the containers (the notification names them), or restore to a new volume.
+- **The disk is full** (the reason has "no space left"). Remove data that you do not need, or grow the disk. See [VM settings](usage.md#vm-settings).
+- **ColimaBar cannot read the file.** Choose a file in a folder that you own.
+
+If a restore into a volume with files fails after you clicked **Replace All Files**, the volume holds none or only some of the files, or it does not exist. The notification says which. Restore the backup again. A restore into a new volume removes the new volume when it fails.
+
+If a backup or restore ends because the VM stopped, ColimaBar removes the helper container at the first container refresh after the next launch. It looks only for containers that have both labels `com.imohitkr.colimabar.helper=1` and `com.imohitkr.colimabar.helper.kind=volume`.
 
 ## Auto-start fails
 

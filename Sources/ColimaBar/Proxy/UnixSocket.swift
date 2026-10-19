@@ -16,6 +16,9 @@ enum UnixSocket {
     static func tryConnect(_ path: String, timeout: Int = 0) -> Result<Int32, Error> {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return .failure(.socket(errno)) }
+        // Before `connect`: macOS refuses this option on a socket whose peer
+        // has gone, and a later write would then raise SIGPIPE.
+        noSigPipe(fd)
         guard var addr = address(path) else {
             close(fd)
             return .failure(.socket(ENAMETOOLONG))
@@ -47,6 +50,8 @@ enum UnixSocket {
         unlink(tmp)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw Error.socket(errno) }
+        // Accepted sockets inherit it, so no write to a client that left can raise SIGPIPE.
+        noSigPipe(fd)
         guard var addr = address(tmp) else {
             close(fd)
             throw Error.socket(ENAMETOOLONG)
@@ -79,9 +84,14 @@ enum UnixSocket {
         if own { chmod(dir, 0o700) }
     }
 
-    static func configure(_ fd: Int32, timeout: Int) {
+    /// A write to a socket whose peer has gone then fails with EPIPE and raises no signal.
+    static func noSigPipe(_ fd: Int32) {
         var one: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, socklen_t(MemoryLayout<Int32>.size))
+    }
+
+    static func configure(_ fd: Int32, timeout: Int) {
+        noSigPipe(fd)
         if timeout > 0 { setTimeout(fd, timeout) }
     }
 

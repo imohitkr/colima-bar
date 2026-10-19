@@ -24,6 +24,31 @@ struct ColimaStatusJSON: Decodable {
 struct APIInfo: Decodable {
     /// The clock of the VM, in RFC 3339 format.
     let SystemTime: String?
+    /// The CPU architecture of the VM, for example `aarch64` or `x86_64`.
+    let Architecture: String?
+}
+
+/// `GET /volumes/NAME`.
+struct APIVolume: Decodable {
+    let Name: String
+    let Driver: String?
+    let Labels: [String: String]?
+    let CreatedAt: String?
+    /// The driver options, for example a bind folder or an NFS address.
+    let Options: [String: String]?
+
+    /// True for a plain `local` volume that ColimaBar can delete and create again.
+    var isPlain: Bool { (Driver ?? "local") == "local" && (Options ?? [:]).isEmpty }
+}
+
+/// The reply of `POST /containers/create`.
+struct APIIdResponse: Decodable {
+    let Id: String
+}
+
+/// The error reply of the daemon: `{"message":"…"}`.
+struct APIMessage: Decodable {
+    let message: String?
 }
 
 struct APIContainer: Decodable {

@@ -96,6 +96,39 @@ A spinner shows while docker compose runs for the project. If it fails, a notifi
 
 These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, and remove unused volumes. ColimaBar asks before it deletes volume data.
 
+#### Back up and restore volumes
+
+ColimaBar saves the files of a volume to a tar archive on your Mac, and copies them back. The VM must run. One backup or restore runs at a time. A debug run does not back up or restore.
+
+To back up one volume:
+
+1. In the Volumes tab, click **•••** next to the volume. Choose **Back Up…**.
+2. If running containers use the volume, ColimaBar names them. They can change files during the backup. For a database, stop the containers first. Click **Back Up** to go on.
+3. Choose the name and the folder, then save. The default name is `VOLUME-yyyyMMdd-HHmmss.tar`.
+
+The strip at the top of the tab shows the progress and a **Cancel** button. When you cancel, or when the backup fails, ColimaBar removes the incomplete file. The notification has the file name, not the path.
+
+To back up all named volumes, click **•••** in the header of the tab and choose **Back Up All…**. Choose a folder. ColimaBar saves each volume to its own file. It never replaces a file that exists.
+
+The backup file is a plain `.tar` file with the mode `0600`. It is not compressed. Its first entry is `.colimabar-volume.json`: the name, the driver and the labels of the volume. The files of the volume follow in the folder `v/`. You can read the file with `tar tf FILE`. ColimaBar needs no helper image from the internet: it builds a small image on your Mac and loads it into the VM. The helper container never starts, and ColimaBar removes it after each backup.
+
+To restore a backup:
+
+1. To restore into a volume that exists, click **•••** next to it and choose **Restore from Backup…**. To make a new volume, click **•••** in the header and choose **Restore to New Volume…**.
+2. Choose the `.tar` file. ColimaBar reads the whole file first and changes nothing. It refuses a file that is not a complete tar archive, and a file with an unsafe entry (a path outside the volume, or a device). A gzip file is not accepted: run `gunzip` first.
+3. For a new volume, enter a name. ColimaBar restores the labels of the file only if the new name is the same as the old name.
+
+ColimaBar follows these rules for an existing volume:
+
+| The volume | What ColimaBar does |
+|---|---|
+| Has no files | It restores the files into the volume. |
+| Has files, and no container uses it | It asks. Click **Replace All Files** to delete the volume, create it again with its own labels and restore. The old files are lost for good. |
+| Has files, and uses a driver option (a bind folder or NFS) | It refuses. ColimaBar cannot create such a volume again. Restore to a new volume. |
+| Has files, and containers use it | It refuses and names the containers. Remove them first, or restore to a new volume. |
+
+If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-restore-fails).
+
 ### System tab
 
 - **VM resources**: Light, Standard and Heavy presets, or your own CPU and memory values. **Apply** restarts the VM.
@@ -212,14 +245,14 @@ Repair never touches disks, `cidata.iso`, `*.yaml` files, logs or sockets. Your 
 ### Shrink the disk
 
 > [!WARNING]
-> Shrink deletes all Docker data of the profile: all containers, images, volumes and build cache. If Kubernetes is on, it also deletes the cluster and its data. You cannot undo this. Before you shrink, save the data that you want to keep, for example with `docker save` or a volume backup.
+> Shrink deletes all Docker data of the profile: all containers, images, volumes and build cache. If Kubernetes is on, it also deletes the cluster and its data. You cannot undo this. Before you shrink, save the data that you want to keep. To keep volume data, [back up the volumes](#back-up-and-restore-volumes) first. The warning names the volumes, and the **Back Up Volumes…** button starts **Back Up All…**.
 
 Colima cannot shrink a disk in place. Thus **Shrink…** deletes the VM and its disk, and starts the VM again with an empty, smaller disk. The other VM settings in `colima.yaml` stay: CPU, memory, runtime, architecture, VM type, mount type, Rosetta and Kubernetes.
 
 To shrink the disk:
 
 1. On the System tab or the stopped screen, click **Shrink…** next to the disk size. Select a size: 20, 40, 60 or 80 GB. The menu shows only the sizes that are smaller than the current disk.
-2. Read the warning. It shows the data that the disk holds now, from the **Disk usage** section. If the VM is stopped, ColimaBar cannot show this data.
+2. Read the warning. It shows the data that the disk holds now, from the **Disk usage** section. If the VM is stopped, ColimaBar cannot show this data, and it tells you to start the VM and back up the volumes first. If the VM runs and has named volumes, the warning lists them. Click **Back Up Volumes…** to stop the shrink and back up the volumes. Then start the shrink again.
 3. Type the profile name. Then click **Delete Data and Shrink**.
 4. Colima asks one more time. Click **OK**.
 
@@ -371,6 +404,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.
 - ColimaBar refuses a link, or a link is not valid. If notifications are off, an alert window shows the text. See [A link does nothing](troubleshooting.md#a-link-does-nothing).
 - After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).
+- A volume backup or restore ends or fails. The notification has the volume name and the file name, never the path. See [Back up and restore volumes](#back-up-and-restore-volumes).
 - A published port answers in the VM but not on the Mac, or the VM cannot resolve host names while the Mac can. The notification has a **Restart** button. See [When the network changes](#when-the-network-changes).
 
 ColimaBar sends no notification for a normal start or stop. Exit codes 130, 137 and 143 (SIGINT, SIGKILL and SIGTERM) count as a normal stop, so they send no crash alert. ColimaBar also ignores testcontainers containers. For one container and one kind of failure, it sends at most one notification each 10 minutes.
