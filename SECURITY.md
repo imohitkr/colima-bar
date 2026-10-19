@@ -34,6 +34,7 @@ Include this information:
 These notes describe how ColimaBar works. They help you decide if a problem is a vulnerability.
 
 - **The ColimaBar socket and the profile sockets.** ColimaBar listens on the ColimaBar socket (`~/.cache/colima-bar/docker.sock`). It also listens on one profile socket for each docker profile (`~/.cache/colima-bar/profiles/PROFILE.sock`). Each socket has mode `0600`. Each socket folder has mode `0700`. Only your macOS user can connect. A way for another local user to connect is a vulnerability.
+- **The `colimabar` command.** It runs as your user. `status`, `doctor` and `diagnostics` only read, and `diagnostics` never overwrites a file. `--profile` must pass `ProfileName.isValid` and reaches `colima-ctl.sh` only through the environment. The app writes `~/.cache/colima-bar/app-status.json` with mode `0600`. A way to make the command change a setting, create a VM, or run something other than `colima-ctl.sh` is a vulnerability.
 - **Docker daemon access.** Access to a socket of the Docker daemon is equal to root access inside the VM. The ColimaBar socket and each profile socket give the same access as the Colima socket of their profile, and no more. Any process that runs as your user can already use the Colima socket. Thus this access alone is not a vulnerability.
 - **Docker routes.** ColimaBar sets these routes:
   - `DOCKER_HOST` with `launchctl setenv`.

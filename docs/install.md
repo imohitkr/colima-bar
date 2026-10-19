@@ -57,7 +57,7 @@ macOS does not show the "Apple could not verify" prompt for this download. If Co
 Set `COLIMABAR_VERSION` to the release tag. The installer supports v0.4.0 and later.
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_VERSION=v0.9.0 bash
+curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/install.sh | COLIMABAR_VERSION=v0.10.0 bash
 ```
 
 ## The disk image
@@ -176,7 +176,7 @@ ColimaBar keeps the old app in `~/.cache/colima-bar/update/previous` until the n
 
 - The release is immutable, and the size and SHA-256 digest of `ColimaBar.zip` come from the GitHub API. ColimaBar compares them with the file that it downloaded.
 - If `gh` 2.68 or later is installed and logged in, ColimaBar runs the same `gh attestation verify` check as [the installer](#what-the-installer-checks). If the check fails, ColimaBar stops. If `gh` cannot run it when you confirm, the dialog says so, and the update goes on with the digest check. If `gh` could run it then but cannot run it later (for example, no network or a time-out), ColimaBar stops and keeps the **Install** button. Click it again later.
-- The zip must hold only `ColimaBar.app`. The app must have a valid signature with the code identifier `com.imohitkr.ColimaBar`, the version of the release, a newer version than the running one, and `colima-ctl.sh`.
+- The zip must hold only `ColimaBar.app`. The app must have a valid signature with the code identifier `com.imohitkr.ColimaBar`, the version of the release, a newer version than the running one, `colima-ctl.sh` and the `colimabar` command.
 
 These checks rest on TLS and GitHub. The digest shows that the file is whole and is the file that GitHub stores. Immutable releases keep the files of a tag. Only the attestation shows that the release workflow of this repository built the file. The ad-hoc signature shows integrity, not the author. Homebrew is stronger: the cask holds the SHA-256 in a separate repository, and the tap checks the attestation. See [SECURITY.md](../SECURITY.md).
 
