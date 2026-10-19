@@ -12,6 +12,12 @@ enum DoctorFix: Equatable, Sendable {
     case addPluginFolder
     /// Runs `colima-ctl.sh repair` (the same as the Repair button).
     case repair
+    /// Restarts the VM, so Colima forwards the ports again or the VM reads the DNS of the Mac again.
+    case restartVM
+    /// Sets `portForwarder: ssh` in colima.yaml and restarts the VM.
+    case useSSHForwarder
+    /// Clears `network.dns` in colima.yaml, so the VM uses the DNS of the Mac, and restarts the VM.
+    case useMacDNS
 
     /// A fixed name for scripts: the `fix` field of `colimabar doctor --json`.
     /// Do not change a value.
@@ -23,6 +29,9 @@ enum DoctorFix: Equatable, Sendable {
         case .useOsxkeychain: "useOsxkeychain"
         case .addPluginFolder: "addPluginFolder"
         case .repair: "repair"
+        case .restartVM: "restartVM"
+        case .useSSHForwarder: "useSSHForwarder"
+        case .useMacDNS: "useMacDNS"
         }
     }
 
@@ -34,6 +43,9 @@ enum DoctorFix: Equatable, Sendable {
         case .useOsxkeychain: "Use osxkeychain"
         case .addPluginFolder: "Add folder"
         case .repair: "Repair…"
+        case .restartVM: "Restart"
+        case .useSSHForwarder: "Use ssh forwarder"
+        case .useMacDNS: "Use the Mac's DNS"
         }
     }
 }

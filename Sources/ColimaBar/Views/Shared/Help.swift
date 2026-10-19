@@ -220,7 +220,7 @@ enum Help {
 
     // Doctor
     static let doctorOpen =
-        "Open Doctor. It checks the docker setup, the VM and the disk space of this profile, and offers fixes."
+        "Open Doctor. It checks the docker setup, the VM, the disk space, the published ports and the DNS of this profile, and offers fixes."
     static let doctorRun =
         "Run all checks again. The checks only read. They do not start or change the VM."
     static let doctorDone = "Close Doctor and go back to the dashboard."
@@ -245,6 +245,12 @@ enum Help {
             "Add /opt/homebrew/lib/docker/cli-plugins to cliPluginsExtraDirs in the docker config file. ColimaBar saves a backup first."
         case .repair:
             doctorRepair
+        case .restartVM:
+            networkRestart
+        case .useSSHForwarder:
+            "Set portForwarder: ssh in colima.yaml and restart the VM. ColimaBar asks first. Running containers stop."
+        case .useMacDNS:
+            "Remove the servers in network.dns from colima.yaml and restart the VM. The VM then uses the DNS of your Mac, also after a VPN change. ColimaBar asks first. Running containers stop."
         }
     }
     static func doctorCheck(_ check: DoctorCheck) -> String {
@@ -260,8 +266,24 @@ enum Help {
         case .vmStatus: "The status of this profile in colima list."
         case .staleFiles: "Pid files of Lima and of the Colima daemon that name a process that is gone or not theirs."
         case .diskSpace: "Free space in the VM and on the Mac."
+        case .portForwarding:
+            "Published TCP ports of running containers. Each one must answer on the Mac, not only in the VM. The check sends no data."
+        case .vmDNS:
+            "The VM looks up registry-1.docker.io, and so does the Mac. A VPN or a network change can break the DNS of the VM."
         }
     }
+
+    // Network notice
+    static let networkPorts =
+        "Published ports answer in the VM but not on the Mac. Port forwarding is broken, for example after a network change or a sleep."
+    static let networkDNS =
+        "The VM cannot resolve host names, but the Mac can. A VPN or a network change can cause this."
+    static let networkRestart =
+        "Restart the VM. Colima then forwards the ports again and the VM reads the DNS of the Mac again. Running containers stop. Only containers with a restart policy start again."
+    static let networkSetDNS =
+        "Open the VM settings, to change the DNS servers in network.dns. Empty uses the DNS of your Mac."
+    static let networkCheckAgain =
+        "Check the ports and the DNS of the VM again now. The check sends no data and does not change the VM."
     static let doctorStopped = "Open Doctor to find out why the VM does not start."
 
     // Footer

@@ -88,7 +88,7 @@ Each source file holds one type, or one type and its small private helpers. The 
 ## Coding conventions
 
 - Use Swift 6.4 and SwiftPM, in the Swift 6 language mode. Do not add third-party dependencies.
-- Use only Apple frameworks: AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit and CryptoKit (`notify` is part of libSystem).
+- Use only Apple frameworks: AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, SystemConfiguration and CryptoKit (`notify` is part of libSystem).
 - Draw graphs with SwiftUI `Shape` or `Path`. Do not use Swift Charts or `Canvas`, because they use a lot of graphics memory.
 - Keep UI state in the `@Observable` `ColimaModel`. Assign a property only when its value changes. This keeps the popover still and the redraws small.
 - Write tests with [Swift Testing](https://developer.apple.com/documentation/testing) (`@Suite`, `@Test`, `#expect`). Do not use XCTest.

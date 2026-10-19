@@ -10,6 +10,8 @@ enum DoctorCheck: String, CaseIterable, Sendable {
     case vmStatus
     case staleFiles
     case diskSpace
+    case portForwarding
+    case vmDNS
 
     var title: String {
         switch self {
@@ -23,6 +25,8 @@ enum DoctorCheck: String, CaseIterable, Sendable {
         case .vmStatus: "VM status"
         case .staleFiles: "Stale Lima files"
         case .diskSpace: "Disk space"
+        case .portForwarding: "Port forwarding"
+        case .vmDNS: "DNS in the VM"
         }
     }
 }

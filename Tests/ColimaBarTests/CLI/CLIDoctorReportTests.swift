@@ -43,6 +43,22 @@ import Testing
         #expect(checks[1]["title"] as? String == "Docker context")
     }
 
+    @Test func theNetworkChecksAreNewItemsAndTheSchemaStaysAtOne() throws {
+        let report = DoctorReport(
+            profile: "work", date: Date(timeIntervalSince1970: 0),
+            results: [
+                .init(.portForwarding, .problem, "Ports 8080 answer in the VM but not on the Mac.", fix: .restartVM),
+                .init(.vmDNS, .ok, "The VM resolves registry-1.docker.io."),
+            ])
+        let json = CLIDoctorReport(version: "0.10.0", report: report, home: "/Users/me").json()
+        let o = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+        let checks = try #require(o["checks"] as? [[String: Any]])
+        #expect(o["schemaVersion"] as? Int == 1)
+        #expect(checks.map { $0["id"] as? String } == ["portForwarding", "vmDNS"])
+        #expect(checks.map { $0["title"] as? String } == ["Port forwarding", "DNS in the VM"])
+        #expect(checks[0]["fix"] as? String == "restartVM")
+    }
+
     @Test func aFixIsItsNameAndNoFixIsNull() throws {
         let checks = try #require(try object()["checks"] as? [[String: Any]])
         #expect(checks[1]["fix"] as? String == "useColimabar")
