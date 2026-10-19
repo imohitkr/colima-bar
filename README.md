@@ -60,7 +60,7 @@ You need a Mac with Apple silicon, macOS 14 or later, and [Colima](https://githu
 brew install --cask imohitkr/tap/colima-bar
 ```
 
-Apple does not notarize ColimaBar, so macOS blocks the first launch after you install or upgrade. To allow it, open **System Settings > Privacy & Security** and click **Open Anyway**.
+Apple does not notarize ColimaBar, so macOS blocks the first launch after you install or upgrade. macOS shows "ColimaBar" Not Opened. Click **Done**. Do not click **Move to Bin**: it deletes ColimaBar. Then open **System Settings > Privacy & Security** and click **Open Anyway**. Or remove the quarantine flag: `xattr -dr com.apple.quarantine /Applications/ColimaBar.app`. If ColimaBar is gone, see [ColimaBar is gone after the macOS prompt](docs/troubleshooting.md#colimabar-is-gone-after-the-macos-prompt).
 
 **The installer.** Run this command in Terminal. macOS does not block this download.
 

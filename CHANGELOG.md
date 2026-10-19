@@ -11,6 +11,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - A `colimabar` command for Terminal and scripts. `colimabar status` shows the VM, auto-start, auto-stop and the socket. `colimabar start`, `stop` and `restart` run the VM actions and wait until Docker is ready. `colimabar open` opens the dashboard. `colimabar doctor` runs the Doctor checks, and `colimabar diagnostics` writes the diagnostics file. `status` and `doctor` have `--json` for scripts. `status`, `doctor` and `diagnostics` never start the VM, and ColimaBar does not need to run. Homebrew and the installer link the command, and `~/.local/bin` or `~/bin` gets the link if it is in your `PATH`. The uninstall script removes these links. See [Command line](docs/usage.md#command-line).
 - ColimaBar opens `colimabar://` links: `open`, `doctor`, `start`, `stop` and `restart`. The last three take `profile=NAME`. Use them from Raycast, Alfred, Shortcuts or a script. ColimaBar asks before a link starts, stops or restarts a VM. The System tab setting **Ask before a link starts, stops or restarts Colima** turns the question off. A link never gives data back, and never creates a VM. See [Links](docs/usage.md#links-url-scheme).
 
+### Changed
+
+- The install docs warn that **Move to Bin** in the "ColimaBar" Not Opened prompt deletes ColimaBar, and tell you to click **Done**. A new troubleshooting entry tells you how to get ColimaBar back. See [ColimaBar is gone after the macOS prompt](docs/troubleshooting.md#colimabar-is-gone-after-the-macos-prompt).
+
 ### Fixed
 
 - The dashboard did not show when the icon was behind the camera housing or when the menu bar was full. It now opens as a window.

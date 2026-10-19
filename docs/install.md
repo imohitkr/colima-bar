@@ -20,13 +20,13 @@ brew install --cask imohitkr/tap/colima-bar
 
 The cask comes from the [imohitkr/homebrew-tap](https://github.com/imohitkr/homebrew-tap) repository. Homebrew installs ColimaBar in `/Applications`. A workflow in the tap verifies the attestation of each new release before it updates the cask. See [Verify a download](#verify-a-download).
 
-Apple does not notarize ColimaBar. Thus macOS blocks the first launch after you install or upgrade ColimaBar. To allow it, do the steps in [The disk image](#the-disk-image), or remove the quarantine flag:
+Apple does not notarize ColimaBar. Thus macOS blocks the first launch after you install or upgrade ColimaBar. Homebrew adds the quarantine flag on each install and upgrade, so this occurs again after each `brew upgrade`. When macOS shows "ColimaBar" Not Opened, click **Done**. Do not click **Move to Bin**: it deletes `/Applications/ColimaBar.app`, and Homebrew does not know that it is gone. Then do the steps in [The disk image](#the-disk-image), or remove the quarantine flag:
 
 ```sh
 xattr -dr com.apple.quarantine /Applications/ColimaBar.app
 ```
 
-To upgrade, run `brew upgrade --cask colima-bar`.
+To upgrade, run `brew upgrade --cask colima-bar`. Then remove the quarantine flag again.
 
 `brew uninstall` cannot restore your docker settings. To uninstall, do these steps in this order:
 
@@ -66,9 +66,9 @@ curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/in
 2. Open the disk image.
 3. Drag ColimaBar into Applications.
 
-Apple does not notarize ColimaBar. Thus the first launch shows "Apple could not verify ColimaBar". Do these steps one time:
+Apple does not notarize ColimaBar. Thus the first launch shows "ColimaBar" Not Opened: "Apple could not verify ColimaBar". Do these steps one time:
 
-1. Click **Done**.
+1. Click **Done**. Do not click **Move to Bin**: it deletes ColimaBar. If you clicked it, see [ColimaBar is gone after the macOS prompt](troubleshooting.md#colimabar-is-gone-after-the-macos-prompt).
 2. Open **System Settings > Privacy & Security**.
 3. Scroll down. Next to "ColimaBar was blocked", click **Open Anyway**.
 4. Enter your password, then click **Open Anyway** again.

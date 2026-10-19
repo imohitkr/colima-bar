@@ -135,7 +135,31 @@ ColimaBar reads `COLIMA_HOME`, `LIMA_HOME` and `XDG_CONFIG_HOME` from its launch
 
 ## macOS blocks the first launch
 
-Apple does not notarize ColimaBar. If you use the disk image, follow the [Open Anyway steps](install.md#the-disk-image). As an alternative, use [the installer](install.md#the-installer). macOS does not block its download.
+Apple does not notarize ColimaBar. macOS shows "ColimaBar" Not Opened. Click **Done**, not **Move to Bin**. Then follow the [Open Anyway steps](install.md#the-disk-image), or remove the quarantine flag:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/ColimaBar.app
+```
+
+With Homebrew, this occurs after each install and upgrade. As an alternative, use [the installer](install.md#the-installer). macOS does not block its download.
+
+The prompt can also come when you do not open ColimaBar yourself: at login, the login item starts ColimaBar. After a `brew upgrade`, remove the quarantine flag before you log out, or click **Done** at the next login.
+
+## ColimaBar is gone after the macOS prompt
+
+If you clicked **Move to Bin**, macOS deleted `/Applications/ColimaBar.app`. Your settings and the login item stay. To install ColimaBar again:
+
+- **Homebrew.** Homebrew still lists the cask, so use `reinstall`, then remove the quarantine flag:
+
+  ```sh
+  brew reinstall --cask colima-bar
+  xattr -dr com.apple.quarantine /Applications/ColimaBar.app
+  open /Applications/ColimaBar.app
+  ```
+
+- **Disk image or installer.** Install ColimaBar again as described in [install.md](install.md). The installer download has no quarantine flag.
+
+If docker cannot connect while ColimaBar is gone, see [docker cannot connect after you quit ColimaBar](#docker-cannot-connect-after-you-quit-colimabar).
 
 ## An update does not install
 
