@@ -215,6 +215,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
             // COLIMABAR_DOCTOR=1: show the Doctor page. It runs the checks.
             if ProcessInfo.processInfo.environment["COLIMABAR_DOCTOR"] == "1" { ui.showDoctor = true }
+            // COLIMABAR_VMCONFIG=1: show the "More VM settings" page.
+            if ProcessInfo.processInfo.environment["COLIMABAR_VMCONFIG"] == "1" { ui.showVMConfig = true }
+            // COLIMABAR_RUNNING_ONLY=1: turn the filter on in memory only.
+            // It is not a saved setting, so a debug run changes no Defaults.
+            if ProcessInfo.processInfo.environment["COLIMABAR_RUNNING_ONLY"] == "1" { ui.runningOnly = true }
+            // COLIMABAR_INSPECT=<name>: show the Inspect page of that container
+            // after the first refresh. If there is no such container, the tab stays.
+            if let name = ProcessInfo.processInfo.environment["COLIMABAR_INSPECT"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    guard let self, let c = self.model.containers.first(where: { $0.name == name }) else { return }
+                    self.ui.inspectID = c.id
+                }
+            }
             showWindow()
             if let hs = ProcessInfo.processInfo.environment["COLIMABAR_SNAPSHOT_HEIGHT"], let h = Double(hs) {
                 window?.setContentSize(NSSize(width: 480, height: h))

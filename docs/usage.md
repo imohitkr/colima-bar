@@ -94,7 +94,7 @@ A spinner shows while docker compose runs for the project. If it fails, a notifi
 
 ### Images and Volumes tabs
 
-These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, and remove unused volumes. ColimaBar asks before it deletes volume data.
+These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, remove unused volumes, and back up and restore volumes. See [Back up and restore volumes](#back-up-and-restore-volumes). ColimaBar asks before it deletes volume data.
 
 #### Back up and restore volumes
 
@@ -405,6 +405,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - ColimaBar refuses a link, or a link is not valid. If notifications are off, an alert window shows the text. See [A link does nothing](troubleshooting.md#a-link-does-nothing).
 - After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).
 - A volume backup or restore ends or fails. The notification has the volume name and the file name, never the path. See [Back up and restore volumes](#back-up-and-restore-volumes).
+- A docker compose command fails, or ColimaBar stops it after 15 minutes. The notification gives the exit code, not the output. See [Compose projects](#compose-projects).
 - A published port answers in the VM but not on the Mac, or the VM cannot resolve host names while the Mac can. The notification has a **Restart** button. See [When the network changes](#when-the-network-changes).
 
 ColimaBar sends no notification for a normal start or stop. Exit codes 130, 137 and 143 (SIGINT, SIGKILL and SIGTERM) count as a normal stop, so they send no crash alert. ColimaBar also ignores testcontainers containers. For one container and one kind of failure, it sends at most one notification each 10 minutes.
