@@ -201,6 +201,17 @@ If the icon is behind the camera housing or the menu bar is full, ColimaBar open
 
 See [Links](usage.md#links-url-scheme).
 
+## The dashboard shortcut does nothing
+
+1. Open the System tab. Look at the row **Keyboard shortcut for the dashboard**. An orange line says why the shortcut does not work.
+2. If the line says that another app uses the shortcut, close that app or record a different shortcut.
+3. If the line says that macOS uses the shortcut, record a different one. Or turn the macOS shortcut off in System Settings > Keyboard > Keyboard Shortcuts.
+4. If the row shows no orange line, click the ✕ and record the shortcut again.
+5. If ColimaBar runs as a debug run (`--snapshot`, `--popover` …), it does not use the shortcut. Quit it and open ColimaBar normally.
+6. After an update, the old copy can hold the keys for a few seconds. ColimaBar tries again after 1 and 3 seconds.
+
+See [The dashboard shortcut](usage.md#the-dashboard-shortcut).
+
 ## Report a bug
 
 Open [Doctor](usage.md#doctor) and click **Report an Issue…** (the right-click menu has it too). ColimaBar then saves a [diagnostics file](usage.md#save-diagnostics-and-report-an-issue) and opens the bug report form with the versions filled in. Drag the file into the **Diagnostics** box.

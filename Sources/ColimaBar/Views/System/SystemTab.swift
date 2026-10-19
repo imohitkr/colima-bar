@@ -193,6 +193,7 @@ struct SystemTab: View {
             }
             Toggle("Ask before a link starts, stops or restarts Colima", isOn: $model.askBeforeLinks)
                 .hint(Help.askBeforeLinks)
+            ShortcutRecorder(recording: form.shortcut)
             HStack(spacing: 6) {
                 Button("Export Settings…") { SettingsFilePanel.export(model: model) }
                     .hint(Help.exportSettings)

@@ -12,4 +12,5 @@ final class SystemForm {
     var isLinking = false
     var isCustomIdle = false  // "Custom" picked in the auto-stop picker
     var customMinutes = ""
+    let shortcut = ShortcutRecording()
 }

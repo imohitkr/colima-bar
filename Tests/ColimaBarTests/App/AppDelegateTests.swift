@@ -36,4 +36,24 @@ import Testing
         #expect(!AppDelegate.isDebugRun(arguments: ["/x/ColimaBar"]))
         #expect(!AppDelegate.isDebugRun(arguments: ["/x/ColimaBar", "--window", "--replace"]))
     }
+
+    @Test func theShortcutActionFollowsTheTableForAllInputs() {
+        typealias Row = (modal: Bool, popover: Bool, open: Bool, front: Bool, action: ShortcutAction)
+        let table: [Row] = [
+            (false, false, false, false, .reveal),
+            (false, false, false, true, .reveal),
+            (false, false, true, false, .showWindow),
+            (false, false, true, true, .closeWindow),
+            (false, true, false, false, .closePopover),
+            (false, true, false, true, .closePopover),
+            (false, true, true, false, .closePopover),
+            (false, true, true, true, .closePopover),
+        ]
+        let modalRows: [Row] = table.map { (true, $0.popover, $0.open, $0.front, .nothing) }
+        for row in table + modalRows {
+            let action = AppDelegate.shortcutAction(
+                modal: row.modal, popoverShown: row.popover, windowOpen: row.open, windowFront: row.front)
+            #expect(action == row.action, "\(row)")
+        }
+    }
 }

@@ -26,6 +26,7 @@
 - **Auto-stop**: ColimaBar can stop the VM when it is idle.
 - **Doctor**: one click checks the docker setup (context, routes, shell, plugins, VM and disk) and fixes common problems. **Repair** gets a Broken profile running again.
 - **Links**: start, stop or restart the VM, or open the dashboard, from Raycast, Alfred, Shortcuts or a script with `colimabar://` links. ColimaBar asks first.
+- **Shortcut**: press a keyboard shortcut that you choose to open or close the dashboard from any app. It needs no extra permission.
 - **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, when a Doctor fix ends, after an auto-start that follows a Colima or Lima upgrade, one for each new version and one after an in-app update, and one the first time the icon hides.
 
 > [!NOTE]
@@ -81,6 +82,7 @@ If your `~/.zshrc` sets `DOCKER_HOST`, replace that line with the [shell snippet
 ## Use
 
 - Left-click the menu bar icon to open the dashboard. Move the pointer over a control to see what it does.
+- To open the dashboard from the keyboard, record a shortcut on the System tab. See [The dashboard shortcut](docs/usage.md#the-dashboard-shortcut).
 - Right-click or Control-click the icon to start, stop or restart Colima, change options, check for updates, uninstall or quit.
 - In Terminal, run `colimabar status`, `colimabar start` or `colimabar doctor`. Add `--json` for scripts. See [Command line](docs/usage.md#command-line).
 
