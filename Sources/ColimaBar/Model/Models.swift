@@ -24,8 +24,13 @@ struct Container: Identifiable, Equatable {
     /// "healthy", "unhealthy", "health: starting" or nil. Parsed once here,
     /// not on every read: rows read it several times per render.
     let health: String?
+    /// The folder and files of the Compose project, if the labels are valid.
+    let compose: ComposeProject?
 
-    init(id: String, name: String, image: String, state: String, status: String, ports: [Int], project: String?) {
+    init(
+        id: String, name: String, image: String, state: String, status: String, ports: [Int], project: String?,
+        compose: ComposeProject? = nil
+    ) {
         self.id = id
         self.name = name
         self.image = image
@@ -33,6 +38,7 @@ struct Container: Identifiable, Equatable {
         self.status = status
         self.ports = ports
         self.project = project
+        self.compose = compose
         health = Self.health(status: status)
     }
 

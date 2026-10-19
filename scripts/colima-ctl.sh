@@ -266,6 +266,8 @@ lock_vm() {
 # actions run in the background and we `wait` for them (wait is interruptible).
 WROTE_BUSY=""
 CHILD=""
+# The file with the output of docker compose. Every exit prints it and removes it.
+COMPOSE_OUT=""
 # The file that vm-config got from ColimaBar. Every exit removes it.
 STAGED=""
 # Set while vm-config has put the new colima.yaml in place of the old one and
@@ -274,6 +276,7 @@ STAGED=""
 INSTALLED=""
 VM_BACKUP=""
 cleanup() {
+  compose_show
   if [ -n "$INSTALLED" ]; then
     INSTALLED=""
     if install_config "$VM_BACKUP"; then
@@ -295,6 +298,8 @@ on_term() {
   if [ -n "$CHILD" ]; then
     pkill -TERM -P "$CHILD" 2>/dev/null
     kill -TERM "$CHILD" 2>/dev/null
+    # Compose: wait until docker ended, so ColimaBar keeps the project busy.
+    [ -n "$COMPOSE_OUT" ] && wait "$CHILD" 2>/dev/null
   fi
   exit 143
 }
@@ -710,6 +715,82 @@ restart_vm() {
   start_vm
 }
 
+# compose_check NAME DIR NENV ENV... FILE...: checks the arguments of a
+# Compose action again, the way ColimaBar checked them. The name has the
+# letters, digits, "-" and "_" of Compose, and starts with a letter or digit.
+# NENV (0 to 16) is the number of env files. 1 to 16 Compose files follow
+# them. Each path is absolute. The folder and the files exist.
+compose_check() {
+  local name="$1" dir="$2" nenv="$3" f
+  [ $# -ge 4 ] || { notify "Compose needs 1 to 16 files."; exit 1; }
+  case "$nenv" in
+    [0-9]|1[0-6]) ;;
+    *) notify "Compose needs 0 to 16 env files."; exit 1 ;;
+  esac
+  shift 3
+  [ $# -gt "$nenv" ] && [ $(($# - nenv)) -le 16 ] || { notify "Compose needs 1 to 16 files."; exit 1; }
+  case "$name" in
+    ""|[-_]*|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*)
+      notify "Invalid Compose project name."; exit 1 ;;
+  esac
+  [ "${#name}" -le 63 ] || { notify "Invalid Compose project name."; exit 1; }
+  case "$dir" in
+    /*) ;;
+    *) notify "Invalid folder for the Compose project $name."; exit 1 ;;
+  esac
+  [ -d "$dir" ] || { notify "The folder of the Compose project $name is missing."; exit 1; }
+  for f in "$@"; do
+    case "$f" in
+      /*) ;;
+      *) notify "Invalid Compose file for $name."; exit 1 ;;
+    esac
+    [ -f "$f" ] || { notify "A Compose file of $name is missing. The project folder moved or was deleted."; exit 1; }
+  done
+  docker compose version >/dev/null 2>&1 \
+    || { notify "docker compose is missing. Open Doctor in ColimaBar."; exit 1; }
+}
+
+# compose_show: prints the saved output of docker compose and removes the
+# file. A line of the output must not look like a notice, so a space comes
+# before it. Cleanup calls it too, so a stop of the script keeps the output.
+compose_show() {
+  [ -n "$COMPOSE_OUT" ] || return 0
+  local file="$COMPOSE_OUT"
+  COMPOSE_OUT=""
+  tail -n 1000 "$file" 2>/dev/null | sed 's/^COLIMABAR_NOTIFY:/ COLIMABAR_NOTIFY:/'
+  rm -f "$file"
+}
+
+# compose_run VERB NAME DIR NENV ENV... FILE...: runs docker compose for the
+# profile (DOCKER_HOST). VERB is pull, up or down. A plain down keeps the
+# volumes and the images. The output goes to stdout only, never to ctl.log:
+# it can show values of the project. Docker runs in the background, so a stop
+# of this script (the time limit of ColimaBar) stops docker too.
+compose_run() {
+  local verb="$1" name="$2" dir="$3" nenv="$4" f rc
+  shift 4
+  local argv=(compose -p "$name" --project-directory "$dir")
+  while [ "$nenv" -gt 0 ]; do argv+=(--env-file "$1"); shift; nenv=$((nenv - 1)); done
+  for f in "$@"; do argv+=(-f "$f"); done
+  case "$verb" in
+    up) argv+=(up -d) ;;
+    *) argv+=("$verb") ;;
+  esac
+  (umask 077 && mkdir -p "$STATE_DIR")
+  COMPOSE_OUT="$STATE_DIR/compose-out.$$"
+  (umask 077 && : >"$COMPOSE_OUT")
+  docker "${argv[@]}" >"$COMPOSE_OUT" 2>&1 &
+  CHILD=$!
+  wait "$CHILD"
+  rc=$?
+  CHILD=""
+  compose_show
+  if [ "$rc" -ne 0 ]; then
+    notify "Compose $verb failed for $name (exit $rc). Use Copy Last Output in the project menu to see the output."
+    exit 1
+  fi
+}
+
 case "$1" in
   start)
     lock_vm
@@ -967,6 +1048,14 @@ $list" || exit 2
   ctr-restart) docker restart -- "$2" >/dev/null || { notify "Failed to restart $2"; exit 1; } ;;
   ctr-logs)    exec docker logs -f --tail 200 -- "$2" ;;
   ctr-shell)   exec docker exec -it -- "$2" sh -c 'command -v bash >/dev/null && exec bash || exec sh' ;;
+  # Compose projects: compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...
+  # Not VM actions: no lock and no busy marker. Only down asks first.
+  compose-pull) compose_check "${@:2}"; compose_run pull "${@:2}" ;;
+  compose-up)   compose_check "${@:2}"; compose_run up "${@:2}" ;;
+  compose-down)
+    compose_check "${@:2}"
+    confirm "Stop and remove the containers and networks of the Compose project $2 in $NAMED? Volumes and images stay." || exit 2
+    compose_run down "${@:2}" ;;
   # Idle auto-stop from ColimaBar: no confirmation, just a notification.
   auto-stop)
     lock_vm quiet
@@ -1071,7 +1160,7 @@ $list" || exit 2
     if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
-    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
+    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|ctr-*|compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
     echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta, k8s and vm-config stop if the VM state differs" >&2
     echo "env: COLIMABAR_UPGRADE_NOTE and COLIMABAR_RELEASE_NOTES make start, restart and the config actions ask after an upgrade" >&2

@@ -103,6 +103,7 @@ import Testing
     @Test func diskActionsAreUrgent() {
         let disk: Set<CtlAction> = [
             .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,
+            .composePull, .composeDown,
         ]
         for a in CtlAction.allCases { #expect(a.changesDisk == disk.contains(a), "\(a.rawValue)") }
     }
@@ -252,5 +253,30 @@ import Testing
         #expect(!CtlAction.vmConfig.changesDisk)
         let stopped = CtlAction.vmConfig.environment(profile: "work", expectRunning: false)
         #expect(stopped["COLIMABAR_EXPECT_RUNNING"] == "0")
+    }
+
+    @Test func composeActionsMatchTheScriptLabels() throws {
+        let labels = try scriptActions()
+        for a in [CtlAction.composePull, .composeUp, .composeDown] {
+            #expect(labels.contains(a.rawValue), "\(a.rawValue)")
+            #expect(!a.isVMAction && a.busyLabel(running: true) == nil && a.busyLabel(running: false) == nil)
+            #expect(!a.checksExpectedState && !a.warnsAfterUpgrade(running: true))
+        }
+        #expect(CtlAction.composePull.rawValue == "compose-pull")
+        #expect(CtlAction.composeUp.rawValue == "compose-up")
+        #expect(CtlAction.composeDown.rawValue == "compose-down")
+    }
+
+    @Test func onlyComposeDownAsksFirst() {
+        for running in [true, false] {
+            #expect(CtlAction.composeDown.showsDialog(running: running))
+            #expect(!CtlAction.composePull.showsDialog(running: running))
+            #expect(!CtlAction.composeUp.showsDialog(running: running))
+        }
+    }
+
+    @Test func composeActionsNeedNoExpectedState() {
+        let env = CtlAction.composeDown.environment(profile: "work", expectRunning: nil)
+        #expect(env == ["COLIMABAR_PROFILE": "work", "COLIMABAR_APP": "1"])
     }
 }

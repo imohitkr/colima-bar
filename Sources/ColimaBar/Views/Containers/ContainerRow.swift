@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ContainerRow: View {
     let model: ColimaModel
+    let ui: ViewState
     let c: Container
 
     var body: some View {
@@ -10,7 +11,8 @@ struct ContainerRow: View {
             VStack(alignment: .leading, spacing: 1) {
                 HStack(spacing: 4) {
                     // Middle truncation keeps suffixes like "-1" visible.
-                    Text(c.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle)
+                    inspectTarget(
+                        Text(c.name).font(.system(size: 12, weight: .medium)).lineLimit(1).truncationMode(.middle))
                     if let h = c.health {
                         Text(h == "health: starting" ? "starting" : h)
                             .font(.system(size: 9, weight: .medium))
@@ -20,8 +22,9 @@ struct ContainerRow: View {
                             .hint(h == "healthy" ? Help.healthy : h == "unhealthy" ? Help.unhealthy : Help.starting)
                     }
                 }
-                Text(c.isRunning ? c.image : "\(c.image) · \(c.status)")
-                    .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                inspectTarget(
+                    Text(c.isRunning ? c.image : "\(c.image) · \(c.status)")
+                        .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle))
             }
             Spacer(minLength: 4)
             // One port inline leaves room for the name; all ports are in the ••• menu.
@@ -43,6 +46,17 @@ struct ContainerRow: View {
         .opacity(c.isRunning ? 1 : 0.75)
     }
 
+    /// The name and the image open the Inspect page. The health badge is
+    /// not part of the target, so its hint does not hide the hint of the name.
+    private func inspectTarget<V: View>(_ view: V) -> some View {
+        view
+            .contentShape(Rectangle())
+            .onTapGesture { ui.inspectID = c.id }
+            .hint(Help.inspect)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { ui.inspectID = c.id }
+    }
+
     @ViewBuilder private var actions: some View {
         HStack(spacing: 0) {
             if c.isRunning {
@@ -58,6 +72,8 @@ struct ContainerRow: View {
                 IconButton("trash", Help.ctrRemove) { model.run(.containerRemove, c.name) }
             }
             Menu {
+                Button("Inspect…") { ui.inspectID = c.id }
+                Divider()
                 Button("Logs in Terminal") { model.terminal(.containerLogs, c.name) }
                 Divider()
                 Button("Copy name") { Pasteboard.copy(c.name) }

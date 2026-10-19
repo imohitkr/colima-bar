@@ -206,4 +206,94 @@ import Testing
             redactor.redact(String(once.prefix(50_000)))
                 == redactor.redact(redactor.redact(String(once.prefix(50_000)))))
     }
+
+    @Test func isSecretKeyAgreesWithTheRedaction() {
+        let r = Redactor(home: "/Users/x")
+        let secret = ["DB_PASSWORD", "AWS_SECRET_ACCESS_KEY", "GITHUB_TOKEN", "api_key", "proxy_auth", "auth"]
+        let plain = ["PATH", "AUTHOR", "KEYBOARD", "NODE_ENV", "authenticated", "PreferredAuthentications"]
+        for key in secret {
+            #expect(Redactor.isSecretKey(key), "\(key)")
+            #expect(r.redact("\(key)=value12345") == "\(key)=<redacted>", "\(key)")
+        }
+        for key in plain {
+            #expect(!Redactor.isSecretKey(key), "\(key)")
+            #expect(r.redact("\(key)=value12345") == "\(key)=value12345", "\(key)")
+        }
+    }
+
+    @Test func isSecretKeyNeedsTheStemInTheWholeKey() {
+        #expect(!Redactor.isSecretKey(""))
+        #expect(!Redactor.isSecretKey("secret value"))
+        #expect(!Redactor.isSecretKey("A=secret"))
+    }
+
+    @Test func hasSecretShapeFindsTokensAndUrlsWithPasswords() {
+        #expect(Redactor.hasSecretShape("ghp_abcdefghijklmnopqrstuvwxyz0123456789"))
+        #expect(
+            Redactor.hasSecretShape("eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dBjftJeZ4CVPmB92K27uhbUJU1p1r"))
+        #expect(Redactor.hasSecretShape("postgres://app:hunter2@db:5432/x"))
+        #expect(Redactor.hasSecretShape("-----BEGIN RSA PRIVATE KEY-----"))
+        #expect(!Redactor.hasSecretShape("postgres://db:5432/x"))
+        #expect(!Redactor.hasSecretShape("hello"))
+    }
+
+    @Test func hasSecretShapeFindsAnEmptyUserASlashInThePasswordAndAPasswordPair() {
+        #expect(Redactor.hasSecretShape("redis://:pw@redis:6379"))
+        #expect(Redactor.hasSecretShape("postgres://u:ab/cd@db/app"))
+        #expect(Redactor.hasSecretShape("Server=db;User Id=sa;Password=x"))
+        #expect(Redactor.hasSecretShape("host=db pwd = x"))
+        #expect(!Redactor.hasSecretShape("redis://redis:6379"))
+        #expect(!Redactor.hasSecretShape("passwords are hidden"))
+    }
+
+    @Test func diagnosticsHideAUrlPasswordWithAnEmptyUserOrASlash() {
+        gone("pw123", in: "REDIS_URL=redis://:pw123@redis:6379")
+        gone("ab/cd", in: "url postgres://u:ab/cd@db/app")
+        gone("ab/cd", in: "url postgres://u:ab/cd@db.example.org/app")
+        #expect(redactor.redact("redis://:pw123@redis:6379").contains("redis://"))
+    }
+
+    @Test func aPassphraseAndAConnectionStringAreSecretKeys() {
+        for key in ["GPG_PASSPHRASE", "CONNECTION_STRING", "DB_CONN_STR", "ConnStr"] {
+            #expect(Redactor.isSecretKey(key), "\(key)")
+            #expect(redactor.redact("\(key)=value12345") == "\(key)=<redacted>", "\(key)")
+        }
+    }
+
+    @Test func hideSecretValuesKeepsTheRestOfTheText() {
+        #expect(
+            Redactor.hideSecretValues(in: "run --token abc --name web", with: "XX") == "run --token XX --name web")
+        #expect(Redactor.hideSecretValues(in: "a DB_PASSWORD=x b", with: "XX") == "a DB_PASSWORD=XX b")
+    }
+
+    @Test func normalDiagnosticsLinesStayUnchanged() {
+        let lines = [
+            "colima version 0.9.1",
+            "Docker version 27.3.1, build ce12230",
+            "default  Running  aarch64  4  8GiB  100GiB  docker  192.168.5.2",
+            "desktop-linux  moby  Docker Desktop  unix:///Users/x/.docker/run/docker.sock",
+            "colima *  moby  colima  unix:///Users/x/.colima/default/docker.sock",
+            "origin  https://github.com/abiosoft/colima.git (fetch)",
+            "http://localhost:8080/path/x and https://github.com:443/a/b",
+            "tcp://127.0.0.1:2375/v1.43/info",
+            "Doctor: ok: socket answers on unix:///var/run/docker.sock",
+        ]
+        for line in lines {
+            #expect(
+                redactor.redact(line).replacingOccurrences(of: "/Users/<user>", with: "/Users/x") == line, "\(line)")
+        }
+    }
+
+    @Test func aPortAndPathIsNotAPassword() {
+        #expect(!Redactor.hasSecretShape("http://localhost:8080/path/x@v1"))
+        #expect(Redactor.hasSecretShape("redis://:1234@redis"))
+    }
+
+    @Test func longLinesRedactQuickly() {
+        let line = String(repeating: "a://b:c/d ", count: 5000) + String(repeating: "x:", count: 20_000)
+        let start = ContinuousClock.now
+        _ = redactor.redact(line)
+        _ = Redactor.hasSecretShape(line)
+        #expect(ContinuousClock.now - start < .seconds(20))
+    }
 }

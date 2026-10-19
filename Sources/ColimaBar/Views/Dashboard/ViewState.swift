@@ -16,6 +16,12 @@ final class ViewState {
     var showDoctor = false
     /// The VM settings page replaces the tabs and the stopped screen.
     var showVMConfig = false
+    /// The container that the Inspect page shows. The page replaces the
+    /// tabs while the VM runs. It never keeps a value of the container.
+    var inspectID: String? {
+        didSet { if inspectID != oldValue { inspect.reset() } }
+    }
+    let inspect = InspectState()
     let system = SystemForm()
     let vmConfig = VMConfigForm()
 }

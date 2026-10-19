@@ -6,7 +6,6 @@ These features are planned. They have no target version yet. The milestones are 
 
 ## 1. Containers
 
-- Inspect a container: environment with secrets hidden, labels, networks, mounts and restart count. Open the Compose project folder, and pull, start or stop the project.
 - A debug shell for containers that have no shell, for example distroless images.
 - Back up a volume to a file and restore it.
 
