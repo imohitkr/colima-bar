@@ -98,6 +98,34 @@ enum Help {
     static let rosettaNeedsVZ =
         "Rosetta needs the vz VM type. This profile uses a different VM type (vmType in colima.yaml). If Rosetta is on, you can still turn it off."
 
+    // System: advanced VM settings
+    static let vmSettingsOpen = "Change DNS, the port forwarder, the IP address, mounts and registries of this VM."
+    static let vmSettingsDone =
+        "Close the VM settings and go back to the dashboard. ColimaBar keeps your edits until you apply or revert them."
+    static let dnsServers =
+        "The DNS servers that the VM uses. Use them when names do not resolve, for example with a VPN. Empty uses the DNS of your Mac."
+    static let vmAddress =
+        "Give the VM an IP address that your Mac can reach. Colima cannot turn it off later."
+    static let vmCopyIP = "Copy the IP address of the VM."
+    static let portForwarder =
+        "How Colima forwards published ports to your Mac. ssh is stable and forwards TCP only. grpc also forwards UDP."
+    static let mounts = "The Mac folders that containers can use. Writable lets containers change the files."
+    static let mountAdd = "Pick a Mac folder that containers can use."
+    static let mountWritable = "Let containers change the files in this folder."
+    static let mountRemove = "Remove this folder from the list. Containers can no longer use it."
+    static let mountInotify =
+        "Send file changes on the Mac to the containers, for tools that watch files. It is experimental."
+    static let registryMirrors = "Registries that Docker tries before Docker Hub. Separate them with commas."
+    static let insecureRegistries =
+        "Registries that Docker reaches without TLS. Use them only on networks that you trust. Separate them with commas."
+    static let vmSettingsFixed =
+        "Colima ignores a change of these values after it created the VM. To change them, delete the profile and create it again."
+    static let vmSettingsApply =
+        "Write the new settings to colima.yaml and restart the VM. ColimaBar keeps a copy of the old file. Running containers stop."
+    static let vmSettingsApplyWhenStopped =
+        "Write the new settings to colima.yaml. The VM stays stopped. The new settings apply at the next start."
+    static let vmSettingsRevert = "Discard your changes."
+
     // System: disk usage
     static let dfImages = "Images that you downloaded or built. Reclaimable is the part that no container uses."
     static let dfContainers =

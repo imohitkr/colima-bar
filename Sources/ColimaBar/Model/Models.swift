@@ -9,6 +9,8 @@ struct VMInfo: Equatable {
     var diskGB = 0
     var driver = ""
     var mountType = ""
+    /// The reachable IP address of the VM (`network.address`), or "".
+    var ipAddress = ""
 }
 
 struct Container: Identifiable, Equatable {

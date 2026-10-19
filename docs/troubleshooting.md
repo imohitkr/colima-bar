@@ -42,6 +42,26 @@ If a VM action fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/
 
 If the notification says "Colima profile NAME didn't become ready", open the Lima log from the dashboard footer.
 
+## The VM does not start after a VM settings change
+
+If the VM does not start after **Apply** on the [VM settings](usage.md#vm-settings) page, ColimaBar puts the old `colima.yaml` back and sends a notification. The VM stays stopped. If the restart does not end (it stops, or it takes longer than 15 minutes), ColimaBar also puts the old file back. If `colima stop` fails, the VM keeps running with the old settings, and the notification says that nothing changed. Click **Start** to use the old settings. Open `~/.cache/colima-bar/ctl.log` to see why the new settings failed.
+
+ColimaBar keeps a copy of the file before the change in `~/.cache/colima-bar/colima.PROFILE.yaml.bak`. To go back by hand, copy it to `colima.yaml` in the [Colima folder](#colimabar-uses-the-wrong-colima-folder) of the profile.
+
+Common causes:
+
+- A mount folder that Colima cannot share. Remove it from the list.
+- A mirror or an insecure registry that Docker cannot use. Fix its address.
+- **Reachable IP address** with a VM type that is not `vz`.
+
+If ColimaBar says that `colima.yaml` changed outside ColimaBar, ColimaBar has already read the file again and dropped your edits. Check the new values, make your changes again and click **Apply**.
+
+## Names do not resolve in containers
+
+If containers cannot resolve names, for example after you connect to a VPN, set the DNS servers of the VM. Open **More VM settings…**, type the IP addresses of your DNS servers in **DNS servers** and click **Apply**. The VM restarts. If the field is empty, the VM uses the DNS of your Mac. A VPN can change that DNS.
+
+To check, run `colima ssh -- cat /etc/resolv.conf`. The file must show your servers.
+
 ## A disk shrink fails
 
 A disk shrink runs `colima stop`, `colima delete --data --force` and `colima start`. For a stopped VM, it skips the first `colima stop` and runs `colima stop` at the end. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.

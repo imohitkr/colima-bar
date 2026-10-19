@@ -70,7 +70,7 @@ import Testing
     }
 
     @Test func aStoppedVMSavesSettingsWithNoDialog() {
-        for a in [CtlAction.resources, .rosetta, .k8s] {
+        for a in [CtlAction.resources, .rosetta, .k8s, .vmConfig] {
             #expect(a.showsDialog(running: true), "\(a.rawValue)")
             #expect(!a.showsDialog(running: false), "\(a.rawValue)")
         }
@@ -83,7 +83,7 @@ import Testing
 
     @Test func onlyActionsWithAStateDependentDialogSendTheExpectedState() {
         let checks = Set(CtlAction.allCases.filter(\.checksExpectedState))
-        #expect(checks == [.resources, .rosetta, .k8s])
+        #expect(checks == [.resources, .rosetta, .k8s, .vmConfig])
     }
 
     @Test func theEnvironmentHasTheExpectedStateOnlyWhenTheActionChecksIt() {
@@ -109,8 +109,8 @@ import Testing
 
     @Test func vmActionsShowABusyLabel() {
         let vm: Set<CtlAction> = [
-            .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop, .profileCreate,
-            .profileDelete, .repair,
+            .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .autoStop,
+            .profileCreate, .profileDelete, .repair,
         ]
         for a in CtlAction.allCases {
             #expect(a.isVMAction == vm.contains(a), "\(a.rawValue)")
@@ -140,10 +140,11 @@ import Testing
     }
 
     @Test func aConfigEditOfAStoppedVMShowsSaving() {
-        for a in [CtlAction.resources, .rosetta, .k8s, .disk] {
+        for a in [CtlAction.resources, .rosetta, .k8s, .disk, .vmConfig] {
             #expect(a.editsConfigWhenStopped, "\(a.rawValue)")
             #expect(a.busyLabel(running: false) == "Saving", "\(a.rawValue)")
-            #expect(a.busyLabel(running: true) == "Restarting", "\(a.rawValue)")
+            #expect(
+                a.busyLabel(running: true) == (a == .vmConfig ? "Applying VM settings" : "Restarting"), "\(a.rawValue)")
         }
         #expect(!CtlAction.diskShrink.editsConfigWhenStopped)
     }
@@ -168,7 +169,7 @@ import Testing
         for a in [CtlAction.restart, .repair, .profileCreate, .diskShrink] {
             #expect(a.startsVM(running: true) && a.startsVM(running: false), "\(a.rawValue)")
         }
-        for a in [CtlAction.resources, .rosetta, .k8s, .disk] {
+        for a in [CtlAction.resources, .rosetta, .k8s, .disk, .vmConfig] {
             #expect(a.startsVM(running: true), "\(a.rawValue)")
             #expect(!a.startsVM(running: false), "\(a.rawValue)")
         }
@@ -187,6 +188,8 @@ import Testing
         #expect(CtlAction.restart.warnsAfterUpgrade(running: true))
         #expect(CtlAction.resources.warnsAfterUpgrade(running: true))
         #expect(!CtlAction.resources.warnsAfterUpgrade(running: false))
+        #expect(CtlAction.vmConfig.warnsAfterUpgrade(running: true))
+        #expect(!CtlAction.vmConfig.warnsAfterUpgrade(running: false))
         for a in [CtlAction.repair, .diskShrink, .profileCreate] {
             #expect(!a.warnsAfterUpgrade(running: true) && !a.warnsAfterUpgrade(running: false), "\(a.rawValue)")
         }
@@ -239,5 +242,15 @@ import Testing
             CtlAction.allCases.filter { $0.warnsAfterUpgrade(running: true) || $0.warnsAfterUpgrade(running: false) }
                 .map(\.rawValue))
         #expect(warns == script)
+    }
+
+    @Test func theVMSettingsActionMatchesTheScriptAndAsksOnlyForARunningVM() throws {
+        #expect(CtlAction.vmConfig.rawValue == "vm-config")
+        #expect(try scriptActions().contains("vm-config"))
+        #expect(CtlAction.vmConfig.isVMAction)
+        #expect(CtlAction.vmConfig.showsDialog(running: true) && !CtlAction.vmConfig.showsDialog(running: false))
+        #expect(!CtlAction.vmConfig.changesDisk)
+        let stopped = CtlAction.vmConfig.environment(profile: "work", expectRunning: false)
+        #expect(stopped["COLIMABAR_EXPECT_RUNNING"] == "0")
     }
 }

@@ -14,6 +14,8 @@ enum Paths {
     static let cacheDir = "\(home)/.cache/colima-bar"
     /// Busy marker colima-ctl.sh writes while a VM action runs, per profile.
     static func busy(_ profile: String) -> String { "\(cacheDir)/busy.\(profile)" }
+    /// The new colima.yaml that ColimaBar stages for `colima-ctl.sh vm-config`.
+    static func stagedConfig(_ profile: String) -> String { "\(cacheDir)/colima.\(profile).yaml.new" }
     /// colima-ctl.sh's stderr (colima's own output included) when ColimaBar runs it.
     static let ctlLog = "\(cacheDir)/ctl.log"
     /// The file that a normal run of the app writes for the `colimabar`

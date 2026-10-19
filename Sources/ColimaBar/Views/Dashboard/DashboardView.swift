@@ -14,6 +14,8 @@ struct DashboardView: View {
             Divider()
             if ui.showDoctor {
                 DoctorView(model: model, ui: ui)
+            } else if ui.showVMConfig {
+                VMConfigView(model: model, ui: ui)
             } else if model.state == .running {
                 LiveTiles(model: model).padding(.horizontal, 12).padding(.vertical, 10)
                 Picker("", selection: $ui.tab) {

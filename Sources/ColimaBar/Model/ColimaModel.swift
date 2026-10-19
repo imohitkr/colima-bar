@@ -23,6 +23,14 @@ final class ColimaModel {
     /// The colima.yaml of the selected profile, or nil when the file is
     /// missing. For a stopped VM, `vm` shows the last start, not this file.
     private(set) var config: VMConfig?
+    /// The VM settings that the advanced editor shows, from the same file.
+    private(set) var vmSettings: VMSettings.Read?
+    /// The SHA-256 of that file. `applyVMSettings` compares it with the file
+    /// at Apply, to find an edit made outside ColimaBar.
+    private(set) var vmSettingsSHA: String?
+    /// True after a check of this VM start found no `ip_address`, so the
+    /// refresh does not ask again.
+    private var addressUnavailable = false
     private(set) var containers: [Container] = [] {
         didSet { updateDerivedLists() }
     }
@@ -586,6 +594,9 @@ final class ColimaModel {
         let newState: VMState = info?.status == "Running" ? .running : .stopped
         let wasRunning = state == .running
 
+        // Read colima.yaml first: the address check below needs its newest value.
+        reloadConfig()
+        if newState != .running || !wasRunning { addressUnavailable = false }
         if let info {
             var v = vm
             v.arch = info.arch ?? ""
@@ -593,17 +604,24 @@ final class ColimaModel {
             v.cpus = info.cpus ?? 0
             v.memGB = ByteFormat.gib(bytes: info.memory ?? 0)
             v.diskGB = Int((info.disk ?? 0) / ByteFormat.bytesPerGiB)
-            if newState == .running && (!wasRunning || v.driver.isEmpty) {
+            // The address of a VM that has `address: true` can come after the start.
+            let wantsAddress = Self.needsAddressCheck(
+                address: vmSettings?.address == true, ipAddress: v.ipAddress, unavailable: addressUnavailable)
+            if newState == .running && (!wasRunning || v.driver.isEmpty || wantsAddress) {
                 let s = await Shell.run(["colima", "status", "-j", "--profile", profile], timeout: 10)
                 guard gen == generation, statusOrder.isLatestApplied(seq) else { return true }
                 if let st = try? dec.decode(ColimaStatusJSON.self, from: Data(s.out.utf8)) {
                     v.driver = st.driver ?? ""
                     v.mountType = st.mount_type ?? ""
+                    v.ipAddress = st.ip_address ?? ""
+                }
+                if wantsAddress, v.ipAddress.isEmpty {
+                    addressUnavailable = true
+                    log.notice("profile \(self.profile, privacy: .public): colima status gives no IP address")
                 }
             }
             set(\.vm, v)
         }
-        reloadConfig()
         if state != newState {
             log.notice("profile \(self.profile, privacy: .public): \(String(describing: newState), privacy: .public)")
         }
@@ -626,8 +644,19 @@ final class ColimaModel {
 
     /// Reads the colima.yaml of the selected profile. A missing file gives
     /// nil, so no flags of an older file stay. `set` assigns only a change.
-    private func reloadConfig() {
-        set(\.config, (try? String(contentsOfFile: Paths.config(profile), encoding: .utf8)).map(VMConfig.parse))
+    func reloadConfig() {
+        let data = try? Data(contentsOf: URL(fileURLWithPath: Paths.config(profile)))
+        let text = data.flatMap { String(data: $0, encoding: .utf8) }
+        set(\.config, text.map(VMConfig.parse))
+        set(\.vmSettings, text.map(VMSettings.read))
+        set(\.vmSettingsSHA, text == nil ? nil : data.map(Self.configSHA))
+    }
+
+    /// True if the refresh must ask `colima status` for the IP address of
+    /// the VM: the file has `address: true`, the IP address is not known and
+    /// no check of this start found none.
+    nonisolated static func needsAddressCheck(address: Bool, ipAddress: String, unavailable: Bool) -> Bool {
+        address && ipAddress.isEmpty && !unavailable
     }
 
     private func clearVMData() {
@@ -650,6 +679,7 @@ final class ColimaModel {
         if let b = localBusy { profileActions[old] = b }
         localBusy = profileActions.removeValue(forKey: profile)
         set(\.startFailed, false)
+        addressUnavailable = false
         // At once, not on the next tick: the Delete guard of the menu reads it.
         set(\.busy, readBusy())
         retargetSocket()

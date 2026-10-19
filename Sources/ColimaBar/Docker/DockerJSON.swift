@@ -16,6 +16,7 @@ struct ColimaListJSON: Decodable {
 struct ColimaStatusJSON: Decodable {
     let driver: String?
     let mount_type: String?
+    let ip_address: String?
 }
 
 // Docker Engine API payloads (only the fields we use).

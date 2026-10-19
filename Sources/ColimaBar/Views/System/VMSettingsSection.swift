@@ -7,6 +7,7 @@ import SwiftUI
 struct VMSettingsSection: View {
     @Bindable var model: ColimaModel
     @Bindable var form: SystemForm
+    var ui: ViewState
     /// The VM state of the selected profile.
     let running: Bool
 
@@ -161,6 +162,12 @@ struct VMSettingsSection: View {
                     : "The disk grows at the next start. Shrink deletes all images, containers and volumes."
             )
             .font(.caption2).foregroundStyle(.secondary)
+            HStack {
+                Spacer()
+                Button("More VM settings…") { ui.showVMConfig = true }
+                    .controlSize(.small)
+                    .hint(Help.vmSettingsOpen)
+            }
         }
         .toggleStyle(.switch).controlSize(.small)
         .onAppear { syncPickers() }

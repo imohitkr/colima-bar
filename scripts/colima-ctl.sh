@@ -266,12 +266,28 @@ lock_vm() {
 # actions run in the background and we `wait` for them (wait is interruptible).
 WROTE_BUSY=""
 CHILD=""
+# The file that vm-config got from ColimaBar. Every exit removes it.
+STAGED=""
+# Set while vm-config has put the new colima.yaml in place of the old one and
+# the restart has not ended well. If the script ends in that time (a signal or
+# the time limit of ColimaBar), cleanup puts the old file back.
+INSTALLED=""
+VM_BACKUP=""
 cleanup() {
+  if [ -n "$INSTALLED" ]; then
+    INSTALLED=""
+    if install_config "$VM_BACKUP"; then
+      notify "The VM settings of $NAMED did not finish. ColimaBar put the old colima.yaml back. A copy is in $VM_BACKUP."
+    else
+      notify "The VM settings of $NAMED did not finish. ColimaBar could not put the old colima.yaml back. A copy is in $VM_BACKUP."
+    fi
+  fi
   if [ -e "$FOLDER_CHANGED" ]; then
     rm -f "$FOLDER_CHANGED"
     notify "The Colima folder changed during the action of $NAMED. Try again.$FOLDER_NOTE"
   fi
   [ -n "$WROTE_BUSY" ] && rm -f "$BUSY"
+  [ -n "$STAGED" ] && rm -f "$STAGED"
   [ -n "$HOLD_LOCK" ] && { rm -f "$LOCK/pid" "$LOCK/pid.$$"; rmdir "$LOCK" 2>/dev/null; }
   return 0
 }
@@ -332,12 +348,31 @@ set_k8s() {
     || { notify "Couldn't set kubernetes.enabled in colima.yaml."; exit 1; }
 }
 
+# file_sha FILE -> the SHA-256 of FILE as hex, or nothing if it cannot be read.
+file_sha() {
+  local h
+  h=$(shasum -a 256 "$1" 2>/dev/null) || return 0
+  printf '%s' "${h%% *}"
+}
+
+# install_config FILE -> puts FILE in place of colima.yaml. It copies to a
+# file in the same folder first, so colima.yaml is never half written.
+install_config() {
+  local tmp="$CONFIG.new.$$"
+  cp "$1" "$tmp" && mv -f "$tmp" "$CONFIG" && return 0
+  rm -f "$tmp"
+  return 1
+}
+
 # The smallest disk that disk-shrink accepts, in GB.
 MIN_DISK=10
 
 # The exit code of shrink_disk when the new disk exists but the last stop
 # failed. The caller tells the user.
 RESTOP_FAILED=3
+
+# The exit code of restart_vm when `colima stop` failed. The VM still runs.
+STOP_FAILED=4
 
 # shrink_disk BACKUP [RESTOP] -> stops the VM, deletes it with its data,
 # puts the edited colima.yaml back and starts the VM. `colima delete`
@@ -666,7 +701,7 @@ repair_vm() {
 
 restart_vm() {
   if vm_up; then
-    colima stop || return 1
+    colima stop || return "$STOP_FAILED"
   fi
   # shellcheck disable=SC2119 # no flags: a plain colima start
   start_vm
@@ -712,6 +747,59 @@ case "$1" in
     else
       set_key cpu "$cpu"
       set_key memory "$mem"
+    fi
+    ;;
+
+  # vm-config STAGED SHA: replaces colima.yaml with STAGED, a file that
+  # ColimaBar wrote for the advanced VM settings. SHA is the SHA-256 of the
+  # colima.yaml that ColimaBar edited. If colima.yaml is different now, the
+  # script changes nothing. A copy of the old file stays in
+  # colima.PROFILE.yaml.bak. A running VM restarts. If it does not start, the
+  # old file goes back. A stopped VM only gets the new file. COLIMABAR_EXPECT_RUNNING
+  # applies (see vm_state).
+  vm-config)
+    staged="$2"; sha="$3"
+    # Only the file that ColimaBar stages for this profile.
+    if [ "$staged" != "$STATE_DIR/colima.$PROFILE.yaml.new" ] || [ ! -f "$staged" ] || [ -L "$staged" ]; then
+      notify "Invalid VM settings file for $NAMED. Nothing changed."
+      exit 1
+    fi
+    STAGED="$staged"
+    backup="$STATE_DIR/colima.$PROFILE.yaml.bak"
+    lock_vm
+    [ -f "$CONFIG" ] || { notify "$CONFIG not found."; exit 1; }
+    vm_state
+    changed_note="colima.yaml of $NAMED changed outside ColimaBar. Nothing changed. Try again."
+    [ -n "$sha" ] && [ "$(file_sha "$CONFIG")" = "$sha" ] || { notify "$changed_note"; exit 1; }
+    if [ "$VM_UP" = 1 ]; then
+      upgrade_confirm || exit 2
+      confirm "Apply the new VM settings to $NAMED? Colima will restart the VM and $(running_count) running container(s) will stop." || exit 2
+      # The dialog can stay open for minutes.
+      same_state 1 || state_changed
+      [ "$(file_sha "$CONFIG")" = "$sha" ] || { notify "$changed_note"; exit 1; }
+      cp -p "$CONFIG" "$backup" || { notify "Couldn't copy colima.yaml to $backup."; exit 1; }
+      install_config "$staged" || { notify "Couldn't write colima.yaml of $NAMED. Nothing changed."; exit 1; }
+      VM_BACKUP="$backup"
+      INSTALLED=1
+      with_busy "Applying VM settings" restart_vm || {
+        rc=$?
+        INSTALLED=""
+        if install_config "$backup"; then
+          # If the stop failed, the VM still runs with the old settings.
+          if [ "$rc" = "$STOP_FAILED" ]; then
+            notify "ColimaBar could not stop the VM of $NAMED, so nothing changed - $SEE_LOG."
+          else
+            notify "The VM of $NAMED did not start with the new settings - $SEE_LOG. ColimaBar put the old colima.yaml back. Start the VM to use it."
+          fi
+        else
+          notify "The VM of $NAMED did not start with the new settings - $SEE_LOG. ColimaBar could not put the old colima.yaml back. A copy is in $backup."
+        fi
+        exit 1
+      }
+      INSTALLED=""
+    else
+      cp -p "$CONFIG" "$backup" || { notify "Couldn't copy colima.yaml to $backup."; exit 1; }
+      install_config "$staged" || { notify "Couldn't write colima.yaml of $NAMED. Nothing changed."; exit 1; }
     fi
     ;;
 
@@ -980,9 +1068,9 @@ $list" || exit 2
     if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
-    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|disk-shrink GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
+    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|ctr-*|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
-    echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta and k8s stop if the VM state differs" >&2
+    echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta, k8s and vm-config stop if the VM state differs" >&2
     echo "env: COLIMABAR_UPGRADE_NOTE and COLIMABAR_RELEASE_NOTES make start, restart and the config actions ask after an upgrade" >&2
     exit 1 ;;
 esac
