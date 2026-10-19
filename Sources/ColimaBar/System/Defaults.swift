@@ -42,6 +42,9 @@ enum Defaults {
         /// `["at": seconds, "links": [text]]` (`LinkInbox.handoff`). It is
         /// machine state, not a setting.
         case linkHandoff
+        /// The keyboard shortcut for the dashboard, as a spec such as
+        /// `control+option+command+C` (`KeyCombo.spec`). Unset means none.
+        case hotKey
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

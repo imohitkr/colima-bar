@@ -31,6 +31,8 @@ enum SettingsTransfer {
         case checkUpdates
         case profile
         case launchAtLogin
+        /// The keyboard shortcut for the dashboard, as a spec. An empty string means none.
+        case hotKey
 
         /// The name that the confirmation and the summary show.
         var title: String {
@@ -45,6 +47,7 @@ enum SettingsTransfer {
             case .checkUpdates: "Daily version check"
             case .profile: "Profile"
             case .launchAtLogin: "Launch at login"
+            case .hotKey: "Keyboard shortcut"
             }
         }
     }
@@ -67,6 +70,8 @@ enum SettingsTransfer {
             switch self {
             case .bool(let b): b ? "on" : "off"
             case .int(let n): s == .autoStopMinutes ? "\(n) min" : "\(n)"
+            case .string(let v) where s == .hotKey:
+                KeyCombo(spec: v)?.symbols(keyName: nil) ?? "none"
             case .string(let v): v
             }
         }
@@ -185,6 +190,11 @@ enum SettingsTransfer {
         case .profile:
             guard let name = raw as? String, ProfileName.isValid(name) else { return nil }
             return .string(name)
+        case .hotKey:
+            guard let text = raw as? String else { return nil }
+            if text.isEmpty { return .string("") }
+            guard let combo = KeyCombo(spec: text), combo.problem == nil else { return nil }
+            return .string(combo.spec)
         default:
             guard let n = raw as? NSNumber, isBool(n) else { return nil }
             return .bool(n.boolValue)
@@ -196,6 +206,7 @@ enum SettingsTransfer {
         case .autoStopMinutes:
             "the value must be a whole number from \(IdleMinutes.range.lowerBound) to \(IdleMinutes.range.upperBound)."
         case .profile: "the value is not a valid profile name."
+        case .hotKey: "the value is not a valid keyboard shortcut, for example control+option+command+C."
         default: "the value must be true or false."
         }
     }

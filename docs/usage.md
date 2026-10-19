@@ -17,7 +17,7 @@ Left-click the icon to open the dashboard. Right-click or Control-click the icon
 
 ## Open the dashboard
 
-Left-click the menu bar icon to open the dashboard. To keep it open in a resizable window, click the window button in the footer, or choose **Open Dashboard Window** in the right-click menu.
+Left-click the menu bar icon to open the dashboard. You can also press the [dashboard shortcut](#the-dashboard-shortcut). To keep it open in a resizable window, click the window button in the footer, or choose **Open Dashboard Window** in the right-click menu.
 
 The tabs (Containers, Images, Volumes and System) and the live tiles show only while Colima runs. If Colima is stopped, the dashboard shows the stopped screen. It has a **Start Colima** button and the **Hide menu bar icon while Colima is stopped** checkbox. If Colima is not installed, the dashboard shows the command to install it.
 
@@ -77,7 +77,7 @@ These tabs show sizes and the items that containers use. You can pull the latest
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
 - **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Profiles**: shown only when you have more than one profile.
-- **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
+- **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
 
 ### Doctor
 
@@ -180,16 +180,24 @@ If the VM was stopped, Colima must start it once to create the new disk. Thus Co
 
 Use these buttons to copy your ColimaBar settings to a different Mac.
 
-**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile and the login item. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item and the keyboard shortcut. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 
 - It rejects a file that is not a ColimaBar settings file.
 - It rejects a file with a newer format version. To read it, update ColimaBar.
-- It skips a value of the wrong type or out of range. For example, the auto-stop time must be from 1 to 1440 minutes.
+- It skips a value of the wrong type or out of range. For example, the auto-stop time must be from 1 to 1440 minutes. It also skips a keyboard shortcut that the app cannot use, or that another app or macOS holds.
+- An empty keyboard shortcut in the file removes the shortcut.
 - It ignores unknown keys. A setting that is not in the file keeps its current value.
 - It skips a profile that does not exist on this Mac. To create it, use **New Profile…** in the profile menu. See [Create a profile](#create-a-profile). Then import again.
 - It shows the changes and asks before it applies them. Then it shows the applied and skipped settings.
+
+The `hotKey` value is a text with these parts, joined with `+`:
+
+- Modifiers: `control`, `option`, `shift` and `command`. Use each one at most once. The case does not matter.
+- One key name: a letter, a digit, `F1` to `F20`, `space`, `return`, `tab`, `delete`, `forwarddelete`, `home`, `end`, `pageup`, `pagedown`, `left`, `right`, `up`, `down`, `minus`, `equal`, `leftbracket`, `rightbracket`, `backslash`, `semicolon`, `quote`, `comma`, `period`, `slash` or `grave`.
+
+For example: `"hotKey": "control+option+command+C"`. The value `""` means no shortcut. The [rules for a shortcut](#the-dashboard-shortcut) apply: two of ⌘ ⌃ ⌥, or one of them with F1 to F20.
 
 ### Footer
 
@@ -206,6 +214,40 @@ From left to right, the footer has these controls:
 
 - ⌘R refreshes the data.
 - ⌘F moves the focus to the filter field.
+
+## The dashboard shortcut
+
+A keyboard shortcut can open and close the dashboard from any app. It has no default. It needs no Accessibility or Input Monitoring permission.
+
+To set it:
+
+1. Open the System tab. In **App**, click **Record Shortcut**.
+2. Press the keys of the shortcut, for example ⌃⌥⌘C.
+
+To cancel, press Esc. To remove the shortcut, click the ✕ next to it.
+
+Rules for a shortcut:
+
+- Use two or more of ⌘, ⌃ and ⌥ with a letter, a digit, a sign, Space or another key. ⇧ does not count.
+- Or use one of ⌘, ⌃ and ⌥ with a function key (F1 to F20).
+
+What a press does:
+
+- If the dashboard is closed, it opens. If the icon is hidden, the icon shows. If the icon is behind the camera housing or the menu bar is full, the dashboard opens as a window.
+- If the popover is open, it closes.
+- If the dashboard window is in front, it closes. If the window is behind other windows, it comes to the front.
+- While a dialog is open, it does nothing.
+
+When the dashboard opens, it takes the focus. Use ⌘F to filter, ⌘R to refresh and Esc to close the popover.
+
+ColimaBar takes the shortcut for itself. If macOS or another app already uses the keys, the recorder shows why and keeps waiting for other keys:
+
+- **macOS uses this shortcut.** Record a different one, or turn it off in System Settings > Keyboard > Keyboard Shortcuts.
+- **Another app uses this shortcut.** Record a different one.
+
+If ColimaBar cannot take the keys when it starts or after you record, the System tab shows an orange line. If nothing happens when you press the keys, see [The dashboard shortcut does nothing](troubleshooting.md#the-dashboard-shortcut-does-nothing).
+
+A debug run does not record or use the shortcut. The row is disabled. The `colimabar` command never uses it.
 
 ## The right-click menu
 
@@ -248,7 +290,7 @@ When Colima is stopped, the icon leaves the menu bar. ColimaBar continues to run
 
 The icon stays visible while an action runs, while the dashboard is open and while the VM of a different profile runs.
 
-To show the icon while Colima is stopped, open ColimaBar from Spotlight, or open the link `colimabar://open`. The icon and the dashboard appear. If the icon is behind the camera housing or the menu bar is full, the dashboard opens as a window. When you close the dashboard, the icon hides again. The first time the icon hides, ColimaBar sends a notification that tells you this.
+To show the icon while Colima is stopped, press the dashboard shortcut, open ColimaBar from Spotlight, or open the link `colimabar://open`. The icon and the dashboard appear. If the icon is behind the camera housing or the menu bar is full, the dashboard opens as a window. When you close the dashboard, the icon hides again. The first time the icon hides, ColimaBar sends a notification that tells you this.
 
 ## Notifications
 

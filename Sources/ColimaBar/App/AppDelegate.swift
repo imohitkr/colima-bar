@@ -57,8 +57,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     // Implicitly unwrapped: the status bar exists only after launch, so
     // applicationDidFinishLaunching sets it, and nothing reads it before.
     private var item: NSStatusItem!
-    private let popover = NSPopover()
-    private var window: NSWindow?
+    let popover = NSPopover()
+    private(set) var window: NSWindow?
     private var windowCounted = false  // dashboard window counted in model.visibleCount
     private var appliedHidden: Bool?  // last icon visibility we set
     /// Watches clicks in other apps while the popover is open (see popoverDidShow).
@@ -145,6 +145,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
         model.start(debug: Self.isDebugRun)
         updateIcon()
+        HotKey.shared.onPress = { [weak self] in self?.toggleDashboard() }
+        HotKey.shared.start(debug: Self.isDebugRun)
         if !Self.isDebugRun {
             LoginItem.migrate()
             registerLoginItemOnce()
@@ -532,6 +534,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     func applicationWillTerminate(_ note: Notification) {
         // macOS persists isVisible per status item; don't start hidden next time.
         item?.isVisible = true
+        HotKey.shared.stop()
         if !Self.isDebugRun { model.shutdown() }
         // A non-zero exit makes launchd start the agent again (KeepAlive).
         if relaunching, Self.isLaunchAgent {

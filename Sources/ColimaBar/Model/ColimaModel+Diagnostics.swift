@@ -155,8 +155,15 @@ extension ColimaModel {
 
     private func settingsText() -> String {
         let snapshot = settingsSnapshot
-        var lines = SettingsTransfer.Setting.allCases.compactMap { s in
-            snapshot[s].map { "\(s.title): \($0.text(for: s))" }
+        var lines: [String] = []
+        for s in SettingsTransfer.Setting.allCases {
+            guard let value = snapshot[s] else { continue }
+            // No shortcut is the default, so the file leaves out that line.
+            if s == .hotKey, value == .string("") { continue }
+            lines.append("\(s.title): \(value.text(for: s))")
+        }
+        if !isDebug, snapshot[.hotKey] != .string("") {
+            lines.append("Keyboard shortcut active: \(HotKey.shared.isActive ? "yes" : "no")")
         }
         lines.append("Colima folder: \(Paths.colimaDir)")
         lines.append("Lima folder: \(Paths.limaDir)")

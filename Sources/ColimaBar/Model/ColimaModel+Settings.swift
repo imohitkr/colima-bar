@@ -15,6 +15,8 @@ extension ColimaModel {
             .checkUpdates: .bool(Updater.shared.enabled),
             .profile: .string(profile),
             .launchAtLogin: .bool(LoginItem.isEnabled),
+            // Read from Defaults, not from HotKey: the command never touches HotKey.
+            .hotKey: .string(Defaults.string(.hotKey).flatMap { KeyCombo(spec: $0)?.spec } ?? ""),
         ]
     }
 
@@ -47,6 +49,12 @@ extension ColimaModel {
             } catch {
                 return "\(s.title): \(error.localizedDescription)"
             }
+        case (.hotKey, .string(let v)):
+            // A debug run must not register a shortcut.
+            guard !AppDelegate.isDebugRun else { return "\(s.title): not changed in a debug run." }
+            let combo = v.isEmpty ? nil : KeyCombo(spec: v)
+            guard v.isEmpty || combo != nil else { return "\(s.title): the value is not a valid keyboard shortcut." }
+            if let problem = HotKey.shared.set(combo) { return "\(s.title): \(problem.message)" }
         default:
             return "\(s.title): the value has the wrong type."
         }

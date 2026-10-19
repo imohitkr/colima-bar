@@ -179,6 +179,12 @@ enum Help {
         "Start ColimaBar when you log in. If it crashes, start it again immediately. Thus the ColimaBar socket continues to work."
     static let askBeforeLinks =
         "Apps, scripts and web pages can open colimabar:// links. With this on, ColimaBar asks before a link starts, stops or restarts a VM. Links that open the dashboard or Doctor never ask."
+    static let shortcut =
+        "Click, then press the keys of the new shortcut, for example ⌃⌥⌘C. The shortcut opens or closes the dashboard from any app. ColimaBar needs no extra permission for it."
+    static let shortcutRecording =
+        "Press the keys of the new shortcut now. To cancel, press Esc. If nothing happens, macOS or another app uses these keys."
+    static let shortcutClear = "Remove the keyboard shortcut. The keys then go to other apps again."
+    static let shortcutDebug = "A debug run does not record or use the keyboard shortcut."
     static let exportSettings =
         "Save the ColimaBar settings to a JSON file. Use the file to set up ColimaBar on a different Mac."
     static let importSettings =

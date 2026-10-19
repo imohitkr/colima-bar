@@ -4,16 +4,12 @@
 
 These features are planned. They have no target version yet. The milestones are in the order that we plan to build them.
 
-## 1. Automation
-
-- A global hotkey.
-
-## 2. VM configuration
+## 1. VM configuration
 
 - Change more Colima settings in the app: DNS, the port forwarder, the VM network address, mounts, the VM type and registry mirrors.
 - Detect published ports that stop working and DNS that fails after a VPN change, with a fix.
 
-## 3. Containers
+## 2. Containers
 
 - Inspect a container: environment with secrets hidden, labels, networks, mounts and restart count. Open the Compose project folder, and pull, start or stop the project.
 - A debug shell for containers that have no shell, for example distroless images.

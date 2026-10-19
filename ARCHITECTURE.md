@@ -10,7 +10,7 @@ ColimaBar is a menu bar app for [Colima](https://github.com/abiosoft/colima). It
 2. **Auto-start.** It runs a proxy on a unix socket, the stable socket. All docker clients use that socket. While the VM is down, the first real docker request starts Colima. Each docker profile also has its own proxy socket, the profile socket, which starts that profile.
 3. **Auto-stop.** It can stop the VM of each running profile after an idle time.
 
-ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
+ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit, Carbon HIToolbox for the keyboard shortcut; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
 
 ColimaBar gets its data from three sources:
 
@@ -28,7 +28,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 ### `App/`
 
-`AppDelegate` owns the menu bar icon, the popover, the dashboard window, the right-click menu (`showMenu()`) and the debug flags. It also makes sure that only one instance runs. `AppDelegate+Relaunch` restarts the app after an update replaced its bundle (`relaunchIfUpdated(reveal:)` in `AppDelegate`). `MainMenu` adds the Edit and Window menus. `AppDelegate+Links` receives and handles `colimabar://` links, with `AppLink` (the parser), `AppLinkPolicy` (the gates, the texts) and `LinkInbox` (the queue). `StatusItemPlacement` decides if the icon can anchor the popover. `ScreenGeometry` is the plain value of a screen that it reads. `Snapshot` renders the debug screenshots.
+`AppDelegate` owns the menu bar icon, the popover, the dashboard window, the right-click menu (`showMenu()`) and the debug flags. It also makes sure that only one instance runs. `AppDelegate+Relaunch` restarts the app after an update replaced its bundle (`relaunchIfUpdated(reveal:)` in `AppDelegate`). `MainMenu` adds the Edit and Window menus. `AppDelegate+Links` receives and handles `colimabar://` links, with `AppLink` (the parser), `AppLinkPolicy` (the gates, the texts) and `LinkInbox` (the queue). `AppDelegate+Shortcut` runs the dashboard shortcut (`toggleDashboard()`, with the pure `ShortcutAction` table in its own file). `StatusItemPlacement` decides if the icon can anchor the popover. `ScreenGeometry` is the plain value of a screen that it reads. `Snapshot` renders the debug screenshots.
 
 ### `CLI/`
 
@@ -42,6 +42,7 @@ The `colimabar` command. See [Command line](#command-line). `CLIParser` reads th
 - `ColimaModel+Events`: which `/events` messages cause which refresh, and which ones go to `RemovedLogKeeper`.
 - `ColimaModel+StartDetection`: finds a `colima start` that already runs, so ColimaBar does not start a second one.
 - `ColimaModel+Settings`: reads the user settings for an export, and applies imported settings through the normal setters.
+- `KeyCombo`: a keyboard shortcut as a pure value (Carbon key code and modifier mask). It parses and writes the spec string, checks the rules, and makes the symbols and the spoken text. `KeyCombo+Layout` adds the text with the key name of the keyboard layout.
 - `SettingsTransfer`: the settings file format (JSON with a format name and a version), its checks and the import plan.
 - `DiskShrink`: the rules and the warning text for a smaller disk.
 - `VMConfig`: the VM settings in the `colima.yaml` of the selected profile (`ColimaModel.config`), and the values that the settings show (`VMConfig.shown`). For a stopped VM, `colima list` shows the values of the last start, not the file. Memory is a decimal number of GiB, as in Colima: `memory: 2.5` is 2.5 GiB. CPU and disk are whole numbers.
@@ -72,6 +73,7 @@ The `colimabar` command. See [Command line](#command-line). `CLIParser` reads th
 
 - `Paths`: all file paths. `colimaDir` and `limaDir` find the Colima folder and Lima's folder with the rule in [Actions and `colima-ctl.sh`](#actions-and-colima-ctlsh). The model checks both folders again on each status refresh and each heartbeat tick.
 - `Shell`: runs `colima`, `colima-ctl.sh` and other tools, and opens iTerm or Terminal.
+- `HotKey`: registers the dashboard shortcut (see [Keyboard shortcut](#keyboard-shortcut)). `HotKeyBackend` holds the Carbon calls and the saved value, so a test can use fakes. `KeyLayout` gives the key name of the current keyboard layout.
 - `Routing`: sets and checks the docker routes. `Routing.useOwnContext()` is the Doctor fix **Use colimabar**.
 - `DiagnosticsProbe`: all the I/O of the diagnostics file (the tools, the log, the log files, the crash reports, the own socket of Colima, the file write). It reads only.
 - `IssueLink`: the URL of the bug report form with the fields filled in.
@@ -95,7 +97,7 @@ The log windows. `LogStore` holds the live state for one container. If the conta
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Dashboard/` also has `UpdateAlert` (the dialogs of an update) and `LinkAlert` (the question before a link starts, stops or restarts a VM, and the alert for a link text when notifications are off). `Doctor/` has `DoctorView` (the Doctor page), `DoctorRow` (one check) and `DiagnosticsPanel` (the save panel of the diagnostics file). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Dashboard/` also has `UpdateAlert` (the dialogs of an update) and `LinkAlert` (the question before a link starts, stops or restarts a VM, and the alert for a link text when notifications are off). `Doctor/` has `DoctorView` (the Doctor page), `DoctorRow` (one check) and `DiagnosticsPanel` (the save panel of the diagnostics file). `System/` also has `ShortcutRecorder` (the row for the dashboard shortcut) and `ShortcutRecording` (the state of the recorder and its event monitor). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
 
 ### `Support/`
 
@@ -393,9 +395,21 @@ The JSON of `status` and `doctor` has `schemaVersion` 1. Every key is always the
 
 `open` calls `NSWorkspace.openApplication` for the bundle of the command. If the status file showed no app, it waits up to 10 s for the app and opens once more, so the dashboard shows.
 
+### Keyboard shortcut
+
+`HotKey.shared` registers one global shortcut with Carbon `RegisterEventHotKey` and `InstallEventHandler` on the application event target. It needs no permission. An event tap or a global monitor would need Input Monitoring or Accessibility.
+
+- **Exclusive.** The registration uses `kEventHotKeyExclusive`. macOS refuses a key that another process holds with `eventHotKeyExistsErr` (-9878), shown as "Another app uses this shortcut". A holder that did not register exclusively keeps no key while ColimaBar runs. Before `set` registers, it checks `CopySymbolicHotKeys` (`KeyCombo.isReserved`), so the recorder also refuses an enabled macOS shortcut.
+- **Rules.** `KeyCombo.problem` needs two or more of ⌘ ⌃ ⌥, or one of them with a function key. ⇧ does not count.
+- **Storage.** `Defaults.Key.hotKey` holds the spec string, for example `control+option+command+C`. The settings file holds the same string, and an empty string means none. `uninstall.sh` removes the key with the other defaults.
+- **Threading.** The C handler is a file-scope function. Carbon calls it on the main thread. It checks the signature and gives the press to the main queue, and `HotKey.pressed()` runs after the handler returns. `toggleDashboard()` then picks an action (`AppDelegate.shortcutAction`) and calls `revealDashboard()` to open.
+- **Launch.** `start(debug:)` runs after `ensureSingleSupervisedInstance()`, so only the live copy registers. A copy that hands over or reopens the old copy exits first. If the key is still held, `start` tries again after 1 s and 3 s. `applicationWillTerminate` calls `stop()`.
+- **Recording.** `ShortcutRecording` pauses the hot key (`pause()`), so the keys reach its local event monitor. It resumes the hot key when it ends, loses the key window or the row disappears. `set(_:)` saves the shortcut only after the registration succeeds, and a failed change keeps the old one.
+- **Debug runs and the command.** A debug run reads the stored shortcut for display and export. It registers nothing, and `set` does nothing. The command never touches `HotKey`: the settings snapshot reads the stored string from `Defaults`.
+
 ### Debug runs
 
-`--snapshot`, `--popover`, `--notify-test` and `--diagnostics` start a debug run. A debug run ignores links. It does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It may write the diagnostics file that the user chose. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover`, `--notify-test` and `--diagnostics` start a debug run. A debug run ignores links. It does not change the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It may write the diagnostics file that the user chose. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 
@@ -413,7 +427,7 @@ Do not break these rules.
 - **Replace the bundle only by rename.** An in-app update swaps the whole bundle with `renamex_np` (`BundleSwap`). It never writes into the running bundle, and it changes nothing in the Applications folder before the download passes every check.
 - **Links.** A link never returns data, writes a file or reaches a shell. Its profile must pass `ProfileName.isValid` and be in a fresh `colima list`. VM links ask while `askBeforeLinks` is on. A debug run ignores links.
 - **Command line.** `--cli` never creates `NSApplication`. The command never writes a setting and never changes the system, except through `colima-ctl.sh` (`start`, `stop`, `restart`), the file that the user names (`diagnostics`) and `NSWorkspace.openApplication` (`open`). It never overwrites a file. Only a normal run writes `app-status.json`. The JSON keys of `status` and `doctor` are a contract.
-- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. The `colimabar` command (`--cli`) is a debug run too. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It never downloads or installs an update. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
+- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. The `colimabar` command (`--cli`) is a debug run too. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It never downloads or installs an update. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
 
 ## Testing
 

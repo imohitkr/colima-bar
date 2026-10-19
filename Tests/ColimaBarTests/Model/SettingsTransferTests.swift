@@ -17,6 +17,7 @@ import Testing
         .checkUpdates: .bool(true),
         .profile: .string("work"),
         .launchAtLogin: .bool(true),
+        .hotKey: .string("control+option+command+C"),
     ]
 
     /// A settings file with `settings` as its JSON settings object.
@@ -204,5 +205,39 @@ import Testing
         #expect(plan.changes.map(\.setting) == [.autoStop])
         #expect(plan.skipped.count == 1)
         #expect(plan.skipped[0].contains("1 to 1440"))
+    }
+
+    // MARK: - Keyboard shortcut
+
+    @Test func anEmptyShortcutMeansNone() throws {
+        let (values, skipped) = try T.decode(file(#"{"hotKey": ""}"#))
+        #expect(values[.hotKey] == .string(""))
+        #expect(skipped.isEmpty)
+    }
+
+    @Test func aShortcutIsStoredInItsCanonicalForm() throws {
+        let (values, _) = try T.decode(file(#"{"hotKey": "Command+OPTION+control+c"}"#))
+        #expect(values[.hotKey] == .string("control+option+command+C"))
+    }
+
+    @Test func skipsAnInvalidShortcutWithAReason() throws {
+        for bad in [#""banana""#, #""command+C""#, #""control+option""#, "true", "5"] {
+            let (values, skipped) = try T.decode(file(#"{"hotKey": \#(bad)}"#))
+            #expect(values[.hotKey] == nil, "\(bad)")
+            #expect(skipped.count == 1, "\(bad)")
+            #expect(skipped.first?.contains("control+option+command+C") == true)
+        }
+    }
+
+    @Test func theShortcutChangeShowsSymbols() throws {
+        var current = sample
+        current[.hotKey] = .string("")
+        let plan = try T.plan(file(#"{"hotKey": "control+option+command+C"}"#), current: current, profiles: [])
+        #expect(plan.changes.map(\.text) == ["Keyboard shortcut: none → ⌃⌥⌘C"])
+    }
+
+    @Test func aShortcutThatIsAlreadySetIsNotAChange() throws {
+        let plan = try T.plan(file(#"{"hotKey": "command+option+control+c"}"#), current: sample, profiles: [])
+        #expect(plan.changes.isEmpty)
     }
 }
