@@ -60,6 +60,40 @@ import Testing
         #expect(text.hasSuffix("type the profile name: work"))
     }
 
+    @Test func warningForARunningVMNamesTheVolumesToBackUp() {
+        let text = DiskShrink.warning(
+            profile: "work", from: 100, to: 40, usage: [], kubernetes: false, running: true,
+            volumes: ["a", "b", "c"])
+        #expect(text.contains("To keep volume data, back up the volumes first: a, b, c."))
+        #expect(text.hasSuffix("type the profile name: work"))
+    }
+
+    @Test func warningForARunningVMWithoutVolumesHasNoBackupLine() {
+        let text = DiskShrink.warning(
+            profile: "work", from: 100, to: 40, usage: [], kubernetes: false, running: true, volumes: [])
+        #expect(!text.contains("To keep volume data"))
+    }
+
+    @Test func warningForAStoppedVMTellsToStartAndBackUp() {
+        let text = DiskShrink.warning(
+            profile: "work", from: 100, to: 40, usage: [], kubernetes: false, running: false)
+        #expect(text.contains("To keep volume data, start the VM and back up the volumes first."))
+    }
+
+    @Test func theVolumeListStopsAtEightNames() {
+        let names = (1...11).map { "vol\($0)" }
+        let line = DiskShrink.backupAdvice(running: true, volumes: names)
+        #expect(
+            line
+                == "To keep volume data, back up the volumes first: vol1, vol2, vol3, vol4, vol5, vol6, vol7, vol8 and 3 more."
+        )
+    }
+
+    @Test func eightVolumesAreAllListed() {
+        let names = (1...8).map { "v\($0)" }
+        #expect(DiskShrink.backupAdvice(running: true, volumes: names)?.hasSuffix("v7, v8.") == true)
+    }
+
     /// colima-ctl.sh checks the same minimum, so the menu never offers a
     /// size that the script rejects.
     @Test func minimumMatchesTheScript() throws {
@@ -70,5 +104,22 @@ import Testing
             contentsOf: root.appendingPathComponent("scripts/colima-ctl.sh"), encoding: .utf8)
         let line = try #require(script.components(separatedBy: "\n").first { $0.hasPrefix("MIN_DISK=") })
         #expect(Int(line.dropFirst("MIN_DISK=".count)) == DiskShrink.minimumGB)
+    }
+
+    @Test func theDestructiveButtonShrinksOnlyWithTheTypedName() {
+        #expect(DiskShrink.answer(clicked: 0, typedOK: true, offersBackup: false) == .shrink)
+        #expect(DiskShrink.answer(clicked: 0, typedOK: true, offersBackup: true) == .shrink)
+        #expect(DiskShrink.answer(clicked: 0, typedOK: false, offersBackup: true) == .cancel)
+    }
+
+    @Test func theSecondButtonBacksUpOnlyWhenTheAlertOffersIt() {
+        #expect(DiskShrink.answer(clicked: 1, typedOK: false, offersBackup: true) == .backUpVolumes)
+        #expect(DiskShrink.answer(clicked: 1, typedOK: true, offersBackup: true) == .backUpVolumes)
+        #expect(DiskShrink.answer(clicked: 1, typedOK: true, offersBackup: false) == .cancel)
+    }
+
+    @Test func theLastButtonCancels() {
+        #expect(DiskShrink.answer(clicked: 2, typedOK: true, offersBackup: true) == .cancel)
+        #expect(DiskShrink.answer(clicked: 1, typedOK: true, offersBackup: false) == .cancel)
     }
 }

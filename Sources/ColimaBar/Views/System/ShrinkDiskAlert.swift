@@ -5,20 +5,24 @@ import AppKit
 /// time before it deletes anything.
 @MainActor
 enum ShrinkDiskAlert {
-    /// True only if the user typed the profile name and clicked the
-    /// destructive button. `running` is the VM state of the profile.
+    /// `running` is the VM state of the profile. `volumes` are the names of
+    /// the named volumes. With a running VM and volumes, the alert has a
+    /// button that starts Back Up All instead of the shrink.
     static func confirm(
-        profile: String, from: Int, to: Int, usage: [DFRow], kubernetes: Bool, running: Bool
-    ) -> Bool {
+        profile: String, from: Int, to: Int, usage: [DFRow], kubernetes: Bool, running: Bool, volumes: [String]
+    ) -> DiskShrink.Answer {
         let alert = NSAlert()
         alert.alertStyle = .critical
         alert.messageText = "Delete all Docker data and shrink the disk to \(to) GB?"
         alert.informativeText = DiskShrink.warning(
-            profile: profile, from: from, to: to, usage: usage, kubernetes: kubernetes, running: running)
+            profile: profile, from: from, to: to, usage: usage, kubernetes: kubernetes, running: running,
+            volumes: volumes)
         let delete = alert.addButton(withTitle: "Delete Data and Shrink")
         delete.hasDestructiveAction = true
         delete.isEnabled = false
         delete.keyEquivalent = ""  // Return must not delete the data
+        let offersBackup = running && !volumes.isEmpty
+        if offersBackup { alert.addButton(withTitle: "Back Up Volumes…").toolTip = Help.backupVolumesShrink }
         alert.addButton(withTitle: "Cancel").keyEquivalent = "\u{1b}"
 
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
@@ -32,6 +36,8 @@ enum ShrinkDiskAlert {
         NSApp.activate()
         let answer = alert.runModal()
         field.delegate = nil
-        return answer == .alertFirstButtonReturn && DiskShrink.confirms(typed: field.stringValue, profile: profile)
+        return DiskShrink.answer(
+            clicked: answer.rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue,
+            typedOK: DiskShrink.confirms(typed: field.stringValue, profile: profile), offersBackup: offersBackup)
     }
 }

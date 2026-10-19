@@ -98,6 +98,21 @@ enum Help {
     static let unusedVolume = "No container uses this volume. If you remove it, its data is deleted permanently."
     static let removeUnusedVolumes =
         "Delete all volumes that no container uses. Their data is lost permanently. ColimaBar asks first."
+    static let volumeMenu = "Copy the name of this volume, back it up, restore a backup into it, or remove it."
+    static let backupVolume =
+        "Save the files of this volume to a tar archive on your Mac. Running containers can change files during the backup."
+    static let restoreVolume =
+        "Copy the files of a backup into this volume. If the volume has files, ColimaBar asks before it replaces them."
+    static let restoreNewVolume = "Create a new volume from a backup file."
+    static let backupAllVolumes = "Save each volume to its own tar archive in a folder that you choose."
+    static let volumesMore = "Restore a backup into a new volume, or back up all volumes."
+    static let transferCancel = "Stop the transfer. ColimaBar removes the incomplete file."
+    static let transferDebug = "A debug run does not back up or restore volumes."
+    static let transferBusy = "Another backup or restore runs now. Wait until it ends."
+    static let transferNeedsVM = "The VM must run to back up or restore volumes."
+    static let shrinkBlockedByTransfer = "A volume backup or restore runs. Wait until it ends."
+    static let backupVolumesShrink =
+        "Stop the shrink and save each volume to its own tar archive in a folder that you choose. Then you can shrink the disk again."
 
     // System: resources
     static let presets =

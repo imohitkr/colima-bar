@@ -10,11 +10,25 @@ struct VolumesTab: View {
             q.isEmpty || $0.name.lowercased().contains(q) || ($0.project?.lowercased().contains(q) ?? false)
         }
         let unused = model.volumes.filter { $0.links == 0 }
+        let transferOff = model.transferBlockReason
         // Lazy: a long list builds only the rows on screen.
         LazyVStack(alignment: .leading, spacing: 6) {
+            if let transfer = model.volumeTransfer { VolumeTransferStrip(model: model, transfer: transfer) }
             SectionHeader(title: "\(model.volumes.count) volumes · \(unused.count) unused") {
                 Button("Remove unused") { model.run(.prune, "volumes") }.buttonStyle(.borderless).font(.caption)
                     .hint(Help.removeUnusedVolumes)
+                Menu {
+                    Button("Restore to New Volume…") { VolumeBackupPanel.restoreToNew(model: model) }
+                        .hint(Help.restoreNewVolume)
+                    Button("Back Up All…") { VolumeBackupPanel.backUpAll(model: model) }
+                        .hint(Help.backupAllVolumes)
+                } label: {
+                    Image(systemName: "ellipsis")
+                }
+                .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
+                .disabled(transferOff != nil)
+                .accessibilityLabel("More volume actions")
+                .hint(transferOff ?? Help.volumesMore)
             }
             if list.isEmpty { EmptyStateText(text: model.volumes.isEmpty ? "No volumes" : "No matches") }
             ForEach(list) { v in
@@ -40,12 +54,18 @@ struct VolumesTab: View {
                         .frame(width: 60, alignment: .trailing)
                     Menu {
                         Button("Copy name") { Pasteboard.copy(v.name) }
+                        Button("Back Up…") { VolumeBackupPanel.backUp(model: model, volume: v) }
+                            .disabled(transferOff != nil).hint(Help.backupVolume)
+                        Button("Restore from Backup…") { VolumeBackupPanel.restore(model: model, volume: v) }
+                            .disabled(transferOff != nil).hint(Help.restoreVolume)
                         Divider()
                         Button("Remove…") { model.run(.volumeRemove, v.name) }.disabled(v.links > 0)
                     } label: {
                         Image(systemName: "ellipsis")
                     }
                     .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
+                    .accessibilityLabel("Actions for volume \(v.name)")
+                    .hint(transferOff ?? Help.volumeMenu)
                 }
                 .padding(.vertical, 4).padding(.horizontal, 6)
                 .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))

@@ -31,18 +31,34 @@ final class DockerAPI: Sendable {
         await request("POST", path, timeout: timeout)
     }
 
-    func request(_ method: String, _ path: String, timeout: Int = 15) async -> Response? {
+    /// A POST with a JSON body.
+    func post(_ path: String, json: Data, timeout: Int = 60) async -> Response? {
+        await request("POST", path, headers: ["Content-Type": "application/json"], body: json, timeout: timeout)
+    }
+
+    func request(
+        _ method: String, _ path: String, headers: [String: String] = [:], body: Data? = nil, timeout: Int = 15
+    ) async -> Response? {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
-                cont.resume(returning: self.requestSync(method, path, timeout: timeout))
+                cont.resume(
+                    returning: self.requestSync(method, path, headers: headers, body: body, timeout: timeout))
             }
         }
     }
 
-    private func requestSync(_ method: String, _ path: String, timeout: Int) -> Response? {
+    private func requestSync(
+        _ method: String, _ path: String, headers: [String: String], body: Data?, timeout: Int
+    ) -> Response? {
         guard let fd = connect(timeout: timeout) else { return nil }
         defer { close(fd) }
-        guard send(fd, method: method, path: path) else { return nil }
+        guard send(fd, method: method, path: path, headers: headers, contentLength: body?.count) else { return nil }
+        if let body, !body.isEmpty, !UnixSocket.writeAll(fd, body) { return nil }
+        return readResponse(fd)
+    }
+
+    /// Reads until the daemon closes the connection, then parses the reply.
+    private func readResponse(_ fd: Int32) -> Response? {
         var data = Data()
         var buf = [UInt8](repeating: 0, count: Self.bufferSize)
         while true {
@@ -59,6 +75,81 @@ final class DockerAPI: Sendable {
         var body = Data(data[split.upperBound...])
         if headers["transfer-encoding"]?.lowercased() == "chunked" { body = Self.dechunk(body) }
         return Response(status: status, headers: headers, body: body)
+    }
+
+    /// An upload that runs on its own thread. `handle.cancel()` stops it.
+    struct Upload: Sendable {
+        let handle: StreamHandle
+        /// The reply, or nil if the upload failed or ended early.
+        let response: Task<Response?, Never>
+    }
+
+    /// Sends `length` bytes of the file `fd` from `offset` as the body of a
+    /// request, in chunks of 64 KB. `onProgress` gets the bytes sent so far,
+    /// on the sending thread. The file ends too early: the upload fails.
+    func upload(
+        _ method: String, _ path: String, fd file: Int32, offset: Int64, length: Int64, contentType: String,
+        onProgress: @escaping @Sendable (Int64) -> Void
+    ) -> Upload {
+        let handle = StreamHandle()
+        let response = Task<Response?, Never> {
+            await withCheckedContinuation { cont in
+                Thread.detachNewThread {
+                    cont.resume(
+                        returning: self.uploadSync(
+                            method, path, handle: handle, file: file, offset: offset, length: length,
+                            contentType: contentType, onProgress: onProgress))
+                }
+            }
+        }
+        return Upload(handle: handle, response: response)
+    }
+
+    private func uploadSync(
+        _ method: String, _ path: String, handle: StreamHandle, file: Int32, offset: Int64, length: Int64,
+        contentType: String, onProgress: @Sendable (Int64) -> Void
+    ) -> Response? {
+        guard let fd = connect(timeout: 0) else { return nil }
+        guard handle.attach(fd) else {
+            close(fd)
+            return nil
+        }
+        defer { handle.finish() }
+        guard
+            send(
+                fd, method: method, path: path, headers: ["Content-Type": contentType],
+                contentLength: Int(length))
+        else { return nil }
+        var sent: Int64 = 0
+        var chunk = [UInt8](repeating: 0, count: 64 * 1024)
+        var writeFailed = false
+        while sent < length {
+            if handle.cancelled { return nil }
+            let n = pread(file, &chunk, Int(min(Int64(chunk.count), length - sent)), off_t(offset + sent))
+            if n < 0, errno == EINTR { continue }
+            guard n > 0 else { return nil }  // the file is shorter than it was
+            let ok = chunk.withUnsafeBytes { raw -> Bool in
+                var done = 0
+                while done < n {
+                    let w = write(fd, raw.baseAddress! + done, n - done)
+                    if w < 0, errno == EINTR { continue }
+                    if w <= 0 { return false }
+                    done += w
+                }
+                return true
+            }
+            if !ok {
+                writeFailed = true
+                break
+            }
+            sent += Int64(n)
+            onProgress(sent)
+        }
+        if handle.cancelled { return nil }
+        // The daemon can answer before it reads all bytes (an error), then
+        // close. Its answer says why, so read it even after a failed write.
+        let reply = readResponse(fd)
+        return writeFailed && reply?.ok == true ? nil : reply
     }
 
     static func parseHead(_ raw: Data) -> (Int, [String: String]) {
@@ -149,10 +240,17 @@ final class DockerAPI: Sendable {
         UnixSocket.connect(socketPath, timeout: timeout)
     }
 
-    private func send(_ fd: Int32, method: String, path: String) -> Bool {
-        let req =
-            "\(method) \(path) HTTP/1.0\r\nHost: docker\r\nUser-Agent: ColimaBar\r\n"
-            + (method == "GET" ? "" : "Content-Length: 0\r\n") + "\r\n"
+    private func send(
+        _ fd: Int32, method: String, path: String, headers: [String: String] = [:], contentLength: Int? = nil
+    ) -> Bool {
+        var req = "\(method) \(path) HTTP/1.0\r\nHost: docker\r\nUser-Agent: ColimaBar\r\n"
+        for (name, value) in headers.sorted(by: { $0.key < $1.key }) { req += "\(name): \(value)\r\n" }
+        if let contentLength {
+            req += "Content-Length: \(contentLength)\r\n"
+        } else if method != "GET" {
+            req += "Content-Length: 0\r\n"
+        }
+        req += "\r\n"
         let bytes = Array(req.utf8)
         return bytes.withUnsafeBytes { write(fd, $0.baseAddress, bytes.count) } == bytes.count
     }
