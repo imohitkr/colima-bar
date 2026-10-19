@@ -116,6 +116,7 @@ Read the notification. It gives the reason. ColimaBar changes nothing before it 
 - **The file is compressed.** ColimaBar accepts plain tar only. Run `gunzip FILE.tar.gz`, then restore the `.tar` file.
 - **Containers use volume NAME.** Remove the containers (the notification names them), or restore to a new volume.
 - **The disk is full** (the reason has "no space left"). Remove data that you do not need, or grow the disk. See [VM settings](usage.md#vm-settings).
+- **A volume named NAME exists now.** Another tool created the volume during the restore. Restore again and choose another name.
 - **ColimaBar cannot read the file.** Choose a file in a folder that you own.
 
 If a restore into a volume with files fails after you clicked **Replace All Files**, the volume holds none or only some of the files, or it does not exist. The notification says which. Restore the backup again. A restore into a new volume removes the new volume when it fails.

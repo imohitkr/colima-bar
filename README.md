@@ -29,7 +29,7 @@
 - **Links**: start, stop or restart the VM, or open the dashboard, from Raycast, Alfred, Shortcuts or a script with `colimabar://` links. ColimaBar asks first.
 - **Shortcut**: press a keyboard shortcut that you choose to open or close the dashboard from any app. It needs no extra permission.
 - **Command line**: run `colimabar status`, `start`, `stop` or `doctor` in Terminal. Add `--json` for scripts.
-- **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, when a Doctor fix ends, when a published port or the DNS of the VM breaks, when ColimaBar refuses a link, after an auto-start that follows a Colima or Lima upgrade, one for each new version and one after an in-app update, and one the first time the icon hides.
+- **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, when a Doctor fix ends, when a volume backup or restore ends, when a published port or the DNS of the VM breaks, when ColimaBar refuses a link, after an auto-start that follows a Colima or Lima upgrade, one for each new version and one after an in-app update, and one the first time the icon hides.
 
 > [!NOTE]
 > ColimaBar is an independent community project. It is not part of [Colima](https://github.com/abiosoft/colima), and the Colima maintainers do not support it. Report ColimaBar problems in the [ColimaBar issue tracker](https://github.com/imohitkr/colima-bar/issues).
@@ -38,12 +38,28 @@
 
 <table>
   <tr>
-    <td width="50%"><img src="docs/screenshots/images.png" alt="Images tab: sizes, in-use badges, prune"></td>
-    <td width="50%"><img src="docs/screenshots/system.png" alt="System tab: VM resources, features, disk usage, auto-start, auto-stop presets, hide icon, update check"></td>
+    <td width="50%"><img src="docs/screenshots/images.png" alt="Images tab: sizes, in-use badges and prune"></td>
+    <td width="50%"><img src="docs/screenshots/system.png" alt="System tab: VM resources, features, disk usage, auto-start and auto-stop"></td>
   </tr>
   <tr>
     <td align="center"><b>Images</b>: sizes, images in use, prune</td>
     <td align="center"><b>System</b>: VM size, Rosetta, k3s, disk, auto-start and auto-stop</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/inspect.png" alt="Inspect page: environment with hidden secrets, mounts, ports and health"></td>
+    <td width="50%"><img src="docs/screenshots/volumes.png" alt="Volumes tab: back up and restore volumes, and Compose volumes"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Inspect</b>: environment with secrets hidden, mounts, ports and health</td>
+    <td align="center"><b>Volumes</b>: back up and restore volumes, Compose volumes</td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/doctor.png" alt="Doctor page: twelve checks, including published ports and DNS in the VM"></td>
+    <td width="50%"><img src="docs/screenshots/vmsettings.png" alt="VM settings page: DNS, port forwarder, mounts and registries"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Doctor</b>: twelve checks, including published ports and DNS in the VM</td>
+    <td align="center"><b>VM settings</b>: DNS, port forwarder, mounts and registries</td>
   </tr>
   <tr>
     <td colspan="2"><img src="docs/screenshots/logs.png" alt="Log viewer with search, follow, timestamps and highlighted stderr"></td>

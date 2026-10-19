@@ -47,7 +47,7 @@ enum Help {
     static let more =
         "Inspect the container. Copy the name, ID, image or an exec command. Open ports. Open a debug shell. Remove the container."
     static let debugShell =
-        "Open a shell in a new busybox container that shares the processes and network of this container. Use it when the container has no shell. The new container ends when you exit."
+        "Open a shell in a new container (busybox by default) that shares the processes and network of this container. Use it when the container has no shell. The new container ends when you exit."
     static let debugShellDebug = "A debug run does not open a debug shell."
     static let stopAll = "Stop all running containers. ColimaBar asks first."
 
@@ -104,15 +104,15 @@ enum Help {
     static let restoreVolume =
         "Copy the files of a backup into this volume. If the volume has files, ColimaBar asks before it replaces them."
     static let restoreNewVolume = "Create a new volume from a backup file."
-    static let backupAllVolumes = "Save each volume to its own tar archive in a folder that you choose."
-    static let volumesMore = "Restore a backup into a new volume, or back up all volumes."
+    static let backupAllVolumes = "Save each named volume to its own tar archive in a folder that you choose."
+    static let volumesMore = "Restore a backup into a new volume, or back up all named volumes."
     static let transferCancel = "Stop the transfer. ColimaBar removes the incomplete file."
     static let transferDebug = "A debug run does not back up or restore volumes."
     static let transferBusy = "Another backup or restore runs now. Wait until it ends."
     static let transferNeedsVM = "The VM must run to back up or restore volumes."
     static let shrinkBlockedByTransfer = "A volume backup or restore runs. Wait until it ends."
     static let backupVolumesShrink =
-        "Stop the shrink and save each volume to its own tar archive in a folder that you choose. Then you can shrink the disk again."
+        "Stop the shrink and save each named volume to its own tar archive in a folder that you choose. Then you can shrink the disk again."
 
     // System: resources
     static let presets =

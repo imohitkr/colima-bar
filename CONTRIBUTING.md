@@ -53,7 +53,7 @@ A debug run ignores `colimabar://` links, so test them with a normal build. Whil
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test`, `--diagnostics` or `--cli` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It ignores links. It also skips system sleep, power and network changes, and auto-stop. It writes no VM settings. It makes no volume backup or restore and removes no helper container. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test`, `--diagnostics` or `--cli` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It ignores links. It also skips system sleep, power and network changes, and auto-stop. It writes no VM settings. It makes no volume backup or restore and removes no helper container. It runs no docker compose and opens no debug shell. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|
@@ -69,6 +69,9 @@ The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--no
 - `COLIMABAR_HINT`: text for the hint bar.
 - `COLIMABAR_DOCTOR`: set it to `1`. The PNG then shows the Doctor page after the checks ran. The checks only read, and the fix buttons are disabled.
 - `COLIMABAR_LOGS`: a container name. The PNG then shows the log viewer for that container.
+- `COLIMABAR_INSPECT`: a container name. The PNG then shows the Inspect page of that container. If the app finds no container with that name, the PNG shows the normal tab.
+- `COLIMABAR_VMCONFIG`: set it to `1`. The PNG then shows the "More VM settings" page.
+- `COLIMABAR_RUNNING_ONLY`: set it to `1`. The Containers tab then shows only running containers. The app does not save this filter.
 - `COLIMABAR_SNAPSHOT_HEIGHT`: the window height in points.
 - `COLIMABAR_SNAPSHOT_DELAY`: seconds to wait before the snapshot (default 6). Use 65 to fill the sparklines.
 
