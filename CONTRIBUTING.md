@@ -53,7 +53,7 @@ A debug run ignores `colimabar://` links, so test them with a normal build. Whil
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test`, `--diagnostics` or `--cli` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It ignores links. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test`, `--diagnostics` or `--cli` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It ignores links. It also skips system sleep, power and network changes, and auto-stop. It writes no VM settings. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|

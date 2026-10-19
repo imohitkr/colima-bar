@@ -52,6 +52,21 @@ import Testing
         #expect(sb.leavesNoLockOrBusyMarker)
     }
 
+    private func mode(_ sb: ScriptSandbox, _ relative: String) -> Int? {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: "\(sb.home)/\(relative)")
+        return (attrs?[.posixPermissions] as? NSNumber)?.intValue
+    }
+
+    @Test(arguments: [0o644, 0o600]) func colimaYAMLKeepsItsModeAfterAStoppedVMApply(original: Int) async throws {
+        let sb = try sandbox()
+        try FileManager.default.setAttributes(
+            [.posixPermissions: original], ofItemAtPath: "\(sb.home)/\(configPath)")
+        let r = try await vmConfig(sb)
+        #expect(r.status == 0, "\(r.out)")
+        #expect(read(sb, configPath) == new)
+        #expect(mode(sb, configPath) == original)
+    }
+
     @Test func aRunningVMAsksThenRestarts() async throws {
         let sb = try sandbox()
         let r = try await vmConfig(sb, env: ["STUB_COLIMA_STATUS": "0"])

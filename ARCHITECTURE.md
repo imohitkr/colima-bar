@@ -14,10 +14,12 @@ It also takes `colimabar://` links, a keyboard shortcut and the `colimabar` comm
 
 ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit, SystemConfiguration for the network watch, Carbon HIToolbox for the keyboard shortcut; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
 
-ColimaBar gets its data from three sources:
+ColimaBar gets its data from these sources:
 
 - **The Docker Engine API on the unix socket** of the selected profile. For auto-stop and for starts, the model also calls the sockets of the other running profiles. The docker CLI and Portainer use the same transport. `/events` streams changes. `/containers/{id}/stats?stream=1` streams samples for each container, but only while a dashboard is on screen. `docker stats --no-stream` blocks for about 2 seconds on each call, and the stream does not.
 - **The `colima` CLI.** Colima has no API. Thus ColimaBar reads VM data from `colima list -j`, and the driver and mount type from `colima status -j`.
+- **`colima ssh` probes.** The port and DNS checks run a short script in the VM. It is built only from port numbers.
+- **SystemConfiguration.** It reports changes of the DNS setup of the Mac (network changes), which start the DNS check.
 - **`scripts/colima-ctl.sh`.** The app bundle contains this script. VM actions, actions that ask for confirmation and changes to `colima.yaml` go through it. Container start, stop and restart calls go directly to the API.
 
 <p align="center">

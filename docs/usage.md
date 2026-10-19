@@ -28,6 +28,8 @@ Below the **Start Colima** button and the checkbox, the stopped screen shows the
 - A bigger disk asks first. Colima grows the disk at the next start. A disk cannot shrink in place, so a grow is permanent.
 - **Shrink…** deletes all Docker data. It starts the VM once to create the new disk, then stops it again. See [Shrink the disk](#shrink-the-disk).
 
+**More VM settings…** opens the [VM settings](#vm-settings) page.
+
 If the profile has no `colima.yaml`, the stopped screen tells you to start the profile once. Colima creates the file at the first start.
 
 If `colima list` shows the profile as Broken, or the last start of the profile failed, the stopped screen shows an orange line with a **Doctor…** button. See [Doctor](#doctor).
@@ -72,7 +74,7 @@ These tabs show sizes and the items that containers use. You can pull the latest
 - **VM resources**: Light, Standard and Heavy presets, or your own CPU and memory values. **Apply** restarts the VM.
 - **Features**: Rosetta, Kubernetes (k3s) and the disk size. A change restarts the VM, and ColimaBar asks first. A disk grows in place and keeps your data. To make it smaller, use **Shrink…**. See [Shrink the disk](#shrink-the-disk).
 - Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is not `vz`, the Rosetta switch is disabled, unless Rosetta is on. A missing `vmType` counts as `vz`.
-- **More VM settings…**: DNS, the port forwarder, the IP address, mounts and Docker registries. See [VM settings](#vm-settings).
+- **More VM settings…**: DNS, the port forwarder, the IP address, mounts, inotify and Docker registries. See [VM settings](#vm-settings).
 - To change these settings while the VM is stopped, use the [stopped screen](#open-the-dashboard).
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons.
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md). **Stop sooner on battery or in Low Power Mode** shortens the idle time. See [On battery and in Low Power Mode](auto-stop.md#on-battery-and-in-low-power-mode).
@@ -299,7 +301,6 @@ When the Mac wakes from sleep, ColimaBar does these steps:
 2. For each running profile with the docker runtime, it asks the Colima socket if Docker answers. It tries for about 30 seconds. It skips a profile with a running action or auto-start.
 3. If Docker does not answer, it sends one notification with a **Restart** button.
 4. If Docker answers and the clock of the VM is more than 2 seconds off, it waits 20 seconds for Lima to fix it. If the clock is still off, ColimaBar sets it to the time of the Mac. If ColimaBar cannot set the clock, it sends a notification with a **Restart** button.
-
 5. If Docker answers, ColimaBar waits 15 seconds for the network. Then it checks the published ports of the VM. If a port answers in the VM but not on the Mac, it checks again after 5 seconds. If the port still fails, ColimaBar sends a notification with a **Restart** button.
 
 The **Restart** button restarts only a profile that still exists, has no running action and has a running VM. Else ColimaBar sends a short notice and does nothing. The check never starts a VM. Auto-stop does not count the sleep time. See [Auto-stop](auto-stop.md#when-the-mac-sleeps).
@@ -312,7 +313,7 @@ ColimaBar watches the DNS setup of the Mac (the system network configuration). I
 - If neither resolves it, the network is down. ColimaBar does nothing.
 - If only the VM fails, ColimaBar looks up again after 20 seconds. If it fails again, ColimaBar sends a notification with a **Restart** button, and the Containers tab shows a notice.
 
-With empty `network.dns`, the VM asks the Mac, so it follows the VPN. A restart fixes a VM that lost this. With servers in `network.dns`, the VM asks only those servers. Then the notice has **Use the Mac's DNS**, which removes the servers and restarts the VM, and **Set DNS servers…**, which opens [VM settings](#vm-settings).
+With empty `network.dns`, the VM asks the Mac, so it follows the VPN. A restart fixes a VM that lost this. With servers in `network.dns`, the VM asks only those servers. Then the notice has **Use the Mac's DNS**, which removes the servers and restarts the VM. With empty `network.dns`, the notice has **Restart**. In both cases the notice also has **Set DNS servers…**, which opens [VM settings](#vm-settings).
 
 The dashboard also checks the published ports when it opens, if the last check is more than 5 minutes old. It shows the notice and sends no notification. **Check again** in the notice checks the ports and the DNS again. ColimaBar sends each kind of network notification for a profile at most one time in 60 minutes. A good result lets a new failure notify again. The checks run only while the VM runs. They never start it. A debug run does no check by itself and sends no notification.
 

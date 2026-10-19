@@ -103,9 +103,9 @@ enum Help {
     static let vmSettingsDone =
         "Close the VM settings and go back to the dashboard. ColimaBar keeps your edits until you apply or revert them."
     static let dnsServers =
-        "The DNS servers that the VM uses. Use them when names do not resolve, for example with a VPN. Empty uses the DNS of your Mac."
+        "The DNS servers that the VM uses. Use them when names do not resolve, for example with a VPN. Use up to 3 IP addresses, separated by commas. Empty uses the DNS of your Mac."
     static let vmAddress =
-        "Give the VM an IP address that your Mac can reach. Colima cannot turn it off later."
+        "Give the VM an IP address that your Mac can reach. It needs the vz VM type. Colima cannot turn it off later."
     static let vmCopyIP = "Copy the IP address of the VM."
     static let portForwarder =
         "How Colima forwards published ports to your Mac. ssh is stable and forwards TCP only. grpc also forwards UDP."
