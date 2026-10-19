@@ -53,7 +53,7 @@ A debug run ignores `colimabar://` links, so test them with a normal build. Whil
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test` or `--diagnostics` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It ignores links. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test`, `--diagnostics` or `--cli` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It ignores links. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|
@@ -62,6 +62,7 @@ The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--no
 | `--notify-test` | Sends a test notification, then quits. |
 | `--diagnostics PATH` | Writes the [diagnostics file](docs/usage.md#save-diagnostics-and-report-an-issue) to `PATH`, then quits. It only reads, opens nothing and exits with 1 if it cannot write the file. The header of the file shows "(debug run)" after the version. |
 | `--window` | Opens the dashboard window at launch. |
+| `--cli ARGS` | Runs the [`colimabar` command](docs/usage.md#command-line) with `ARGS`. Use it as the first argument, or use `build/ColimaBar.app/Contents/Resources/bin/colimabar ARGS`. It is a debug run. It creates no `NSApplication`. `status`, `doctor` and `diagnostics` only read. `start`, `stop`, `restart` and `open` change the real VM or app: do not run them in automated tests. |
 
 `--snapshot` also reads these environment variables:
 

@@ -58,6 +58,50 @@ import Testing
         #expect(left == ["d.txt"])
     }
 
+    @Test func aNewFileIsNeverWiderThan0600AndStaysSoAfterAReplace() throws {
+        let dir = try TempFolder()
+        let url = URL(fileURLWithPath: dir.path + "/d.txt")
+        let old = umask(0)  // a loose umask must not widen the mode
+        defer { umask(old) }
+        try DiagnosticsProbe.write("one", to: url, replace: false)
+        #expect(try mode(url) == 0o600)
+        try DiagnosticsProbe.write("two", to: url)
+        #expect(try mode(url) == 0o600)
+    }
+
+    private func mode(_ url: URL) throws -> Int? {
+        try FileManager.default.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int
+    }
+
+    @Test func aWriteWithoutReplaceRefusesAFileThatIsThere() throws {
+        let dir = try TempFolder()
+        let url = URL(fileURLWithPath: dir.path + "/d.txt")
+        try "keep".write(to: url, atomically: true, encoding: .utf8)
+        #expect(throws: CLIDiagnosticsPath.Failure.exists(url.path)) {
+            try DiagnosticsProbe.write("new", to: url, replace: false)
+        }
+        #expect(try String(contentsOf: url, encoding: .utf8) == "keep")
+    }
+
+    @Test func aWriteWithoutReplaceDoesNotFollowALink() throws {
+        let dir = try TempFolder()
+        let target = dir.path + "/target.txt"
+        let link = dir.path + "/link.txt"
+        symlink(target, link)  // points nowhere yet
+        #expect(throws: CLIDiagnosticsPath.Failure.exists(link)) {
+            try DiagnosticsProbe.write("new", to: URL(fileURLWithPath: link), replace: false)
+        }
+        #expect(!FileManager.default.fileExists(atPath: target))
+    }
+
+    @Test func aReplaceLeavesNoTemporaryFile() throws {
+        let dir = try TempFolder()
+        let url = URL(fileURLWithPath: dir.path + "/d.txt")
+        try DiagnosticsProbe.write("one", to: url)
+        try DiagnosticsProbe.write("two", to: url)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["d.txt"])
+    }
+
     @Test func aWriteToAMissingFolderFails() throws {
         let dir = try TempFolder()
         let url = URL(fileURLWithPath: dir.path + "/no/such/d.txt")

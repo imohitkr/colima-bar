@@ -30,6 +30,10 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 `AppDelegate` owns the menu bar icon, the popover, the dashboard window, the right-click menu (`showMenu()`) and the debug flags. It also makes sure that only one instance runs. `AppDelegate+Relaunch` restarts the app after an update replaced its bundle (`relaunchIfUpdated(reveal:)` in `AppDelegate`). `MainMenu` adds the Edit and Window menus. `AppDelegate+Links` receives and handles `colimabar://` links, with `AppLink` (the parser), `AppLinkPolicy` (the gates, the texts) and `LinkInbox` (the queue). `StatusItemPlacement` decides if the icon can anchor the popover. `ScreenGeometry` is the plain value of a screen that it reads. `Snapshot` renders the debug screenshots.
 
+### `CLI/`
+
+The `colimabar` command. See [Command line](#command-line). `CLIParser` reads the arguments into a `CLIRequest` (no library). `CLIRunner` runs a request, and `CLIRunner+Actions` runs `start`, `stop`, `restart` and `open`. `CLIExit` holds the exit codes and `CLIHelp` the help text. `CLIStatus` is the answer of `status` (JSON and text), and `CLIStatusProbe` makes its inputs with reads only. `CLIDoctorReport` is the output of `doctor`. `CLIDiagnosticsPath` decides the file of `diagnostics`. `CLIProfile` picks the profile. `CLIOutput` is stdout and stderr.
+
 ### `Model/`
 
 `ColimaModel` is the `@Observable` single source of truth for the dashboard, auto-start and auto-stop. It runs the heartbeat, starts the VM of a profile for a proxy (`wakeForProxy(profile:)`), checks for idle time (`checkIdle()` for the selected profile, `checkOtherProfilesIdle()` for the others) and runs the profile actions (`createProfile`, `deleteProfile`, `startProfile`, `stopProfile`).
@@ -49,6 +53,8 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `ProfileDelete`: when a delete is refused, its warning text and the profile to select after it.
 - `CtlAction`: the actions of `colima-ctl.sh`.
 - Diagnostics, see [Diagnostics](#diagnostics): `DiagnosticsPart`, `DiagnosticsSection`, `DiagnosticsBundle` (the file text and its limits), `Redactor`, `ColimaConfigSummary`, `CrashReportDigest` and `ColimaModel+Diagnostics`. Doctor, see [Doctor](#doctor): `DoctorCheck` (the ten checks), `DoctorResult` (a status, a detail and an optional `DoctorFix`), `DoctorFix`, `DoctorInputs` (everything the checks read), `DoctorRules` and `DoctorRules+Docker` (the pure rules: inputs in, results out), `DoctorReport` (the results of one run, its summary and its plain text), `ColimaModel+Doctor` (`runDoctor()`, `applyFix(_:)`, `repairProfile()`, `currentDoctorReport`, `doctorHint`). The upgrade guard has `VersionChange`, `GoodStarts`, `UpgradeGuard` and `ColimaModel+Upgrade`, see [Upgrade guard](#upgrade-guard). The parsers and rules have their own types: `ToolVersions`, `ShellStartupScan`, `DockerConfig`, `StaleLimaFile`, `DiskSpace`.
+- `ColimaModel+AppStatus` and `AppStatus`: the status file for the `colimabar` command (what it holds, when the app writes it, when it is stale). `System/AppStatusFile` does the I/O.
+- `ReadinessGate`: the wait for "Docker is ready" after a start. The wake of a proxy and the `colimabar` command use it.
 - `BusyMarker`: reads the busy marker (label and owner PID) and decides if it is stale.
 - `DFGate`: allows one `/system/df` call at a time.
 - `LatestOnly`: drops results of overlapping calls that arrive out of order.
@@ -71,6 +77,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 - `IssueLink`: the URL of the bug report form with the fields filled in.
 - `DoctorProbe`: all the I/O of Doctor (tool versions, `docker context ls`, the shell files, the docker config file, plugin folders, `colima-ctl.sh stale-files`, `df`). It reads only.
 - `DockerConfigFile`: edits the docker config file for a Doctor fix: a private backup `config.json.colimabar-YYYYMMDD-HHMMSS`, then a write through a symlink.
+- `AppStatusFile`: writes, reads and removes `app-status.json` (see [Command line](#command-line)).
 - `ProcessProbe`: the start time of a process by PID (`sysctl`), for the busy marker.
 - `ProfileContexts`: creates, updates and removes the `colimabar-PROFILE` docker contexts.
 - `LoginItem`: the login item.
@@ -99,7 +106,8 @@ Small helpers with no app state: `Parse` (for example `colima.yaml` lookup and t
 | Path | Contents |
 |---|---|
 | `scripts/colima-ctl.sh` | VM actions, confirm dialogs, `colima.yaml` changes, `stale-files` and `repair`. The app bundle contains it. |
-| `scripts/install.sh` | The installer. |
+| `scripts/colimabar.sh` | The `colimabar` command. `build.sh` puts it in `Contents/Resources/bin/colimabar`. |
+| `scripts/install.sh` | The installer. It links the command into a folder of the user. |
 | `scripts/uninstall.sh` | The uninstall script. The app bundle contains it. |
 | `scripts/make-icon.swift` | Draws `Resources/AppIcon.icns`. |
 | `scripts/dmg-readme.txt` | The "Read Me First" file in the disk image. |
@@ -359,6 +367,32 @@ If LaunchServices starts a second copy for a link, that copy forwards the links 
 
 `revealDashboard()` opens the dashboard for a reopen event, `--reveal`, a link and the Doctor menu item. It opens the popover only when `StatusItemPlacement.canAnchor` is true (the icon is on a screen and not under the camera housing). Else it opens the window. If the popover still opens off screen, it opens the window.
 
+### Command line
+
+`colimabar` is a short bash wrapper (`scripts/colimabar.sh`) in `ColimaBar.app/Contents/Resources/bin`. It finds the app through its own links (`readlink -f`) and runs `Contents/MacOS/ColimaBar --cli ARGS`. A link to the binary would not work: the system finds the bundle from the path of the executable, and `Bundle.main` and `UserDefaults.standard` must be the ones of the app. The first line of `AppDelegate.main()` checks `isCommandLine` and calls `CLIRunner.main(_:)`, before `NSApplication.shared` exists. So the command has no Dock icon and no status item, and it never reaches `ensureSingleSupervisedInstance` or the login item. A second target or a script would need a library split of the app, a nested signature or a second copy of Doctor and `Redactor`. If `Bundle.main` is not ColimaBar, the command exits with 1.
+
+The command has no control socket and sends no Apple event. It reads facts from these sources:
+
+| Fact | Source |
+|---|---|
+| State, runtime, CPUs, memory, disk of the VM | `colima list -j`, at the moment of the call |
+| Action in progress | The busy marker, read only. The command never removes a stale one. |
+| Selected profile, auto-start and auto-stop settings | The `UserDefaults` of the app |
+| App running, app version, auto-stop time of each profile | `~/.cache/colima-bar/app-status.json` |
+| Socket kind | One `lstat` of the socket path, and whether the app runs |
+| Docker context | `Routing.currentContext()` |
+| Doctor, diagnostics | The command runs them with a read-only `ColimaModel` |
+
+`AppStatus` is the status file: `{"format":1,"pid":N,"version":"X","autoStopAt":{"default":"2026-10-19T09:12:00Z"}}`, mode `0600` in the folder with mode `0700`. A normal run writes it (`publishAppStatus()`) when it starts, when a profile gets or loses an auto-stop time, when a time moves by 1 second or more, and when the file is gone. The write is a temporary file made with `O_CREAT|O_EXCL|O_NOFOLLOW`, then `rename`. `shutdown()` removes the file only if it holds its own PID. The file is stale on the rule of the busy marker (`BusyMarker.isStale`): the PID must belong to a process that started before the file was written. A stale, unreadable or too big file means "the app does not run". A debug run and the command never write it.
+
+`ColimaModel(profile:readOnly:)` is the model of `doctor` and `diagnostics`. A read-only model counts as a debug run (`isDebug`), and the command never calls `start()`. So it starts no proxy, changes no route, context or setting, and makes no Doctor fix. The fallback to the `default` profile in `refreshStatus()` also needs `!isDebug`, or a debug run would save `default` as the profile. `ColimaModel.notify` does nothing in the command: the command never touches `Notifier`. The diagnostics header shows "(command line)" (`DiagnosticsBundle.render(runNote:)`).
+
+`start`, `stop` and `restart` run `colima-ctl.sh` as the app does (`COLIMABAR_PROFILE`, `COLIMABAR_APP=1`). First they run `colima list -j`. A profile other than `default` that is not listed gives exit 1, so a typo never creates a VM. While a busy marker or a `colima start` holds the profile, the command waits (1 s steps, 15 minutes at most). It asks no question, sets no `COLIMABAR_UPGRADE_NOTE`, uses no link and records no good start. After a good `start` or `restart` of a docker profile it waits for `ReadinessGate` on the socket of Colima. SIGINT and SIGTERM cancel the task. The task sends SIGTERM to the script, which removes its lock and busy marker. The exit codes are in `CLIExit`: 0 done, 1 failed, 2 usage, 3 lock held (the script exited with 2), 130 and 143 for the signals.
+
+The JSON of `status` and `doctor` has `schemaVersion` 1. Every key is always there, with `null` when it has no value. A new key keeps the version. A rename, a removal or a change of a type raises it. The text can change. The output has no names or counts of containers, images, volumes or networks, and the Doctor JSON has no registry host. `--profile` passes `ProfileName.isValid` and reaches the script only through the environment.
+
+`open` calls `NSWorkspace.openApplication` for the bundle of the command. If the status file showed no app, it waits up to 10 s for the app and opens once more, so the dashboard shows.
+
 ### Debug runs
 
 `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` start a debug run. A debug run ignores links. It does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It may write the diagnostics file that the user chose. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
@@ -375,13 +409,14 @@ Do not break these rules.
 - **`colima-ctl.sh`.** The app bundle contains it in `Contents/Resources`. Exit code 0 means done. Exit code 1 means failed (the script already notified the user). Exit code 2 means cancelled, or another VM action holds the lock. ColimaBar shows nothing for 2.
 - **Login item.** It is a plain LaunchAgent plist with the label `com.imohitkr.ColimaBar.login` in `~/Library/LaunchAgents`. Do not use `SMAppService`. launchd ties an `SMAppService` agent to the code signature, and each ad-hoc build has a new signature. `LoginItem.migrate()` removes the old `SMAppService` agent.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
-- **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
+- **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row (`ReadinessGate`, also used by `colimabar start`). During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
 - **Replace the bundle only by rename.** An in-app update swaps the whole bundle with `renamex_np` (`BundleSwap`). It never writes into the running bundle, and it changes nothing in the Applications folder before the download passes every check.
 - **Links.** A link never returns data, writes a file or reaches a shell. Its profile must pass `ProfileName.isValid` and be in a fresh `colima list`. VM links ask while `askBeforeLinks` is on. A debug run ignores links.
-- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It never downloads or installs an update. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
+- **Command line.** `--cli` never creates `NSApplication`. The command never writes a setting and never changes the system, except through `colima-ctl.sh` (`start`, `stop`, `restart`), the file that the user names (`diagnostics`) and `NSWorkspace.openApplication` (`open`). It never overwrites a file. Only a normal run writes `app-status.json`. The JSON keys of `status` and `doctor` are a contract.
+- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. The `colimabar` command (`--cli`) is a debug run too. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It never downloads or installs an update. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
 
 ## Testing
 
 Tests use Swift Testing. Logic lives in small static functions, so tests can call it without a VM. `Tests/ColimaBarTests/TestSupport/` has shared fakes, for example `FakeDaemon`. Automated runs never start or stop the user's Colima VM.
 
-`Tests/ColimaBarTests/Scripts/` tests the scripts in `scripts/`. `ScriptSandbox` runs a copy of a script in a temporary HOME, with stub `osascript` (`STUB_OSASCRIPT_OUT` is the button that it answers, `STUB_OSASCRIPT_ERR` the error text), `open` (it logs and opens nothing), `colima`, `docker`, `kubectl`, `pgrep` and `ps` first on its PATH. The stub `ps` answers `-o command=` and `-o etime=` for a PID from a table (`stubProcesses`), so the owner checks of the lock, the busy marker and the pid files of Lima run without real processes. Thus no dialog reaches the screen, and no VM or docker context changes. The uninstall tests source only the helper functions of `uninstall.sh`.
+`Tests/ColimaBarTests/Scripts/` tests the scripts in `scripts/`. `ScriptSandbox` runs a copy of a script in a temporary HOME, with stub `osascript` (`STUB_OSASCRIPT_OUT` is the button that it answers, `STUB_OSASCRIPT_ERR` the error text), `open` (it logs and opens nothing), `colima`, `docker`, `kubectl`, `pgrep` and `ps` first on its PATH. The stub `ps` answers `-o command=` and `-o etime=` for a PID from a table (`stubProcesses`), so the owner checks of the lock, the busy marker and the pid files of Lima run without real processes. Thus no dialog reaches the screen, and no VM or docker context changes. The uninstall and install tests source only the helper functions of `uninstall.sh` and `install.sh`. `CLIWrapperScriptTests` runs `colimabar.sh` in a fake bundle. The `CLI` tests use pure inputs, so no test runs `colima`, starts a VM or reads the real cache folder.

@@ -153,6 +153,22 @@ import Testing
         }
     }
 
+    @Test func refusesABundleWithoutTheCommand() async throws {
+        let tmp = try TempFolder()
+        let app = try await FakeBundle.make(in: tmp.path, withCommand: false)
+        await #expect(throws: UpdateError.self) {
+            try await UpdateVerifier.verifyBundle(app, tag: "v0.9.1", running: "0.9.0")
+        }
+    }
+
+    @Test func refusesABundleWhoseCommandIsNotExecutable() async throws {
+        let tmp = try TempFolder()
+        let app = try await FakeBundle.make(in: tmp.path, commandIsExecutable: false)
+        await #expect(throws: UpdateError.self) {
+            try await UpdateVerifier.verifyBundle(app, tag: "v0.9.1", running: "0.9.0")
+        }
+    }
+
     @Test func removesTheQuarantineFlagFromTheUnpackedCopy() async throws {
         let tmp = try TempFolder()
         let app = try await FakeBundle.make(in: tmp.path)

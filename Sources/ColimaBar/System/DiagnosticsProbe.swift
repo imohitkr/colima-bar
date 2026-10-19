@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// All the I/O of the diagnostics file. Each function reads one part and
@@ -313,16 +314,57 @@ enum DiagnosticsProbe {
 
     // MARK: - The file
 
-    /// Writes the text to `url`, then sets the mode 0600. A write error keeps
-    /// its reason. If the mode cannot be set, it removes the file: a file
-    /// that others can read must not stay.
-    static func write(_ text: String, to url: URL) throws {
-        try Data(text.utf8).write(to: url, options: .atomic)
-        do {
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-        } catch {
-            try? FileManager.default.removeItem(at: url)
-            throw error
+    /// Writes the text to `url` with the mode 0600 from the first byte. A file
+    /// that others can read never exists, not even for a moment.
+    ///
+    /// With `replace`, the text goes to a new private temporary file beside
+    /// `url`, then `rename` puts it over `url`: an old file or link at `url`
+    /// is replaced. The save panel confirmed that. Without `replace`, `url`
+    /// must be new: `O_EXCL` and `O_NOFOLLOW` make the system refuse a file
+    /// or a link that is there (`CLIDiagnosticsPath.Failure.exists`). A write
+    /// error keeps its reason and leaves no file.
+    static func write(_ text: String, to url: URL, replace: Bool = true) throws {
+        let data = Data(text.utf8)
+        guard replace else {
+            do {
+                try createPrivateFile(at: url.path, data: data)
+            } catch let error as POSIXError where error.code == .EEXIST {
+                throw CLIDiagnosticsPath.Failure.exists(url.path)
+            }
+            return
+        }
+        let temp = "\(url.path).\(getpid()).tmp"
+        unlink(temp)
+        try createPrivateFile(at: temp, data: data)
+        if rename(temp, url.path) != 0 {
+            let code = errno
+            unlink(temp)
+            throw POSIXError(POSIXErrorCode(rawValue: code) ?? .EIO)
+        }
+    }
+
+    /// Makes a new file with the mode 0600 and writes `data`. It never opens
+    /// an existing file or a link. A failure removes the file again.
+    private static func createPrivateFile(at path: String, data: Data) throws {
+        let fd = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var written = 0
+        var failure: Int32 = 0
+        data.withUnsafeBytes { raw in
+            while written < data.count {
+                let n = Darwin.write(fd, raw.baseAddress! + written, data.count - written)
+                if n < 0 {
+                    if errno == EINTR { continue }
+                    failure = errno
+                    return
+                }
+                written += n
+            }
+        }
+        if close(fd) != 0, failure == 0 { failure = errno }
+        if failure != 0 {
+            unlink(path)
+            throw POSIXError(POSIXErrorCode(rawValue: failure) ?? .EIO)
         }
     }
 }

@@ -59,15 +59,16 @@ enum DiagnosticsBundle {
     }
 
     /// The whole file: the notice, the summary and one block for each part.
-    /// `redactor` runs over all of it. The result has at most `maxBytes`.
+    /// `runNote` is "debug run" or "command line" after the version, or nil
+    /// for a normal run. `redactor` runs over all of it. The result has at most `maxBytes`.
     static func render(
-        sections: [DiagnosticsSection], date: Date, version: String, isDebugRun: Bool, elapsed: TimeInterval,
+        sections: [DiagnosticsSection], date: Date, version: String, runNote: String?, elapsed: TimeInterval,
         notes: [String] = [], redactor: Redactor
     ) -> String {
         var out: [String] = [notice, ""]
         out.append("ColimaBar diagnostics")
         out.append("Date: \(date.formatted(.iso8601))")
-        out.append("ColimaBar: \(version)\(isDebugRun ? " (debug run)" : "")")
+        out.append("ColimaBar: \(version)\(runNote.map { " (\($0))" } ?? "")")
         out.append("Collected in \(String(format: "%.1f", elapsed)) s")
         out.append("")
         out.append("Summary")

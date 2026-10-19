@@ -37,6 +37,6 @@ struct DoctorReport: Equatable, Sendable {
             }
             lines.append("[\(tag)] \(r.check.title): \(r.sharedDetail)")
         }
-        return lines.joined(separator: "\n").replacingOccurrences(of: home, with: "~")
+        return HomeMask.apply(lines.joined(separator: "\n"), home: home)
     }
 }

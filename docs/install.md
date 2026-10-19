@@ -121,6 +121,22 @@ make dmg        # builds build/ColimaBar-<version>.dmg
 
 To list all targets, run `make` with no target. The Make targets call `./build.sh`, so `./build.sh install` and `./build.sh dmg` also work. [CONTRIBUTING.md](../CONTRIBUTING.md) has the other targets.
 
+## Use the command in your PATH
+
+The app has a command for Terminal: [`colimabar`](usage.md#command-line). It is the file `ColimaBar.app/Contents/Resources/bin/colimabar`.
+
+- **Homebrew** links it into your Homebrew `bin` folder.
+- **The installer** links it into `~/.local/bin` or `~/bin`. The folder must exist, you must be able to write to it, and it must be in your `PATH`. The installer never uses `sudo`. If it finds no such folder, it prints the command for `/usr/local/bin`. The installer does not replace a `colimabar` that is not a link of ColimaBar.
+- **The disk image and a build from source** make no link. Make one yourself. For an app in `/Applications`, run this command:
+
+  ```sh
+  sudo ln -sf /Applications/ColimaBar.app/Contents/Resources/bin/colimabar /usr/local/bin/colimabar
+  ```
+
+  Use a folder of your own, for example `~/.local/bin`, if you do not want `sudo`.
+
+To check the link, run `colimabar version`. If macOS blocks the command, allow the app as described for the first launch. See [Install with Homebrew](#homebrew-recommended).
+
 ## After you install
 
 ColimaBar turns on its login item the first time you open it from an Applications folder. See [The login item](usage.md#the-login-item).

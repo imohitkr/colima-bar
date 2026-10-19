@@ -15,9 +15,107 @@
 # without the Gatekeeper prompt that a browser download gets.
 set -euo pipefail
 
+# BEGIN helpers: functions only. Tests source this block.
+
+# Succeeds if $1 is a link to the command of a ColimaBar app: its target ends
+# in /ColimaBar.app/Contents/Resources/bin/colimabar. The installer changes
+# no other file.
+is_own_link() {
+  local target
+  [ -L "$1" ] || return 1
+  target=$(readlink "$1") || return 1
+  case "$target" in
+    */ColimaBar.app/Contents/Resources/bin/colimabar) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Succeeds if $1 is a folder in PATH.
+on_path() {
+  case ":$PATH:" in
+    *":$1:"*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Prints the first of ~/.local/bin and ~/bin that exists, that the user can
+# write to and that is in PATH. Prints nothing if there is none.
+command_dir() {
+  local d
+  for d in "$HOME/.local/bin" "$HOME/bin"; do
+    if [ -d "$d" ] && [ -w "$d" ] && on_path "$d"; then
+      echo "$d"
+      return 0
+    fi
+  done
+  return 0
+}
+
+# link_command WRAPPER -> links the colimabar command to WRAPPER, the command
+# in the app. It never asks and never uses sudo. It leaves a colimabar that
+# is not a link of ColimaBar alone, and a link that works already.
+link_command() {
+  local wrapper=$1 found dir
+  [ -x "$wrapper" ] || return 0
+  found=$(command -v colimabar 2>/dev/null || true)
+  if [ -n "$found" ]; then
+    if is_own_link "$found"; then
+      echo "The colimabar command is linked: $found"
+    else
+      echo "Notice: $found is not a link of ColimaBar. The installer left it."
+    fi
+    return 0
+  fi
+  dir=$(command_dir)
+  if [ -n "$dir" ]; then
+    if [ -e "$dir/colimabar" ] || [ -L "$dir/colimabar" ]; then
+      if ! is_own_link "$dir/colimabar"; then
+        echo "Notice: $dir/colimabar is not a link of ColimaBar. The installer left it."
+        return 0
+      fi
+    fi
+    if ln -sfn "$wrapper" "$dir/colimabar"; then
+      echo "Linked the colimabar command: $dir/colimabar"
+    else
+      echo "Could not link $dir/colimabar."
+    fi
+    return 0
+  fi
+  echo "To use the colimabar command, run: sudo ln -sf '$wrapper' /usr/local/bin/colimabar"
+}
+
+# app_pids -> prints the PID of each ColimaBar app of this user. The
+# `colimabar` command runs the same binary with --cli. It is not the app: do
+# not wait for it and do not stop it.
+app_pids() {
+  local pid args
+  for pid in $(pgrep -U "$(id -u)" -x ColimaBar 2>/dev/null); do
+    args=$(ps -o command= -p "$pid" 2>/dev/null) || continue
+    case " $args" in *" --cli"*) continue ;; esac
+    echo "$pid"
+  done
+  return 0
+}
+
+# app_running -> succeeds if a ColimaBar app of this user runs.
+app_running() {
+  [ -n "$(app_pids)" ]
+}
+
+# term_app -> sends SIGTERM to each ColimaBar app of this user.
+term_app() {
+  local pid
+  for pid in $(app_pids); do
+    kill -TERM "$pid" 2>/dev/null
+  done
+  return 0
+}
+
+# END helpers
+
 wait_for_exit() {
   for _ in $(seq 1 20); do
-    pgrep -U "$(id -u)" -xq ColimaBar || return 0
+    app_running || return 0
     sleep 0.5
   done
 }
@@ -214,17 +312,17 @@ main() {
   fi
   xattr -dr com.apple.quarantine "$tmp/ColimaBar.app" 2>/dev/null || true
 
-  if pgrep -U "$(id -u)" -xq ColimaBar; then
+  if app_running; then
     echo "Quitting the running ColimaBar"
     osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1 || true
     wait_for_exit
     # The Apple event can fail (Automation permission, an open alert).
     # ColimaBar also quits cleanly on SIGTERM, so launchd does not relaunch it.
-    if pgrep -U "$(id -u)" -xq ColimaBar; then
-      pkill -U "$(id -u)" -TERM -x ColimaBar 2>/dev/null || true
+    if app_running; then
+      term_app
       wait_for_exit
     fi
-    if pgrep -U "$(id -u)" -xq ColimaBar; then
+    if app_running; then
       echo "ColimaBar is still running. Quit it from its menu, then run the installer again." >&2
       exit 1
     fi
@@ -246,6 +344,7 @@ main() {
   rm -rf "$dest/ColimaBar.app"
   ditto "$tmp/ColimaBar.app" "$dest/ColimaBar.app"
   echo "Installed $dest/ColimaBar.app"
+  link_command "$dest/ColimaBar.app/Contents/Resources/bin/colimabar"
 
   if ! command -v colima >/dev/null 2>&1 && [ ! -x /opt/homebrew/bin/colima ] && [ ! -x /usr/local/bin/colima ]; then
     echo "Colima is not installed. To install it, run: brew install colima docker"

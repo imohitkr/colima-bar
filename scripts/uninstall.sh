@@ -86,20 +86,87 @@ link_profile_sockets() {
   done
 }
 
+# Succeeds if $1 is a link to the command of a ColimaBar app: its target ends
+# in /ColimaBar.app/Contents/Resources/bin/colimabar. The script removes no
+# other file.
+is_own_link() {
+  local target
+  [ -L "$1" ] || return 1
+  target=$(readlink "$1") || return 1
+  case "$target" in
+    */ColimaBar.app/Contents/Resources/bin/colimabar) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# command_link_dirs -> the folders that can hold the colimabar link of
+# Homebrew, of the installer or of the user.
+command_link_dirs() {
+  echo /opt/homebrew/bin
+  echo /usr/local/bin
+  echo "$HOME/.local/bin"
+  echo "$HOME/bin"
+}
+
+# remove_command_links DIR... -> removes DIR/colimabar in each folder, but
+# only if it is a link to the command of ColimaBar. A folder that the user
+# cannot write to needs sudo, as for /var/run.
+remove_command_links() {
+  local d f
+  for d in "$@"; do
+    f="$d/colimabar"
+    is_own_link "$f" || continue
+    if [ -w "$d" ]; then
+      rm -f "$f" && echo "Removed $f"
+    else
+      echo "Removing $f (needs sudo)"
+      sudo rm -f "$f" || echo "Could not remove $f. Remove it by hand." >&2
+    fi
+  done
+  return 0
+}
+
+# app_pids -> prints the PID of each ColimaBar app of this user. The
+# `colimabar` command runs the same binary with --cli. It is not the app: do
+# not wait for it and do not stop it.
+app_pids() {
+  local pid args
+  for pid in $(pgrep -U "$(id -u)" -x ColimaBar 2>/dev/null); do
+    args=$(ps -o command= -p "$pid" 2>/dev/null) || continue
+    case " $args" in *" --cli"*) continue ;; esac
+    echo "$pid"
+  done
+  return 0
+}
+
+# app_running -> succeeds if a ColimaBar app of this user runs.
+app_running() {
+  [ -n "$(app_pids)" ]
+}
+
+# term_app -> sends SIGTERM to each ColimaBar app of this user.
+term_app() {
+  local pid
+  for pid in $(app_pids); do
+    kill -TERM "$pid" 2>/dev/null
+  done
+  return 0
+}
+
 # END helpers
 
 COLIMA_SOCK="$(colima_dir)/default/docker.sock"
 
 wait_for_exit() {
   for _ in $(seq 1 20); do
-    pgrep -U "$(id -u)" -xq ColimaBar || return 0
+    app_running || return 0
     sleep 0.5
   done
 }
 
 # Stop ColimaBar before you delete it. A running copy recreates the colimabar
 # context and the launchd DOCKER_HOST when the VM starts again.
-if pgrep -U "$(id -u)" -xq ColimaBar; then
+if app_running; then
   echo "Quitting the running ColimaBar"
   osascript -e 'quit app "ColimaBar"' >/dev/null 2>&1
   wait_for_exit
@@ -109,11 +176,11 @@ launchctl bootout "gui/$(id -u)/com.imohitkr.ColimaBar.agent" 2>/dev/null
 launchctl bootout "gui/$(id -u)/com.imohitkr.ColimaBar.login" 2>/dev/null
 # The Apple event can fail (Automation permission, an open alert).
 # ColimaBar also quits cleanly on SIGTERM.
-if pgrep -U "$(id -u)" -xq ColimaBar; then
-  pkill -U "$(id -u)" -TERM -x ColimaBar 2>/dev/null
+if app_running; then
+  term_app
   wait_for_exit
 fi
-if pgrep -U "$(id -u)" -xq ColimaBar; then
+if app_running; then
   echo "ColimaBar is still running. Quit it from its menu, then run this script again." >&2
   exit 1
 fi
@@ -156,6 +223,10 @@ fi
 PROFILE_NAMES=($(profile_socket_names))
 rm -rf ~/Applications/ColimaBar.app /Applications/ColimaBar.app ~/.cache/colima-bar
 rm -f ~/.local/bin/colima-ctl.sh
+# One folder at a time: the home folder can have a space.
+while IFS= read -r dir; do
+  remove_command_links "$dir"
+done < <(command_link_dirs)
 # Keep the stable path as a link to Colima's socket, so a DOCKER_HOST that
 # still points at it (shell rc files, scripts) keeps working.
 (umask 077 && mkdir -p "$(dirname "$STABLE")") && ln -sfn "$COLIMA_SOCK" "$STABLE"
