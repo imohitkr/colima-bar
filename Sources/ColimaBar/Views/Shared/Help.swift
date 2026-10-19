@@ -39,13 +39,16 @@ enum Help {
     static let logs =
         "Open a live log window for this container, with search, follow, a stderr filter and copy. To follow the logs in a terminal window, use the ••• menu."
     static let shell =
-        "Open an interactive shell in the container, in iTerm, or in Terminal when iTerm is not installed. The shell is bash if the container has it, otherwise sh."
+        "Open an interactive shell in the container, in iTerm, or in Terminal when iTerm is not installed. The shell is bash if the container has it, otherwise sh. If the container has no shell, use Debug shell in the ••• menu."
     static let ctrRestart = "Restart this container. Docker keeps its filesystem and volumes."
     static let ctrStop = "Stop this container (SIGTERM, then SIGKILL after 10s). You can start it again."
     static let ctrStart = "Start this stopped container again with its original settings."
     static let ctrRemove = "Delete this container. Its writable layer is lost. Docker keeps named volumes."
     static let more =
-        "Inspect the container. Copy the name, ID, image or an exec command. Open ports. Remove the container."
+        "Inspect the container. Copy the name, ID, image or an exec command. Open ports. Open a debug shell. Remove the container."
+    static let debugShell =
+        "Open a shell in a new busybox container that shares the processes and network of this container. Use it when the container has no shell. The new container ends when you exit."
+    static let debugShellDebug = "A debug run does not open a debug shell."
     static let stopAll = "Stop all running containers. ColimaBar asks first."
 
     // Inspect

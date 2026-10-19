@@ -42,6 +42,14 @@ If a VM action fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/
 
 If the notification says "Colima profile NAME didn't become ready", open the Lima log from the dashboard footer.
 
+## A container has no shell
+
+If the terminal says "Container NAME has no shell" after you click **Shell**, the image has no `sh`. This is usual for distroless images. Open the ••• menu of the container and choose **Debug shell**. See [Containers tab](usage.md#containers-tab).
+
+On the first use, docker downloads the image `busybox:latest`. If the Mac is offline, or Docker Hub refuses the download, set an image that you can reach: `defaults write com.imohitkr.ColimaBar debugShellImage YOUR-MIRROR/busybox`.
+
+The debug shell ends when the container stops. The terminal then shows exit code 137.
+
 ## The VM does not start after a VM settings change
 
 If the VM does not start after **Apply** on the [VM settings](usage.md#vm-settings) page, ColimaBar puts the old `colima.yaml` back and sends a notification. The VM stays stopped. If the restart does not end (it stops, or it takes longer than 15 minutes), ColimaBar also puts the old file back. If `colima stop` fails, the VM keeps running with the old settings, and the notification says that nothing changed. Click **Start** to use the old settings. Open `~/.cache/colima-bar/ctl.log` to see why the new settings failed.

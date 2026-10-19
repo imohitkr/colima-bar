@@ -32,6 +32,10 @@ enum CtlAction: String, CaseIterable, Sendable {
     case containerRemove = "ctr-rm"
     case containerLogs = "ctr-logs"
     case containerShell = "ctr-shell"
+    /// A shell in a new container that shares the processes and the network
+    /// of a container. Args: the full container ID and the image
+    /// (`DebugShell.ctlArgs`). It runs in a terminal: no dialog, no VM action.
+    case containerDebug = "ctr-debug"
     /// `docker compose pull`, `up -d` and `down` of a Compose project. Args:
     /// `NAME DIR NENV ENV... FILE...` (see `ComposeProject.ctlArgs()`). They are
     /// not VM actions: no lock and no busy marker. `ColimaModel.compose`

@@ -6,7 +6,6 @@ These features are planned. They have no target version yet. The milestones are 
 
 ## 1. Containers
 
-- A debug shell for containers that have no shell, for example distroless images.
 - Back up a volume to a file and restore it.
 
 ## Later

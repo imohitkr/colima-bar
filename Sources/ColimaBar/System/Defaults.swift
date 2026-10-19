@@ -45,6 +45,9 @@ enum Defaults {
         /// The keyboard shortcut for the dashboard, as a spec such as
         /// `control+option+command+C` (`KeyCombo.spec`). Unset means none.
         case hotKey
+        /// The image of the debug shell (`DebugShell.image`). Set it with
+        /// `defaults write`. It is not in the settings file.
+        case debugShellImage
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }
