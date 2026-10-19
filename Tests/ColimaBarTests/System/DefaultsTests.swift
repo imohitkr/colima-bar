@@ -11,7 +11,7 @@ import Testing
             "hideIconWhenStopped",
             "toldIconHidden", "apiVersion", "checkUpdates", "notifiedVersion", "didOfferLoginItem",
             "didMigrateLoginItem", "revealOnLaunch", "keepRemovedLogs",
-            "goodStartVersions", "installedVersion", "recoveryPath",
+            "goodStartVersions", "installedVersion", "recoveryPath", "askBeforeLinks", "linkHandoff",
         ]
         #expect(Set(Defaults.Key.allCases.map(\.rawValue)) == expected)
     }

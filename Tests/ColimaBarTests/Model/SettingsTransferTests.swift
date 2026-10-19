@@ -76,6 +76,16 @@ import Testing
         }
     }
 
+    /// A settings file must not turn off the question before a link runs.
+    @Test func theQuestionBeforeLinksIsNeverExported() throws {
+        #expect(!T.Setting.allCases.map(\.rawValue).contains("askBeforeLinks"))
+        let settings = try #require(try object(try T.encode(sample, appVersion: "1"))["settings"] as? [String: Any])
+        #expect(settings["askBeforeLinks"] == nil)
+        let plan = try T.plan(file(#"{"askBeforeLinks": false}"#), current: sample, profiles: [])
+        #expect(plan.changes.isEmpty)
+        #expect(plan.skipped.isEmpty)
+    }
+
     @Test func boolsAndNumbersKeepTheirJSONTypes() throws {
         let text = String(decoding: try T.encode(sample, appVersion: "1"), as: UTF8.self)
         #expect(text.contains(#""autoStart" : true"#))

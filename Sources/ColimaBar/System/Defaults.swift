@@ -35,11 +35,19 @@ enum Defaults {
         /// put it back. The launch clean-up keeps the update folder and the
         /// hidden copies while this path exists.
         case recoveryPath
+        /// Ask before a link starts, stops or restarts a VM. It is not in the
+        /// settings file: a file must not turn off a safety question.
+        case askBeforeLinks
+        /// Links that a copy started by hand gives to the login agent, as
+        /// `["at": seconds, "links": [text]]` (`LinkInbox.handoff`). It is
+        /// machine state, not a setting.
+        case linkHandoff
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }
     static func bool(_ k: Key) -> Bool? { UserDefaults.standard.object(forKey: k.rawValue) as? Bool }
     static func int(_ k: Key) -> Int? { UserDefaults.standard.object(forKey: k.rawValue) as? Int }
+    static func dictionary(_ k: Key) -> [String: Any]? { UserDefaults.standard.dictionary(forKey: k.rawValue) }
     static func double(_ k: Key) -> Double? { UserDefaults.standard.object(forKey: k.rawValue) as? Double }
     /// UserDefaults' own bool(forKey:): false when the key is unset.
     static func flag(_ k: Key) -> Bool { UserDefaults.standard.bool(forKey: k.rawValue) }

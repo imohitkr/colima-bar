@@ -25,6 +25,7 @@
 - **Live dashboard**: see containers by Compose project, with health, ports, CPU, memory and logs. Images, volumes and VM settings are one click away.
 - **Auto-stop**: ColimaBar can stop the VM when it is idle.
 - **Doctor**: one click checks the docker setup (context, routes, shell, plugins, VM and disk) and fixes common problems. **Repair** gets a Broken profile running again.
+- **Links**: start, stop or restart the VM, or open the dashboard, from Raycast, Alfred, Shortcuts or a script with `colimabar://` links. ColimaBar asks first.
 - **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, when a Doctor fix ends, after an auto-start that follows a Colima or Lima upgrade, one for each new version and one after an in-app update, and one the first time the icon hides.
 
 > [!NOTE]
