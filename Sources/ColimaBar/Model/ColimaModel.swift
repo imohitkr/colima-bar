@@ -175,7 +175,7 @@ final class ColimaModel {
         guard fd >= 0 else { return }  // someone else claimed it first
         close(fd)
         Notifier.shared.post(
-            "The icon is hidden while Colima is stopped. It comes back when Colima starts. To show it now, open ColimaBar from Spotlight.",
+            "The icon is hidden while Colima is stopped. It comes back when Colima starts. To show it now, press the dashboard shortcut or open ColimaBar from Spotlight.",
             record: false)
     }
 

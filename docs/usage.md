@@ -77,7 +77,7 @@ These tabs show sizes and the items that containers use. You can pull the latest
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
 - **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Profiles**: shown only when you have more than one profile.
-- **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
+- **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
 
 ### Doctor
 
@@ -303,6 +303,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - An in-app update fails, or it installs but cannot restart ColimaBar. A click opens the release page. See [An update does not install](troubleshooting.md#an-update-does-not-install).
 - A new version is available. ColimaBar sends one notification for each new version. After an in-app update, the new version sends one more notification with a link to the release notes. See [Update](install.md#update).
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.
+- ColimaBar refuses a link, or a link is not valid. If notifications are off, an alert window shows the text. See [A link does nothing](troubleshooting.md#a-link-does-nothing).
 - After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).
 
 ColimaBar sends no notification for a normal start or stop. Exit codes 130, 137 and 143 (SIGINT, SIGKILL and SIGTERM) count as a normal stop, so they send no crash alert. ColimaBar also ignores testcontainers containers. For one container and one kind of failure, it sends at most one notification each 10 minutes.

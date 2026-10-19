@@ -10,6 +10,8 @@ ColimaBar is a menu bar app for [Colima](https://github.com/abiosoft/colima). It
 2. **Auto-start.** It runs a proxy on a unix socket, the stable socket. All docker clients use that socket. While the VM is down, the first real docker request starts Colima. Each docker profile also has its own proxy socket, the profile socket, which starts that profile.
 3. **Auto-stop.** It can stop the VM of each running profile after an idle time.
 
+It also takes `colimabar://` links, a keyboard shortcut and the `colimabar` command.
+
 ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit, Carbon HIToolbox for the keyboard shortcut; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
 
 ColimaBar gets its data from three sources:
@@ -311,7 +313,7 @@ ColimaBar does not use `SMAppService`. launchd ties an `SMAppService` agent to t
 
 ### Notifications
 
-Notifications go out for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Exit codes 0, 130, 137 and 143 are a normal stop (`ColimaModel.ignoredExitCodes`). Containers with the label `org.testcontainers=true` do not send alerts. Two other notifications go out once: one for each new version, and one the first time the icon hides. After an in-app update, the new version sends one more. A third goes out after a good auto-start with a risky Colima or Lima change since the last good start (see the upgrade guard). Its click opens the release notes. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. The checks after a system sleep send a notification with a **Restart** button (category `PROFILE`) when Docker does not answer or the clock fix fails. A click on its banner does nothing. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
+Notifications go out for failures: a container exits with an error, gets OOM-killed or becomes unhealthy, or an action fails. Exit codes 0, 130, 137 and 143 are a normal stop (`ColimaModel.ignoredExitCodes`). Containers with the label `org.testcontainers=true` do not send alerts. Two other notifications go out once: one for each new version, and one the first time the icon hides. After an in-app update, the new version sends one more. A third goes out after a good auto-start with a risky Colima or Lima change since the last good start (see the upgrade guard). Its click opens the release notes. `AlertThrottle` allows one banner for each container and alert kind each 10 minutes. A refused or bad link sends one (see Links). It is rate-limited, and it becomes an alert window when notifications are off. The checks after a system sleep send a notification with a **Restart** button (category `PROFILE`) when Docker does not answer or the clock fix fails. A click on its banner does nothing. The dashboard keeps a list of recent alerts, so nothing is lost when notifications are off.
 
 **Saved logs.** Docker removes an auto-remove container (`docker run --rm`) and its logs right after it dies. While the option is on (`Defaults.Key.keepRemovedLogs`, off by default) and crash alerts are on, `RemovedLogKeeper` does this for the selected profile:
 
@@ -409,7 +411,7 @@ The JSON of `status` and `doctor` has `schemaVersion` 1. Every key is always the
 
 ### Debug runs
 
-`--snapshot`, `--popover`, `--notify-test` and `--diagnostics` start a debug run. A debug run ignores links. It does not change the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It may write the diagnostics file that the user chose. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover`, `--notify-test`, `--diagnostics` and `--cli` start a debug run. A debug run ignores links. It does not change the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It may write the diagnostics file that the user chose. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 

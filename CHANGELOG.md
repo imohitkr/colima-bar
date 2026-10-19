@@ -6,14 +6,18 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-19
+
 ### Added
 
 - A keyboard shortcut can open and close the dashboard from any app. On the System tab, in **App**, click **Record Shortcut**, then press the keys, for example ⌃⌥⌘C. It has no default and needs no Accessibility or Input Monitoring permission. Settings export and import include it. See [The dashboard shortcut](docs/usage.md#the-dashboard-shortcut).
-- A `colimabar` command for Terminal and scripts. `colimabar status` shows the VM, auto-start, auto-stop and the socket. `colimabar start`, `stop` and `restart` run the VM actions and wait until Docker is ready. `colimabar open` opens the dashboard. `colimabar doctor` runs the Doctor checks, and `colimabar diagnostics` writes the diagnostics file. `status` and `doctor` have `--json` for scripts. `status`, `doctor` and `diagnostics` never start the VM, and ColimaBar does not need to run. Homebrew and the installer link the command, and `~/.local/bin` or `~/bin` gets the link if it is in your `PATH`. The uninstall script removes these links. See [Command line](docs/usage.md#command-line).
-- ColimaBar opens `colimabar://` links: `open`, `doctor`, `start`, `stop` and `restart`. The last three take `profile=NAME`. Use them from Raycast, Alfred, Shortcuts or a script. ColimaBar asks before a link starts, stops or restarts a VM. The System tab setting **Ask before a link starts, stops or restarts Colima** turns the question off. A link never gives data back, and never creates a VM. See [Links](docs/usage.md#links-url-scheme).
+- A `colimabar` command for Terminal and scripts. `colimabar status` shows the VM, auto-start, auto-stop and the socket. `colimabar start`, `stop` and `restart` run the VM actions. `start` and `restart` wait until Docker is ready. `colimabar open` opens the dashboard. `colimabar doctor` runs the Doctor checks, and `colimabar diagnostics` writes the diagnostics file. `status` and `doctor` have `--json` for scripts. `status`, `doctor` and `diagnostics` never start the VM, and ColimaBar does not need to run. Homebrew links the command. The installer links it into `~/.local/bin` or `~/bin` if that folder is in your `PATH`. The uninstall script removes these links. See [Command line](docs/usage.md#command-line).
+- ColimaBar opens `colimabar://` links: `open`, `doctor`, `start`, `stop` and `restart`. The last three take `profile=NAME`. Use them from Raycast, Alfred, Shortcuts or a script. ColimaBar asks before a link starts, stops or restarts a VM. The System tab setting **Ask before a link starts, stops or restarts Colima** turns the question off. A link never gives data back, and never creates a VM. If ColimaBar refuses a link, it sends a notification. See [Links](docs/usage.md#links-url-scheme).
 
 ### Changed
 
+- The update also checks that the new app has the `colimabar` command.
+- The diagnostics file shows if the keyboard shortcut is active, and "(command line)" when `colimabar diagnostics` wrote it.
 - The install docs warn that **Move to Bin** in the "ColimaBar" Not Opened prompt deletes ColimaBar, and tell you to click **Done**. A new troubleshooting entry tells you how to get ColimaBar back. See [ColimaBar is gone after the macOS prompt](docs/troubleshooting.md#colimabar-is-gone-after-the-macos-prompt).
 
 ### Fixed
@@ -218,7 +222,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/imohitkr/colima-bar/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/imohitkr/colima-bar/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/imohitkr/colima-bar/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/imohitkr/colima-bar/compare/v0.7.0...v0.7.1

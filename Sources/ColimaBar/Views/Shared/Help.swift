@@ -138,7 +138,7 @@ enum Help {
     static let autoStopCustom =
         "Type a number of minutes from 1 to 1440 (24 hours). Press Return or click elsewhere to apply it."
     static let hideIcon =
-        "Hide the icon while Colima is stopped. ColimaBar continues to run. If auto-start is on, docker still starts Colima. To show the icon, open ColimaBar from Spotlight."
+        "Hide the icon while Colima is stopped. ColimaBar continues to run. If auto-start is on, docker still starts Colima. To show the icon, press the dashboard shortcut or open ColimaBar from Spotlight."
 
     static let enableNotifications = "Open System Settings > Notifications > ColimaBar and turn on Allow Notifications."
 
