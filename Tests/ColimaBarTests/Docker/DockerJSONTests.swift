@@ -57,4 +57,12 @@ import Testing
         let plain = try JSONDecoder().decode(APIInspect.self, from: Data(#"{"Id":"abc"}"#.utf8))
         #expect(plain.HostConfig?.AutoRemove == nil)
     }
+
+    @Test func statusDecodesTheIPAddressOfTheVM() throws {
+        let json = #"{"driver":"macOS Virtualization.Framework","mount_type":"virtiofs","ip_address":"192.168.64.3"}"#
+        let st = try JSONDecoder().decode(ColimaStatusJSON.self, from: Data(json.utf8))
+        #expect(st.ip_address == "192.168.64.3" && st.mount_type == "virtiofs")
+        let none = try JSONDecoder().decode(ColimaStatusJSON.self, from: Data(#"{"driver":"x"}"#.utf8))
+        #expect(none.ip_address == nil)
+    }
 }

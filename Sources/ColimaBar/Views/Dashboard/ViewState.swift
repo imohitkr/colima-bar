@@ -14,5 +14,8 @@ final class ViewState {
     var collapsed: Set<String> = []
     /// The Doctor page replaces the tabs and the stopped screen.
     var showDoctor = false
+    /// The VM settings page replaces the tabs and the stopped screen.
+    var showVMConfig = false
     let system = SystemForm()
+    let vmConfig = VMConfigForm()
 }

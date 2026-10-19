@@ -6,7 +6,7 @@ These features are planned. They have no target version yet. The milestones are 
 
 ## 1. VM configuration
 
-- Change more Colima settings in the app: DNS, the port forwarder, the VM network address, mounts, the VM type and registry mirrors.
+- Change the VM type and the mount type in the app. Colima fixes them when it creates the VM, so this needs a delete and create flow.
 - Detect published ports that stop working and DNS that fails after a VPN change, with a fix.
 
 ## 2. Containers

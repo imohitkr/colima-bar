@@ -64,7 +64,7 @@ struct StoppedView: View {
             Divider()
             Group {
                 if model.config != nil {
-                    VMSettingsSection(model: model, form: form, running: false)
+                    VMSettingsSection(model: model, form: form, ui: ui, running: false)
                         .disabled(model.busy != nil)
                 } else {
                     Text("This profile has no colima.yaml. Start it once to create one.")

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- More VM settings: DNS servers, the port forwarder, a reachable IP address, mounts, inotify and Docker registries. ColimaBar puts the old `colima.yaml` back if the restart does not end, and it refuses to write if `colima.yaml` changed outside ColimaBar. See [VM settings](docs/usage.md#vm-settings).
+
 ## [0.10.0] - 2026-10-19
 
 ### Added

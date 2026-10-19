@@ -9,7 +9,7 @@ struct SystemTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            VMSettingsSection(model: model, form: form, running: true)
+            VMSettingsSection(model: model, form: form, ui: ui, running: true)
 
             Divider()
             SectionHeader(title: "Disk usage")

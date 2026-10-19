@@ -11,6 +11,10 @@ enum CtlAction: String, CaseIterable, Sendable {
     case rosetta
     case k8s
     case disk
+    /// Replaces colima.yaml with a file that ColimaBar staged, after a check of
+    /// the SHA-256 of the old file (the advanced VM settings). Args: the
+    /// staged file and the SHA-256.
+    case vmConfig = "vm-config"
     /// Deletes the VM with all its data and starts it with a smaller disk.
     case diskShrink = "disk-shrink"
     case autoStop = "auto-stop"
@@ -41,8 +45,8 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// not on the next 1 s tick, so a second click can't race it.
     var isVMAction: Bool {
         switch self {
-        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .diskShrink, .autoStop, .profileCreate,
-            .profileDelete, .repair:
+        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .autoStop,
+            .profileCreate, .profileDelete, .repair:
             true
         default: false
         }
@@ -62,7 +66,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// next start.
     var editsConfigWhenStopped: Bool {
         switch self {
-        case .resources, .rosetta, .k8s, .disk: true
+        case .resources, .rosetta, .k8s, .disk, .vmConfig: true
         default: false
         }
     }
@@ -75,7 +79,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// next start. A test checks the running list against the script.
     func showsDialog(running: Bool) -> Bool {
         switch self {
-        case .resources, .rosetta, .k8s: running
+        case .resources, .rosetta, .k8s, .vmConfig: running
         case .disk, .diskShrink, .profileDelete, .repair, .containerRemove, .imageRemove, .volumeRemove, .stopAll,
             .prune:
             true
@@ -98,7 +102,7 @@ enum CtlAction: String, CaseIterable, Sendable {
         switch self {
         case .start: !running
         case .restart, .repair, .profileCreate, .diskShrink: true
-        case .resources, .rosetta, .k8s, .disk: running
+        case .resources, .rosetta, .k8s, .disk, .vmConfig: running
         default: false
         }
     }
@@ -109,7 +113,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// has no record.
     func warnsAfterUpgrade(running: Bool) -> Bool {
         switch self {
-        case .start, .restart, .resources, .rosetta, .k8s, .disk: startsVM(running: running)
+        case .start, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig: startsVM(running: running)
         default: false
         }
     }
@@ -142,6 +146,7 @@ enum CtlAction: String, CaseIterable, Sendable {
         switch self {
         case .start: return "Starting"
         case .stop, .autoStop: return "Stopping"
+        case .vmConfig: return "Applying VM settings"
         case .diskShrink: return "Shrinking disk"
         case .profileCreate: return "Creating"
         case .profileDelete: return "Deleting"

@@ -71,6 +71,7 @@ These tabs show sizes and the items that containers use. You can pull the latest
 - **VM resources**: Light, Standard and Heavy presets, or your own CPU and memory values. **Apply** restarts the VM.
 - **Features**: Rosetta, Kubernetes (k3s) and the disk size. A change restarts the VM, and ColimaBar asks first. A disk grows in place and keeps your data. To make it smaller, use **Shrink…**. See [Shrink the disk](#shrink-the-disk).
 - Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is not `vz`, the Rosetta switch is disabled, unless Rosetta is on. A missing `vmType` counts as `vz`.
+- **More VM settings…**: DNS, the port forwarder, the IP address, mounts and Docker registries. See [VM settings](#vm-settings).
 - To change these settings while the VM is stopped, use the [stopped screen](#open-the-dashboard).
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons.
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md). **Stop sooner on battery or in Low Power Mode** shortens the idle time. See [On battery and in Low Power Mode](auto-stop.md#on-battery-and-in-low-power-mode).
@@ -78,6 +79,24 @@ These tabs show sizes and the items that containers use. You can pull the latest
 - **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Profiles**: shown only when you have more than one profile.
 - **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
+
+### VM settings
+
+**More VM settings…** opens a page for the settings of `colima.yaml` that the System tab does not show. It is on the System tab and on the stopped screen. The page replaces the tabs. **Done** closes it. ColimaBar keeps your edits until you click **Apply** or **Revert**.
+
+- **DNS servers**: up to 3 IP addresses, separated by commas. Use them when names do not resolve, for example with a VPN. If the field is empty, the VM uses the DNS of your Mac.
+- **Reachable IP address**: gives the VM an address that your Mac can reach. It needs the `vz` VM type. Colima cannot turn it off again. When the VM runs, the page shows the IP address and a button to copy it.
+- **Port forwarder**: `ssh` forwards TCP only and is stable. `grpc` also forwards UDP and is experimental.
+- **Mounts**: the Mac folders that the VM shares. Click **Add Folder…** to pick one. **Writable** lets containers change the files. The page knows three cases. If `colima.yaml` has no `mounts` key, or `mounts: null`, Colima mounts no folder, and the page says "No folders are mounted." The first folder that you add is then the only one. If `colima.yaml` has `mounts: []`, Colima mounts your home folder, writable. The first folder that you add then goes after `~`. Remove `~` if you do not want your home folder. If you remove the last folder of a list, ColimaBar writes `mounts: []`, and Colima mounts your home folder again. A folder must exist. Colima does not start if one folder path begins with another, for example `~` and `~/code`, so ColimaBar refuses that list. A folder name must have no line break or control character.
+- **Send file changes to the VM (inotify)**: for tools that watch files. It is experimental.
+- **Docker registries**: mirrors that Docker tries before Docker Hub (an http or https address with no user name, query or fragment), and insecure registries that Docker reaches without TLS. They need the `docker` runtime.
+- **Set when the VM was created**: the VM type, the mount type and the architecture. Colima ignores a change of these values. To change them, delete the profile and create it again.
+
+ColimaBar shows a problem in red and turns **Apply** off until you fix it. If the VM runs, **Apply** asks first, restarts the VM and stops the running containers. If the VM is stopped, **Apply** only writes `colima.yaml`. The VM stays stopped, and the settings apply at the next start.
+
+ColimaBar changes only the lines that you changed in `colima.yaml`. It keeps your comments and the keys that it does not know. Before it writes, it saves a copy of the old file in `~/.cache/colima-bar/colima.PROFILE.yaml.bak`. If `colima.yaml` changed outside ColimaBar after the page read it, ColimaBar changes nothing. It shows the message "colima.yaml changed outside ColimaBar. ColimaBar reloaded it. Check your changes and click Apply again." and drops your edits. After a good **Apply**, the page shows the new file, so **Apply** and **Revert** are off again. If the VM does not start with the new settings, or the restart does not end (it stops, or it takes longer than 15 minutes), ColimaBar puts the old file back. See [The VM does not start after a VM settings change](troubleshooting.md#the-vm-does-not-start-after-a-vm-settings-change).
+
+If a setting has a form that ColimaBar cannot edit (an anchor, or a list over several lines), the page shows it as read-only. Edit `colima.yaml` by hand then.
 
 ### Doctor
 
