@@ -119,7 +119,7 @@ Auto-start also does nothing for some profiles. See [When auto-start does not st
 
 ## Problems after the Mac sleeps
 
-After the Mac wakes, ColimaBar checks each running VM. See [When the Mac sleeps](usage.md#when-the-mac-sleeps). If Docker does not answer, or ColimaBar cannot set the clock of the VM, you get a notification.
+After the Mac wakes, ColimaBar checks each running VM. See [When the Mac sleeps](usage.md#when-the-mac-sleeps). If Docker does not answer, or ColimaBar cannot set the clock of the VM, you get a notification. If a published port stops answering after the wake, see [Published ports stop answering](#published-ports-stop-answering).
 
 To fix it, do these steps:
 

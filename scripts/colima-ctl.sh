@@ -358,8 +358,11 @@ file_sha() {
 # install_config FILE -> puts FILE in place of colima.yaml. It copies to a
 # file in the same folder first, so colima.yaml is never half written.
 install_config() {
-  local tmp="$CONFIG.new.$$"
-  cp "$1" "$tmp" && mv -f "$tmp" "$CONFIG" && return 0
+  local tmp="$CONFIG.new.$$" mode=""
+  [ -f "$CONFIG" ] && mode=$(stat -f %Lp "$CONFIG" 2>/dev/null)
+  if cp "$1" "$tmp" && { [ -z "$mode" ] || chmod "$mode" "$tmp"; } && mv -f "$tmp" "$CONFIG"; then
+    return 0
+  fi
   rm -f "$tmp"
   return 1
 }

@@ -6,11 +6,17 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-19
+
 ### Added
 
-- More VM settings: DNS servers, the port forwarder, a reachable IP address, mounts, inotify and Docker registries. ColimaBar puts the old `colima.yaml` back if the restart does not end, and it refuses to write if `colima.yaml` changed outside ColimaBar. See [VM settings](docs/usage.md#vm-settings).
+- More VM settings: DNS servers, the port forwarder, a reachable IP address, mounts, inotify and Docker registries. Click **More VM settings…** on the System tab or the stopped screen. ColimaBar keeps a copy of the old `colima.yaml`. It puts the copy back if the VM does not start with the new settings or the restart does not end. It refuses to write if `colima.yaml` changed outside ColimaBar. See [VM settings](docs/usage.md#vm-settings).
 - Port forwarding check. ColimaBar finds published ports that answer in the VM but not on the Mac, for example after a sleep or a network change. It tells you in the Containers tab, in a notification and in Doctor, with a **Restart** button. A grpc port forwarder also gets **Use ssh forwarder**. See [Published ports stop answering](docs/troubleshooting.md#published-ports-stop-answering).
 - DNS check. ColimaBar finds a VM that cannot resolve host names while the Mac can, for example after a VPN change. It tells you in the Containers tab, in a notification and in Doctor. With servers in `network.dns`, **Use the Mac's DNS** clears them. Doctor warns when a VPN uses split DNS and `network.dns` is set. See [DNS fails in the VM after a VPN change](docs/troubleshooting.md#dns-fails-in-the-vm-after-a-vpn-change).
+
+### Changed
+
+- Doctor has two new checks, **Port forwarding** and **DNS in the VM**. `colimabar doctor --json` shows them as `portForwarding` and `vmDNS`. `schemaVersion` stays 1.
 
 ## [0.10.0] - 2026-10-19
 
@@ -228,7 +234,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/imohitkr/colima-bar/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/imohitkr/colima-bar/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/imohitkr/colima-bar/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/imohitkr/colima-bar/compare/v0.7.1...v0.8.0
