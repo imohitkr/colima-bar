@@ -44,8 +44,39 @@ enum Help {
     static let ctrStop = "Stop this container (SIGTERM, then SIGKILL after 10s). You can start it again."
     static let ctrStart = "Start this stopped container again with its original settings."
     static let ctrRemove = "Delete this container. Its writable layer is lost. Docker keeps named volumes."
-    static let more = "Copy the name, ID, image or an exec command. Open ports. Remove the container."
+    static let more =
+        "Inspect the container. Copy the name, ID, image or an exec command. Open ports. Remove the container."
     static let stopAll = "Stop all running containers. ColimaBar asks first."
+
+    // Inspect
+    static let inspect =
+        "Show the details of this container: image, state, environment, mounts, networks and ports."
+    static let inspectDone = "Close the details and go back to the list."
+    static let envHidden = "ColimaBar hides values with secret names. Click the eye to show one value."
+    static let revealValue = "Show this value until you close the page."
+    static let hideValue = "Hide this value again."
+    static let copyValue = "Copy the value. A hidden value is copied in full."
+    static let copyDigest = "Copy the full digest of the image."
+    static let openFinder = "Show this folder of your Mac in Finder."
+    static let vmOnlyPath = "This path is only in the VM. The VM does not share it from your Mac."
+    static let openBrowser = "Open this port on localhost in your browser."
+    static let copyPort = "Copy the address of this port. It is not a web port, so ColimaBar does not open it."
+
+    // Compose projects
+    static let composeMenu = "Open the project folder. Pull, start or remove the project with docker compose."
+    static let openProjectFolder = "Show the folder of this Compose project in Finder."
+    static let copyProjectPath = "Copy the path of the folder of this Compose project."
+    static let vsCode = "Open the project folder in Visual Studio Code."
+    static let composePull = "Pull the newest images of the project. Running containers do not change."
+    static let composeUp =
+        "Run docker compose up -d. It creates and starts containers that changed or are missing."
+    static let composeDown =
+        "Stop and remove the containers and networks of the project. Volumes and images stay. ColimaBar asks first."
+    static let composeOutput = "Copy the last lines that docker compose printed for this project."
+    static let composeNoDocker = "Install the docker CLI to use docker compose."
+    static let composeMoved = "The Compose files are missing. The project folder moved or was deleted."
+    static let composeDebug = "A debug run does not run docker compose."
+    static let composeRunning = "docker compose runs for this project."
 
     // Images
     static let inUse =

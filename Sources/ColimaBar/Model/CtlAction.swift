@@ -32,6 +32,13 @@ enum CtlAction: String, CaseIterable, Sendable {
     case containerRemove = "ctr-rm"
     case containerLogs = "ctr-logs"
     case containerShell = "ctr-shell"
+    /// `docker compose pull`, `up -d` and `down` of a Compose project. Args:
+    /// `NAME DIR NENV ENV... FILE...` (see `ComposeProject.ctlArgs()`). They are
+    /// not VM actions: no lock and no busy marker. `ColimaModel.compose`
+    /// runs them, and their output never goes to ctl.log.
+    case composePull = "compose-pull"
+    case composeUp = "compose-up"
+    case composeDown = "compose-down"
     case imageRemove = "img-rm"
     case imagePull = "img-pull"
     case volumeRemove = "vol-rm"
@@ -56,7 +63,9 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// or volume leaves its row and a second Remove can't fail.
     var changesDisk: Bool {
         switch self {
-        case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll, .diskShrink: true
+        case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll, .diskShrink, .composePull,
+            .composeDown:
+            true
         default: false
         }
     }
@@ -81,7 +90,7 @@ enum CtlAction: String, CaseIterable, Sendable {
         switch self {
         case .resources, .rosetta, .k8s, .vmConfig: running
         case .disk, .diskShrink, .profileDelete, .repair, .containerRemove, .imageRemove, .volumeRemove, .stopAll,
-            .prune:
+            .prune, .composeDown:
             true
         default: false
         }

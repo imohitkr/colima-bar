@@ -51,10 +51,12 @@ The live tiles show the total CPU and memory of all containers as a share of the
 
 - ColimaBar groups containers by Compose project. You can start, stop or restart a full project.
 - Each container shows health badges, CPU, memory and `localhost` links for its ports.
+- Click the name or the image of a container to open its [Inspect page](#inspect-a-container).
 - A running container has logs, shell, restart and stop buttons. **Remove…** is in its ••• menu.
 - A stopped container has logs, start and remove buttons.
 - The shell opens in iTerm, or in Terminal when iTerm is not installed.
-- The ••• menu copies the name, ID, image or an exec command. It also opens ports. **Logs in Terminal** follows the logs in iTerm, or in Terminal when iTerm is not installed.
+- The ••• menu of a Compose project opens the project folder and runs docker compose. See [Compose projects](#compose-projects).
+- The ••• menu of a container opens **Inspect…**. It also copies the name, ID, image or an exec command. It also opens ports. **Logs in Terminal** follows the logs in iTerm, or in Terminal when iTerm is not installed.
 - You can filter the list and show running containers only.
 - **Stop all** stops all running containers. ColimaBar asks first.
 - An orange notice below the list shows a broken port forward or a VM that cannot resolve names. See [When the network changes](#when-the-network-changes).
@@ -64,6 +66,30 @@ The live tiles show the total CPU and memory of all containers as a share of the
 Each container gets a live log window. It has search, follow, timestamps, a stderr filter and copy. The window stays open when the container restarts.
 
 If Docker removed the container, the window shows the lines that ColimaBar saved, if any. See [Saved logs](#saved-logs).
+
+### Inspect a container
+
+Click the name or the image of a container, or choose **Inspect…** in its ••• menu. The page replaces the tabs while the VM runs. **Done** (or the Escape key) closes it, and **Logs** opens the log window. The page reads the container again every 2 seconds. If the container is gone, the page says so.
+
+The page has these sections: image (with the digest), state, health, command, environment, labels, networks, mounts, ports and resources. A limit of 0 shows as "No limit".
+
+- **Hidden values.** ColimaBar hides the value of a variable or label with a secret name, such as `PASSWORD`, `TOKEN` or `API_KEY`. It also hides a value that looks like a token or a URL with a password. The value after a flag such as `--password` in the command is hidden too. Click the eye to show one value until you close the page. The copy button copies the full value, also when it is hidden.
+- **Mounts.** If a bind mount comes from a folder that Colima shares from your Mac, **Open in Finder** shows that folder. A path that only exists in the VM shows "VM only".
+- **Ports.** **Open in Browser** opens a web port on `localhost`. A port of a database or another service that is not web shows **Copy localhost:PORT** instead.
+
+ColimaBar keeps these values in memory only while the page is open. It does not write them to the log, to notifications or to the diagnostics file.
+
+### Compose projects
+
+For a container that docker compose started, ColimaBar reads the project folder and the Compose files from its labels. The ••• menu in the header of the project has these items:
+
+- **Open Project Folder**, **Open in VS Code** (only if Visual Studio Code is installed) and **Copy Project Path**.
+- **Pull Images** runs `docker compose pull`. Running containers do not change.
+- **Up (Detached)** runs `docker compose up -d`. It creates and starts the containers that changed or are missing.
+- **Down…** runs `docker compose down`. ColimaBar asks first. It removes the containers and networks of the project. Volumes and images stay.
+- **Copy Last Output** copies the last lines that docker compose printed. ColimaBar keeps them in memory only.
+
+A spinner shows while docker compose runs for the project. If it fails, a notification gives the exit code. It shows no output, because the output can hold secrets. Use **Copy Last Output** to read it. After 15 minutes, ColimaBar stops docker compose and says so. The buttons are off if the docker CLI is missing, if the Compose files are gone (the folder moved or was deleted), and in a debug run. Doctor checks the docker CLI and the compose plugin (**Docker plugins**).
 
 ### Images and Volumes tabs
 

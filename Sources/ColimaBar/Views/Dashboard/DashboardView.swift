@@ -16,6 +16,8 @@ struct DashboardView: View {
                 DoctorView(model: model, ui: ui)
             } else if ui.showVMConfig {
                 VMConfigView(model: model, ui: ui)
+            } else if let id = ui.inspectID, model.state == .running {
+                InspectView(model: model, ui: ui, id: id)
             } else if model.state == .running {
                 LiveTiles(model: model).padding(.horizontal, 12).padding(.vertical, 10)
                 Picker("", selection: $ui.tab) {
@@ -52,6 +54,9 @@ struct DashboardView: View {
         .transaction { $0.animation = nil }
         // The model fetches disk usage and routing only for the tabs that show them.
         .onChange(of: ui.tab, initial: true) { model.dashboardTab = ui.tab }
+        // The container belongs to the VM that the page was open on.
+        .onChange(of: model.profile) { ui.inspectID = nil }
+        .onChange(of: model.state) { if model.state != .running { ui.inspectID = nil } }
         .background {
             Button("") { Task { await model.refreshAll() } }.keyboardShortcut("r").hidden()
             Button("") { searchFocused = true }.keyboardShortcut("f").hidden()

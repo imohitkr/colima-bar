@@ -50,6 +50,16 @@ final class ColimaModel {
     private(set) var doctorReport: DoctorReport?
     /// A Doctor check or fix runs now.
     private(set) var isDoctorRunning = false
+    /// The keys (`profile/name`) of the Compose projects with a `docker compose` run now.
+    private(set) var composeBusy: Set<String> = []
+    /// The keys of the projects whose folder or files are gone. It changes
+    /// after each container refresh, so a render does not read the disk.
+    private(set) var composeMissing: Set<String> = []
+    /// True if the docker tool is not on the search path.
+    private(set) var composeNoDocker = false
+    /// The last lines that `docker compose` printed, for each project key. In
+    /// memory only: the output can name values of the project.
+    private(set) var composeOutput: [String: [String]] = [:]
     /// The last port forwarding check of each running profile, from
     /// `ColimaModel+NetworkHealth`. It changes only when the report changes.
     private(set) var portHealth: [String: PortHealth.Report] = [:]
@@ -513,7 +523,7 @@ final class ColimaModel {
     /// False when the profile's runtime is known and isn't docker (e.g.
     /// containerd): then no docker socket answers, so ColimaBar doesn't ping
     /// it, stream its events or list its containers.
-    private var hasDockerSocket: Bool { Self.hasDockerSocket(runtime: vm.runtime) }
+    var hasDockerSocket: Bool { Self.hasDockerSocket(runtime: vm.runtime) }
 
     /// The selected profile's busy marker, or the label of an action this app
     /// just launched whose script hasn't written its marker yet.
@@ -753,11 +763,13 @@ final class ColimaModel {
                 id: c.Id, name: c.Names.first.map { String($0.drop { $0 == "/" }) } ?? String(c.Id.prefix(12)),
                 image: c.Image, state: c.State, status: c.Status,
                 ports: Array(Set((c.Ports ?? []).compactMap { $0.IP != nil ? $0.PublicPort : nil })).sorted(),
-                project: c.Labels?["com.docker.compose.project"])
+                project: c.Labels?["com.docker.compose.project"],
+                compose: c.Labels.flatMap { ComposeProject.from(labels: $0) })
         }
         // Stable order by name: rows never reorder because a number changed.
         set(\.containers, mapped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
         syncStatStreams()
+        await refreshComposeIssues()
         return true
     }
 
@@ -1566,11 +1578,9 @@ final class ColimaModel {
         if starts, r.ok, UpgradeGuard.started(in: r.out), let versions { saveGoodStart(versions, p) }
         // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
         // lines when ColimaBar runs it, so they arrive as native alerts.
-        var notified = false
-        for line in r.out.split(separator: "\n") where line.hasPrefix("COLIMABAR_NOTIFY:") {
-            Notifier.shared.post(String(line.dropFirst("COLIMABAR_NOTIFY:".count)))
-            notified = true
-        }
+        let notices = Self.notices(in: r.out)
+        for text in notices { Notifier.shared.post(text) }
+        let notified = !notices.isEmpty
         // Exit 2 = the user cancelled a confirm dialog or another action holds the lock.
         if p == profile, r.status != 2, action == .start || action == .restart || action == .repair {
             set(\.startFailed, !r.ok)
@@ -1597,6 +1607,13 @@ final class ColimaModel {
         return r.ok
     }
 
+    /// The messages of the `COLIMABAR_NOTIFY:<message>` lines in the output
+    /// of colima-ctl.sh.
+    nonisolated static func notices(in output: String) -> [String] {
+        let prefix = "COLIMABAR_NOTIFY:"
+        return output.split(separator: "\n").filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count)) }
+    }
+
     /// Doctor publishes through these two, because the properties are
     /// `private(set)` and Doctor lives in `ColimaModel+Doctor`.
     func publishDoctor(report: DoctorReport?) {
@@ -1610,6 +1627,14 @@ final class ColimaModel {
     func setDNSHealth(_ all: [String: DNSHealth.Report]) { set(\.dnsHealth, all) }
     func setNetworkChecking(_ all: Set<String>) { set(\.networkChecking, all) }
     func setNetworkCheckErrors(_ all: [String: String]) { set(\.networkCheckErrors, all) }
+
+    /// `ColimaModel+Compose` stores its state through these two.
+    func setComposeBusy(_ all: Set<String>) { set(\.composeBusy, all) }
+    func setComposeOutput(_ lines: [String], key: String) { composeOutput[key] = lines }
+    func setComposeIssues(_ missing: Set<String>, hasDocker: Bool) {
+        set(\.composeMissing, missing)
+        set(\.composeNoDocker, !hasDocker)
+    }
 
     /// `ColimaModel+Diagnostics` sets the flag through this function.
     func setSavingDiagnostics(_ on: Bool) { set(\.isSavingDiagnostics, on) }

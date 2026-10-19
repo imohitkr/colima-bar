@@ -91,23 +91,50 @@ struct Redactor: Equatable, Sendable {
     /// (`auth`, `auths`) or as the end of a key (`proxy_auth`), so `author`,
     /// `authenticated` and `PreferredAuthentications` stay.
     private static let secretStem =
-        #"[A-Za-z0-9_.\-]*(?:secret|token|passw(?:or)?d|pwd|api[_-]?key|access[_-]?key|credential|private[_-]?key|authorization|auth[_-]?token|[_-]auth(?![A-Za-z0-9])|(?<![A-Za-z0-9_.])auths?(?![A-Za-z0-9]))[A-Za-z0-9_.\-]*"#
+        #"[A-Za-z0-9_.\-]*(?:secret|token|passw(?:or)?d|passphrase|pwd|conn(?:ection)?[_-]?str(?:ing)?|api[_-]?key|access[_-]?key|credential|private[_-]?key|authorization|auth[_-]?token|[_-]auth(?![A-Za-z0-9])|(?<![A-Za-z0-9_.])auths?(?![A-Za-z0-9]))[A-Za-z0-9_.\-]*"#
     private static let valueText = #"("[^"]*"|'[^']*'|[^\s,;&}\]"']+)"#
 
+    /// True if the whole key names a secret, by the same rule as rule 4. The
+    /// Inspect page uses it, so its masking and this redaction do not drift.
+    static func isSecretKey(_ key: String) -> Bool {
+        key.range(of: "(?i)^\(secretStem)$", options: .regularExpression) != nil
+    }
+
+    /// True if the value looks like a secret whatever its key is: a token of
+    /// a known shape, a private key, `scheme://user:password@host` (the user
+    /// can be empty and the password can hold a `/`, but `host:8080/x@y` is a
+    /// port and a path), or `Password=...`.
+    static func hasSecretShape(_ value: String) -> Bool {
+        let shapes =
+            tokenPatterns + [
+                #"-----BEGIN [A-Z ]*PRIVATE KEY-----"#,
+                #"(?i)\b[a-z][a-z0-9+.\-]*://[^\s/@]*:(?!\d+/)[^\s@"']*@"#,
+                #"(?i)\b(?:password|pwd)\s*="#,
+            ]
+        return shapes.contains { value.range(of: $0, options: .regularExpression) != nil }
+    }
+
     private func secretValues(_ text: String) -> String {
+        Self.hideSecretValues(in: text, with: "<redacted>")
+    }
+
+    /// Replaces the value of each secret key in `text` with `placeholder`
+    /// and keeps the rest: `"key": "v"`, `key=v`, `key: v` and `--key v`.
+    static func hideSecretValues(in text: String, with placeholder: String) -> String {
         var t = text
+        let template = "$1" + placeholder
         // "key": "value" and "key": value
-        t = Self.replace(
-            "(?i)([\"']\(Self.secretStem)[\"']\\s*[:=]\\s*)\(Self.valueText)", in: t, with: "$1<redacted>",
-            skip: { Self.isKept($0) })
+        t = replace(
+            "(?i)([\"']\(secretStem)[\"']\\s*[:=]\\s*)\(valueText)", in: t, with: template,
+            skip: { isKept($0) })
         // key=value and key: value
-        t = Self.replace(
-            "(?i)(\\b\(Self.secretStem)[ \\t]*[:=][ \\t]*)\(Self.valueText)", in: t, with: "$1<redacted>",
-            skip: { Self.isKept($0) })
+        t = replace(
+            "(?i)(\\b\(secretStem)[ \\t]*[:=][ \\t]*)\(valueText)", in: t, with: template,
+            skip: { isKept($0) })
         // --key value
-        t = Self.replace(
-            "(?i)(--\(Self.secretStem)[ \\t]+)(?!-)([^\\s\"']+)", in: t, with: "$1<redacted>",
-            skip: { Self.isKept($0) })
+        t = replace(
+            "(?i)(--\(secretStem)[ \\t]+)(?!-)([^\\s\"']+)", in: t, with: template,
+            skip: { isKept($0) })
         return t
     }
 
@@ -133,7 +160,7 @@ struct Redactor: Equatable, Sendable {
         var t = text
         // scheme://user:password@host, for every scheme
         t = Self.replaceMatches(
-            #"(?i)\b([a-z][a-z0-9+.\-]*://)(?:([^\s/@:]+)(?::[^\s/@]*)?@)?(<[a-z\-]+>|\[[0-9a-f:]+\]|[^\s/:?#\]\[\"'),>`]+)"#,
+            #"(?i)\b([a-z][a-z0-9+.\-]*://)(?:([^\s/@:]*)(?::(?!\d+/)[^\s@"']*)?@)?(<[a-z\-]+>|\[[0-9a-f:]+\]|[^\s/:?#\]\[\"'),>`]+)"#,
             in: t
         ) { m in
             let host = m[3]

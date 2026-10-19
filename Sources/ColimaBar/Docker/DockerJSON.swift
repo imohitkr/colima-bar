@@ -131,3 +131,98 @@ struct APIInspect: Decodable {
     let HostConfig: Host?
     let Config: Cfg?
 }
+
+/// `GET /containers/{id}/json`, the fields that the Inspect page shows.
+struct APIContainerDetail: Decodable {
+    struct Health: Decodable {
+        struct Entry: Decodable {
+            let Start: String?
+            let ExitCode: Int?
+            let Output: String?
+        }
+        let Status: String?
+        let FailingStreak: Int?
+        let Log: [Entry]?
+    }
+    struct State: Decodable {
+        let Status: String?
+        let OOMKilled: Bool?
+        let ExitCode: Int?
+        let Error: String?
+        let StartedAt: String?
+        let FinishedAt: String?
+        let Health: Health?
+    }
+    struct RestartPolicy: Decodable {
+        let Name: String?
+        let MaximumRetryCount: Int?
+    }
+    struct Host: Decodable {
+        let RestartPolicy: RestartPolicy?
+        let Privileged: Bool?
+        let Memory: Int64?
+        let MemoryReservation: Int64?
+        let NanoCpus: Int64?
+        let CpuShares: Int64?
+        let PidsLimit: Int64?
+    }
+    /// A list of words. Older API versions sent a single string for
+    /// `Entrypoint`.
+    struct Words: Decodable {
+        let values: [String]
+        init(from decoder: Decoder) throws {
+            let c = try decoder.singleValueContainer()
+            if let list = try? c.decode([String].self) {
+                values = list
+            } else {
+                values = (try? c.decode(String.self)).map { [$0] } ?? []
+            }
+        }
+    }
+    struct Cfg: Decodable {
+        let Image: String?
+        let Env: [String]?
+        let Cmd: Words?
+        let Entrypoint: Words?
+        let WorkingDir: String?
+        let User: String?
+        let Labels: [String: String]?
+    }
+    struct Mount: Decodable {
+        let `Type`: String?
+        let Name: String?
+        let Source: String?
+        let Destination: String?
+        let RW: Bool?
+    }
+    struct Endpoint: Decodable {
+        let IPAddress: String?
+        let GlobalIPv6Address: String?
+        let Aliases: [String]?
+        let DNSNames: [String]?
+    }
+    struct Binding: Decodable {
+        let HostIp: String?
+        let HostPort: String?
+    }
+    struct Net: Decodable {
+        let Networks: [String: Endpoint]?
+        let Ports: [String: [Binding]?]?
+    }
+    let Id: String
+    let Name: String?
+    let Created: String?
+    /// The ID of the image, `sha256:…`.
+    let Image: String?
+    let RestartCount: Int?
+    let State: State?
+    let HostConfig: Host?
+    let Config: Cfg?
+    let Mounts: [Mount]?
+    let NetworkSettings: Net?
+}
+
+/// `GET /images/{id}/json`, the part that gives the digests.
+struct APIImageDetail: Decodable {
+    let RepoDigests: [String]?
+}

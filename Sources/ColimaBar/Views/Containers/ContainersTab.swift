@@ -24,6 +24,7 @@ struct ContainersTab: View {
                         IconButton("play.fill", "Start all in \(project)") { model.project(project, .start) }
                         IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, .restart) }
                         IconButton("stop.fill", "Stop all in \(project)") { model.project(project, .stop) }
+                        if let compose = g.compose { ComposeMenu(model: model, project: compose) }
                     } else if g.key == "~standalone", model.running.count > 1 {
                         Button("Stop all") { model.run(.stopAll) }.buttonStyle(.borderless).font(.caption)
                             .hint(Help.stopAll)
@@ -31,7 +32,7 @@ struct ContainersTab: View {
                 }
                 if !isCollapsed.wrappedValue {
                     ForEach(g.items) { c in
-                        ContainerRow(model: model, c: c)
+                        ContainerRow(model: model, ui: ui, c: c)
                     }
                 }
             }
@@ -48,6 +49,7 @@ struct ContainersTab: View {
         let key: String
         let title: String
         let project: String?
+        let compose: ComposeProject?
         let items: [Container]
     }
 
@@ -69,7 +71,10 @@ struct ContainersTab: View {
         for (p, group) in byProject.sorted(by: { $0.key < $1.key }) {
             let items = group.map(\.container).sorted(by: order)
             let up = items.filter(\.isRunning).count
-            out.append(Group(key: "p:\(p)", title: "\(p)  ·  \(up)/\(items.count) running", project: p, items: items))
+            out.append(
+                Group(
+                    key: "p:\(p)", title: "\(p)  ·  \(up)/\(items.count) running", project: p,
+                    compose: group.lazy.compactMap { $0.container.compose }.first, items: items))
         }
         let solo = list.filter { $0.project == nil }.sorted(by: order)
         if !solo.isEmpty {
@@ -77,7 +82,7 @@ struct ContainersTab: View {
             out.append(
                 Group(
                     key: "~standalone", title: "Standalone  ·  \(up)/\(solo.count) running",
-                    project: nil, items: solo))
+                    project: nil, compose: nil, items: solo))
         }
         return out
     }
