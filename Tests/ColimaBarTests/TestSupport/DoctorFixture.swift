@@ -31,6 +31,8 @@ enum DoctorFixture {
         i.staleFiles = []
         i.disk = .init(
             vm: .init(usedKB: 10_000_000, availKB: 90_000_000), macFreeBytes: 100 * DiskSpace.gigabyte)
+        i.ports = .checked(PortHealth.Report(okPorts: [8080]))
+        i.dns = .checked(DNSHealth.Report(verdict: .ok))
         return i
     }
 

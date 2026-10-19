@@ -6,7 +6,7 @@ This page lists the ColimaBar logs, fixes for common problems and the steps to r
 
 ## Run Doctor first
 
-For many problems, open [Doctor](usage.md#doctor): click **Doctor…** in the right-click menu. Doctor checks the tools, the docker context, the routes, the shell, the registry login, the docker plugins, the Colima and Lima upgrade, the VM status, the stale Lima files and the disk space. It offers a fix for most findings. Doctor only reads, so it is safe to run at any time.
+For many problems, open [Doctor](usage.md#doctor): click **Doctor…** in the right-click menu. Doctor checks the tools, the docker context, the routes, the shell, the registry login, the docker plugins, the Colima and Lima upgrade, the VM status, the stale Lima files, the disk space, the published ports and the DNS of the VM. It offers a fix for most findings. Doctor only reads, so it is safe to run at any time.
 
 ## ColimaBar warns about an upgrade
 
@@ -61,6 +61,30 @@ If ColimaBar says that `colima.yaml` changed outside ColimaBar, ColimaBar has al
 If containers cannot resolve names, for example after you connect to a VPN, set the DNS servers of the VM. Open **More VM settings…**, type the IP addresses of your DNS servers in **DNS servers** and click **Apply**. The VM restarts. If the field is empty, the VM uses the DNS of your Mac. A VPN can change that DNS.
 
 To check, run `colima ssh -- cat /etc/resolv.conf`. The file must show your servers.
+
+## Published ports stop answering
+
+A published port can answer in the VM but not on the Mac. This can happen after the Mac sleeps or the network changes. The Colima port forwarder then does not forward the port again. ColimaBar finds it ([When the Mac sleeps](usage.md#when-the-mac-sleeps)), shows a notice in the Containers tab and checks the port again in [Doctor](usage.md#doctor), in **Port forwarding**.
+
+To fix it, do these steps:
+
+1. Click **Restart** in the notice, in the notification or in Doctor. The VM restarts. Only containers with a restart policy start again.
+2. If the port forwarder is grpc, click **Use ssh forwarder**. The ssh forwarder is the default and is more stable.
+3. If a port does not answer on the Mac or in the VM, the app in the container does not listen. Check its logs.
+
+ColimaBar does not check a port that a container binds to another host address, for example `-p 192.168.1.5:8080:80`. Colima forwards such a port only if the address is in `network.hostAddresses` in `colima.yaml`. With Kubernetes and `network.address`, Colima ignores the ports 80 and 443. With `portForwarder: none`, Colima forwards no port.
+
+## DNS fails in the VM after a VPN change
+
+If the VM cannot resolve host names after you connect to a VPN or change the network, ColimaBar shows a notice and sends a notification. See [When the network changes](usage.md#when-the-network-changes). [Doctor](usage.md#doctor) shows the same in **DNS in the VM**.
+
+To fix it, do these steps:
+
+1. If `network.dns` is empty, the VM asks the Mac. Click **Restart**, so the VM reads the new DNS of the Mac.
+2. If `network.dns` has servers, the VM asks only those servers. A VPN can block them, or it can use domains that they do not know. Click **Use the Mac's DNS**. ColimaBar removes the servers and restarts the VM. The VM then follows the VPN and split DNS.
+3. If you need fixed servers, click **Set DNS servers…** and change them. See [Names do not resolve in containers](#names-do-not-resolve-in-containers).
+
+If the Mac cannot resolve names either, check the network of the Mac. ColimaBar then does nothing.
 
 ## A disk shrink fails
 

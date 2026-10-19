@@ -29,6 +29,21 @@ struct DoctorInputs: Equatable, Sendable {
     /// check trusts the config and no fix edits it.
     var dockerConfigUnreadable = false
     var disk = Disk()
+    /// The port forwarding probe, or why there is none.
+    var ports: PortHealth.Probe = .vmStopped
+    /// `portForwarder` in colima.yaml. Colima uses ssh if the key is missing.
+    var portForwarder = "ssh"
+    /// The DNS probe, or why there is none.
+    var dns: DNS = .vmStopped
+    /// `network.dns` in colima.yaml has servers.
+    var dnsOverride = false
+    /// The domains that the Mac sends to special DNS servers (a VPN does this).
+    var macSplitDomains: [String] = []
+
+    enum DNS: Equatable, Sendable {
+        case vmStopped
+        case checked(DNSHealth.Report)
+    }
 
     struct Tools: Equatable, Sendable {
         var colimaPath: String?

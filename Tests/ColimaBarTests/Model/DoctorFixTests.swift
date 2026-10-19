@@ -7,6 +7,7 @@ import Testing
         let names: [(DoctorFix, String)] = [
             (.useColimabar, "useColimabar"), (.setRoutes, "setRoutes"), (.copyLine, "copyLine"),
             (.useOsxkeychain, "useOsxkeychain"), (.addPluginFolder, "addPluginFolder"), (.repair, "repair"),
+            (.restartVM, "restartVM"), (.useSSHForwarder, "useSSHForwarder"), (.useMacDNS, "useMacDNS"),
         ]
         for (fix, name) in names { #expect(fix.id == name) }
     }

@@ -50,6 +50,15 @@ final class ColimaModel {
     private(set) var doctorReport: DoctorReport?
     /// A Doctor check or fix runs now.
     private(set) var isDoctorRunning = false
+    /// The last port forwarding check of each running profile, from
+    /// `ColimaModel+NetworkHealth`. It changes only when the report changes.
+    private(set) var portHealth: [String: PortHealth.Report] = [:]
+    /// The last DNS check of each running profile.
+    private(set) var dnsHealth: [String: DNSHealth.Report] = [:]
+    /// The profiles with a network check that runs now.
+    private(set) var networkChecking: Set<String> = []
+    /// Why the last ports check could not run, by check key. The notice shows it.
+    private(set) var networkCheckErrors: [String: String] = [:]
     /// A diagnostics file is being collected and saved. One at a time.
     private(set) var isSavingDiagnostics = false
     /// A Doctor run was asked for while another one ran (a profile switch).
@@ -273,6 +282,19 @@ final class ColimaModel {
     @ObservationIgnored private var afterSleepAlerts = AlertThrottle(window: 30 * 60)
     // The profiles with a clock fix that runs now. A new check must not fix again.
     @ObservationIgnored private var clockFixes: Set<String> = []
+    // The network checks (see ColimaModel+NetworkHealth): the observer (not
+    // created in a debug run), the wait before a check after a network
+    // change, the time of the last check of each profile, the checks that
+    // run now, and the notifications that were sent. One notification for
+    // each profile and kind every 60 minutes.
+    @ObservationIgnored var networkObserver: NetworkObserver?
+    @ObservationIgnored var networkDebounce: Task<Void, Never>?
+    @ObservationIgnored var networkChecked: [String: Date] = [:]
+    @ObservationIgnored var networkRunning: Set<String> = []
+    @ObservationIgnored var networkAlerts = AlertThrottle(window: 60 * 60)
+    // The start of a sleep, until the after-wake path ran. A network change
+    // is ignored while it is set and not too old (`networkPauseActive`).
+    @ObservationIgnored var networkPausedAt: Date?
     // The colimabar-PROFILE contexts: the last applied and the next wanted set.
     @ObservationIgnored private var appliedContexts: [String: String]?
     @ObservationIgnored private var wantedContexts: [String: String]?
@@ -341,6 +363,7 @@ final class ColimaModel {
                 "power at start: battery \(p.onBattery, privacy: .public), low power \(p.lowPowerMode, privacy: .public), hot \(p.isHot, privacy: .public)"
             )
             powerObserver = observer
+            startNetworkObserver()
             publishAppStatus()
         }
         Task { await refreshAll() }
@@ -586,6 +609,7 @@ final class ColimaModel {
                     status: $0.status)
             })
         syncProfiles()
+        pruneNetworkHealth()
         seedGoodStarts()
         // `colima start` switches the docker context, and `colima stop`
         // deletes it. Check it when a profile starts or stops.
@@ -1192,6 +1216,7 @@ final class ColimaModel {
     private func systemSleepBegan() {
         afterSleep?.cancel()
         afterSleep = nil
+        pauseNetworkChecks()
     }
 
     /// The Mac woke from sleep. The newest check wins.
@@ -1210,6 +1235,8 @@ final class ColimaModel {
         await withTaskGroup(of: Void.self) { group in
             for p in names { group.addTask { await self.checkAfterSleep(p) } }
         }
+        // A new sleep cancels this run, and the pause stays.
+        if !Task.isCancelled { resumeNetworkChecks() }
     }
 
     private func restartStreams() {
@@ -1224,7 +1251,7 @@ final class ColimaModel {
     }
 
     /// An action, an auto-start or a busy marker: they report their own failures.
-    private func isBlockedForSleepCheck(_ p: String) -> Bool {
+    func isBlockedForSleepCheck(_ p: String) -> Bool {
         Self.blocksSleepCheck(
             busyMarker: readBusy(p), actionsInFlight: actionsInFlight[p] ?? 0, starting: wakes[p] != nil)
     }
@@ -1246,6 +1273,7 @@ final class ColimaModel {
                 // A new failure after this recovery must notify again.
                 afterSleepAlerts.reset("no answer|\(p)")
                 await syncClock(p, api)
+                await checkPortsAfterWake(p)
                 return
             }
         }
@@ -1331,13 +1359,18 @@ final class ColimaModel {
         return .success(sample)
     }
 
-    /// The Restart button of an after-sleep alert. It never starts a VM.
-    func restartFromAlert(_ p: String) {
+    /// What the Restart of an alert may do for a profile now.
+    func alertRestartDecision(_ p: String) -> AlertRestart {
         let exists =
             (p == "default" || FileManager.default.fileExists(atPath: Paths.config(p)))
             && profiles.contains { $0.name == p }
         let blocked = isBlockedForSleepCheck(p) || (p == profile && busy != nil)
-        switch Self.alertRestart(exists: exists, blocked: blocked, running: isRunning(profile: p)) {
+        return Self.alertRestart(exists: exists, blocked: blocked, running: isRunning(profile: p))
+    }
+
+    /// The Restart button of an after-sleep alert. It never starts a VM.
+    func restartFromAlert(_ p: String) {
+        switch alertRestartDecision(p) {
         case .restart: run(.restart, profile: p)
         case .missing: Notifier.shared.post(AfterSleepCheck.restartMissingText(profile: p))
         case .busy: Notifier.shared.post(AfterSleepCheck.restartBusyText(profile: p))
@@ -1360,6 +1393,7 @@ final class ColimaModel {
             }
             if dashboardTab == .system { routing = await Routing.status() }
         }
+        checkPortsOnOpen()
         syncStatStreams()
     }
 
@@ -1556,7 +1590,10 @@ final class ColimaModel {
         busy = readBusy()
         await refreshAll(urgentDF: action.changesDisk)
         // Colima switches the docker context on start and deletes it on stop.
-        if action.isVMAction, r.status != 2 { checkDockerContext() }
+        if action.isVMAction, r.status != 2 {
+            checkDockerContext()
+            forgetNetworkHealth(p)
+        }
         return r.ok
     }
 
@@ -1567,6 +1604,12 @@ final class ColimaModel {
     }
 
     func setDoctorRunning(_ on: Bool) { set(\.isDoctorRunning, on) }
+
+    /// `ColimaModel+NetworkHealth` stores its checks through these two.
+    func setPortHealth(_ all: [String: PortHealth.Report]) { set(\.portHealth, all) }
+    func setDNSHealth(_ all: [String: DNSHealth.Report]) { set(\.dnsHealth, all) }
+    func setNetworkChecking(_ all: Set<String>) { set(\.networkChecking, all) }
+    func setNetworkCheckErrors(_ all: [String: String]) { set(\.networkCheckErrors, all) }
 
     /// `ColimaModel+Diagnostics` sets the flag through this function.
     func setSavingDiagnostics(_ on: Bool) { set(\.isSavingDiagnostics, on) }
@@ -1735,7 +1778,7 @@ final class ColimaModel {
 
     // MARK: - Helpers
 
-    private func set<T: Equatable>(_ kp: ReferenceWritableKeyPath<ColimaModel, T>, _ v: T) {
+    func set<T: Equatable>(_ kp: ReferenceWritableKeyPath<ColimaModel, T>, _ v: T) {
         if self[keyPath: kp] != v { self[keyPath: kp] = v }
     }
 

@@ -30,6 +30,9 @@ struct APIContainer: Decodable {
     struct Port: Decodable {
         let IP: String?
         let PublicPort: Int?
+        let PrivatePort: Int?
+        /// "tcp", "udp" or "sctp".
+        let `Type`: String?
     }
     let Id: String
     let Names: [String]

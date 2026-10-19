@@ -67,6 +67,10 @@ extension ColimaModel {
         async let stale = DoctorProbe.staleFiles(
             profile: p, limaDir: limaDir, daemonPidFile: "\(Paths.profileDir(p))/daemon/daemon.pid")
         async let disk = DoctorProbe.disk(profile: p, running: running, runtime: runtime, limaDir: limaDir)
+        let net = settings(of: p)
+        let hasSocket = Self.hasDockerSocket(runtime: runtime)
+        async let ports = Self.doctorPorts(profile: p, running: running, hasSocket: hasSocket, settings: net)
+        async let dns = Self.doctorDNS(profile: p, running: running, settings: net)
         var inputs = DoctorInputs()
         inputs.profile = p
         inputs.home = Paths.home
@@ -88,6 +92,13 @@ extension ColimaModel {
         inputs.staleListFailure = scan.failure
         inputs.staleUnparsed = scan.unparsed
         inputs.disk = await disk
+        inputs.portForwarder = net.forwarder
+        inputs.dnsOverride = net.dnsOverride
+        let mac = NetworkObserver.readCurrent()
+        if mac == nil { log.error("the DNS setup of the Mac was not read") }
+        inputs.macSplitDomains = mac?.splitDomains ?? []
+        inputs.ports = await ports
+        inputs.dns = await dns
         guard gen == generation else { return }
         publishDoctor(report: DoctorReport(profile: p, date: Date(), results: DoctorRules.evaluate(inputs)))
     }
@@ -101,6 +112,8 @@ extension ColimaModel {
             repairProfile()
         case .copyLine:
             run(.copyEnv)
+        case .restartVM:
+            restartForNetworkFix()
         default:
             setDoctorRunning(true)
             Task {
@@ -138,7 +151,11 @@ extension ColimaModel {
             editDockerConfig(done: "Doctor added \(DoctorRules.homebrewPluginFolder) to the docker plugin folders.") {
                 DockerConfig.addingPluginDir(DoctorRules.homebrewPluginFolder, in: $0)
             }
-        case .copyLine, .repair:
+        case .useSSHForwarder:
+            await useSSHForwarder()
+        case .useMacDNS:
+            await useMacDNS()
+        case .copyLine, .repair, .restartVM:
             break
         }
     }

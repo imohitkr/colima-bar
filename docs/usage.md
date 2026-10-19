@@ -55,6 +55,7 @@ The live tiles show the total CPU and memory of all containers as a share of the
 - The ••• menu copies the name, ID, image or an exec command. It also opens ports. **Logs in Terminal** follows the logs in iTerm, or in Terminal when iTerm is not installed.
 - You can filter the list and show running containers only.
 - **Stop all** stops all running containers. ColimaBar asks first.
+- An orange notice below the list shows a broken port forward or a VM that cannot resolve names. See [When the network changes](#when-the-network-changes).
 
 ### Log viewer
 
@@ -100,7 +101,7 @@ If a setting has a form that ColimaBar cannot edit (an anchor, or a list over se
 
 ### Doctor
 
-Doctor checks the setup of the selected profile and offers a fix for most findings. Doctor only reads: the checks do not start the VM and do not change anything. Doctor runs when you ask for it. It never runs by itself. The checks never send a notification. **Use colimabar**, **Set routes**, **Use osxkeychain** and **Add folder** send one with the result. **Repair…** sends one only if it fails. **Copy line** sends none.
+Doctor checks the setup of the selected profile and offers a fix for most findings. Doctor only reads: the checks do not start the VM and do not change anything. Doctor runs when you ask for it. It never runs by itself. The checks never send a notification. **Use colimabar**, **Set routes**, **Use osxkeychain** and **Add folder** send one with the result. **Repair…**, **Restart**, **Use ssh forwarder** and **Use the Mac's DNS** send one only if they fail. **Copy line** sends none.
 
 To open Doctor, click **Open Doctor** on the System tab, click **Doctor…** on the stopped screen, or choose **Doctor…** in the right-click menu. The page runs the checks when it opens, unless the last report is less than 5 minutes old. **Run checks** runs them again. **Done** closes the page.
 
@@ -118,6 +119,10 @@ Each check has a status: OK (green), warning (orange), problem (red) or skipped.
 | VM status | The status of the profile in `colima list`. Broken is a problem. If `colima list` fails or times out, the check is a warning. | **Repair…** |
 | Stale Lima files | The pid files of Lima and of the Colima daemon. A file that names another process, or has no PID, is a problem. A file whose process is gone is OK: Colima and Lima remove it at the next start. If the list fails, the check is skipped. | **Repair…** for a problem. None for a file whose process is gone. |
 | Disk space | Free space in the VM (only while it runs) and on the Mac. The VM is a problem at 95% used or under 2 GB free, and a warning at 85% used. The Mac is a problem under 5 GB free and a warning under 20 GB. | None. Use the cleanup buttons on the System tab. |
+| Port forwarding | The published TCP ports of the running containers (at most 32). Each port must answer on the Mac (`127.0.0.1`). A port that answers in the VM but not on the Mac is a problem. A port that answers nowhere is a warning: the app in the container may be down. Ports bound to other host addresses are not checked, and the detail counts them. The check sends no data. Skipped while the VM is stopped, for a runtime other than docker, with `portForwarder: none`, when Docker does not answer, when `colima ssh` fails, and when the VM gives no answer for some ports. | **Restart**. For the grpc port forwarder: **Use ssh forwarder**. |
+| DNS in the VM | The VM and the Mac both look up `registry-1.docker.io`. If only the VM fails, it is a problem. With servers in `network.dns`, a VPN that sends some domains to its own DNS servers (split DNS) is a warning, because those servers do not know them. Skipped while the VM is stopped, and when the Mac cannot resolve the name either. | **Restart**. With servers in `network.dns`: **Use the Mac's DNS**. |
+
+**Restart** restarts the VM. **Use ssh forwarder** sets `portForwarder: ssh` in `colima.yaml`, and **Use the Mac's DNS** removes the servers in `network.dns`. Both ask first, restart the VM and work like **Apply** in [VM settings](#vm-settings). **Use the Mac's DNS** does not copy the servers of the Mac, because they change with the network.
 
 **Use osxkeychain** and **Add folder** change the docker config file (`~/.docker/config.json`, or `$DOCKER_CONFIG/config.json`). First ColimaBar saves a backup next to the file, named `config.json.colimabar-YYYYMMDD-HHMMSS`. The backup is private to you. If the file is a symlink, ColimaBar writes through it. ColimaBar changes only `credsStore` or `cliPluginsExtraDirs` and keeps all other keys. If the file is not valid JSON, or ColimaBar cannot read it, ColimaBar changes nothing.
 
@@ -295,7 +300,21 @@ When the Mac wakes from sleep, ColimaBar does these steps:
 3. If Docker does not answer, it sends one notification with a **Restart** button.
 4. If Docker answers and the clock of the VM is more than 2 seconds off, it waits 20 seconds for Lima to fix it. If the clock is still off, ColimaBar sets it to the time of the Mac. If ColimaBar cannot set the clock, it sends a notification with a **Restart** button.
 
+5. If Docker answers, ColimaBar waits 15 seconds for the network. Then it checks the published ports of the VM. If a port answers in the VM but not on the Mac, it checks again after 5 seconds. If the port still fails, ColimaBar sends a notification with a **Restart** button.
+
 The **Restart** button restarts only a profile that still exists, has no running action and has a running VM. Else ColimaBar sends a short notice and does nothing. The check never starts a VM. Auto-stop does not count the sleep time. See [Auto-stop](auto-stop.md#when-the-mac-sleeps).
+
+## When the network changes
+
+ColimaBar watches the DNS setup of the Mac (the system network configuration). It needs no permission. A VPN that connects, or a move to another network, changes it. ColimaBar then waits 10 seconds for the change to end. After that, for each running profile with no running action, it looks up `registry-1.docker.io` in the VM and on the Mac.
+
+- If the VM resolves the name, nothing happens.
+- If neither resolves it, the network is down. ColimaBar does nothing.
+- If only the VM fails, ColimaBar looks up again after 20 seconds. If it fails again, ColimaBar sends a notification with a **Restart** button, and the Containers tab shows a notice.
+
+With empty `network.dns`, the VM asks the Mac, so it follows the VPN. A restart fixes a VM that lost this. With servers in `network.dns`, the VM asks only those servers. Then the notice has **Use the Mac's DNS**, which removes the servers and restarts the VM, and **Set DNS servers…**, which opens [VM settings](#vm-settings).
+
+The dashboard also checks the published ports when it opens, if the last check is more than 5 minutes old. It shows the notice and sends no notification. **Check again** in the notice checks the ports and the DNS again. ColimaBar sends each kind of network notification for a profile at most one time in 60 minutes. A good result lets a new failure notify again. The checks run only while the VM runs. They never start it. A debug run does no check by itself and sends no notification.
 
 ## Hide the icon
 
@@ -324,6 +343,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.
 - ColimaBar refuses a link, or a link is not valid. If notifications are off, an alert window shows the text. See [A link does nothing](troubleshooting.md#a-link-does-nothing).
 - After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).
+- A published port answers in the VM but not on the Mac, or the VM cannot resolve host names while the Mac can. The notification has a **Restart** button. See [When the network changes](#when-the-network-changes).
 
 ColimaBar sends no notification for a normal start or stop. Exit codes 130, 137 and 143 (SIGINT, SIGKILL and SIGTERM) count as a normal stop, so they send no crash alert. ColimaBar also ignores testcontainers containers. For one container and one kind of failure, it sends at most one notification each 10 minutes.
 

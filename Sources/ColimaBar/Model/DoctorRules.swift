@@ -10,7 +10,7 @@ enum DoctorRules {
         [
             tools(i), upgrade(i), context(i), appRoutes(i), shellHost(i), credentials(i), plugins(i), vmStatus(i),
             staleFiles(i),
-            diskSpace(i),
+            diskSpace(i), portForwarding(i), vmDNS(i),
         ]
     }
 
