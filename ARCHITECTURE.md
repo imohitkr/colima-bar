@@ -28,7 +28,7 @@ Sources live in `Sources/ColimaBar/`, in one folder per area. Each file holds on
 
 ### `App/`
 
-`AppDelegate` owns the menu bar icon, the popover, the dashboard window, the right-click menu (`showMenu()`) and the debug flags. It also makes sure that only one instance runs. `AppDelegate+Relaunch` restarts the app after an update replaced its bundle (`relaunchIfUpdated(reveal:)` in `AppDelegate`). `MainMenu` adds the Edit and Window menus. `Snapshot` renders the debug screenshots.
+`AppDelegate` owns the menu bar icon, the popover, the dashboard window, the right-click menu (`showMenu()`) and the debug flags. It also makes sure that only one instance runs. `AppDelegate+Relaunch` restarts the app after an update replaced its bundle (`relaunchIfUpdated(reveal:)` in `AppDelegate`). `MainMenu` adds the Edit and Window menus. `AppDelegate+Links` receives and handles `colimabar://` links, with `AppLink` (the parser), `AppLinkPolicy` (the gates, the texts) and `LinkInbox` (the queue). `StatusItemPlacement` decides if the icon can anchor the popover. `ScreenGeometry` is the plain value of a screen that it reads. `Snapshot` renders the debug screenshots.
 
 ### `Model/`
 
@@ -88,7 +88,7 @@ The log windows. `LogStore` holds the live state for one container. If the conta
 
 ### `Views/`
 
-The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Dashboard/` also has `UpdateAlert` (the dialogs of an update). `Doctor/` has `DoctorView` (the Doctor page), `DoctorRow` (one check) and `DiagnosticsPanel` (the save panel of the diagnostics file). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
+The dashboard UI. `Dashboard/` has the frame, header, live tiles, footer and the stopped screen. It also has `ViewState`, the UI state that survives when the popover closes (tab, filter, collapsed groups), and `Sparkline`, the `Shape` that draws the 60-second graphs. `Containers/` and `System/` hold those tabs. `Dashboard/` also has `NewProfileAlert` (the New Profile form) and `DeleteProfileAlert` (the typed confirmation before a profile delete). `System/` also has `VMSettingsSection` (the VM resources and features, on the System tab for a running VM and on the stopped screen for a stopped VM), `SettingsFilePanel` (the export and import panels) and `ShrinkDiskAlert` (the typed confirmation before a disk shrink). `ImagesTab.swift` and `VolumesTab.swift` are the other tabs. `Dashboard/` also has `UpdateAlert` (the dialogs of an update) and `LinkAlert` (the question before a link starts, stops or restarts a VM, and the alert for a link text when notifications are off). `Doctor/` has `DoctorView` (the Doctor page), `DoctorRow` (one check) and `DiagnosticsPanel` (the save panel of the diagnostics file). `Shared/` has the hover hints (`Hint.swift`), all hint text (`Help.swift`), `TypedNameWatcher` (turns on a destructive button when the typed text matches) and small shared views.
 
 ### `Support/`
 
@@ -349,9 +349,19 @@ When the dashboard is closed, the app idles at about 0% CPU. These limits keep m
 
 Live stats stream only while a dashboard is on screen. Saved-log streams open only while the option is on, one for each running auto-remove container. `/system/df` runs only for the tabs that show it. Graphs use SwiftUI `Shape`, not Swift Charts, because Swift Charts uses a lot of graphics memory.
 
+### Links
+
+`colimabar://open`, `doctor`, `start`, `stop` and `restart` reach the app as an Apple event (`kAEGetURL`). `AppDelegate.installLinkHandler()` installs the handler first in `applicationWillFinishLaunching`, so a link that launched the app is kept. The handler only queues the text in `LinkInbox`. `applicationDidFinishLaunching` opens the inbox. The inbox holds at most 4 links, drops the same text within 2 seconds, drops every link while a question is open, and gives one link at a time.
+
+`AppLink.parse` is pure. It accepts only the five routes and, for `start`, `stop` and `restart`, one `profile` parameter that passes `ProfileName.isValid`. A VM link first refreshes the status. Then `AppLinkPolicy.decide` checks, in order: an update restart, Colima missing, a failed list, an unknown profile (a link never creates a VM), a running action, and the VM state (no-op or refusal). While `askBeforeLinks` is on, `LinkAlert` asks first, and the policy runs again after the answer. The profile reaches the script only through `model.run`, as `COLIMABAR_PROFILE`.
+
+If LaunchServices starts a second copy for a link, that copy forwards the links to the running copy (`NSWorkspace.open`). If the request fails or takes more than 2 seconds, it reopens the running copy. Links that arrive while it waits go in the next round. A refused or bad link shows as a notification, or as an alert window if notifications are off. Link messages are limited to one for each link and kind per minute, and 5 per minute in all. If the login item is on, it writes `linkHandoff` for the login agent before `kickstart()`, and the agent takes it at launch. A non-debug copy in an Applications folder registers the scheme with `LSRegisterURL`, off the main actor.
+
+`revealDashboard()` opens the dashboard for a reopen event, `--reveal`, a link and the Doctor menu item. It opens the popover only when `StatusItemPlacement.canAnchor` is true (the icon is on a screen and not under the camera housing). Else it opens the window. If the popover still opens off screen, it opens the window.
+
 ### Debug runs
 
-`--snapshot`, `--popover`, `--notify-test` and `--diagnostics` start a debug run. A debug run does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It may write the diagnostics file that the user chose. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover`, `--notify-test` and `--diagnostics` start a debug run. A debug run ignores links. It does not change the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. It runs the Doctor checks (they only read), but makes no Doctor fix. It may write the diagnostics file that the user chose. It writes no upgrade record. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 
@@ -367,6 +377,7 @@ Do not break these rules.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
 - **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row. During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
 - **Replace the bundle only by rename.** An in-app update swaps the whole bundle with `renamex_np` (`BundleSwap`). It never writes into the running bundle, and it changes nothing in the Applications folder before the download passes every check.
+- **Links.** A link never returns data, writes a file or reaches a shell. Its profile must pass `ProfileName.isValid` and be in a fresh `colima list`. VM links ask while `askBeforeLinks` is on. A debug run ignores links.
 - **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It never downloads or installs an update. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep or power changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
 
 ## Testing

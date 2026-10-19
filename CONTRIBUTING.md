@@ -47,9 +47,13 @@ COLIMABAR_UPDATE_TEST=1 COLIMABAR_BUILD_VERSION=0.9.0 ./build.sh
 
 Test in a separate macOS user, because the build has its own login item and proxy sockets. Put the 0.9.0 test build in `~/Applications`. Make a `ColimaBar.zip` of a build with version 0.9.1 and a `releases/latest` JSON file with the tag, `"immutable": true`, and the `size` and `digest` of the zip. Serve both with `python3 -m http.server --bind 127.0.0.1`, and run `launchctl setenv COLIMABAR_UPDATE_BASE http://127.0.0.1:PORT`. Never use `make install` or a real release for this test. Unit tests need none of this: they use fake bundles in temporary folders and never touch `/Applications`.
 
+### Test links
+
+A debug run ignores `colimabar://` links, so test them with a normal build. While the installed app runs as the login agent, a new copy forwards its links to it, or hands them off to it. Test in a separate macOS user, as for update tests. Or quit the installed app and run the build as the login agent. Put the build in `~/Applications`, run it, and register it: `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f ~/Applications/ColimaBar.app`. Then run `open -g 'colimabar://open'`. If another copy is registered, unregister it first with the same tool and the flag `-u`. Unit tests never register a scheme and never call `open`. The parser, the policy and the inbox are pure and run in tests.
+
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test` or `--diagnostics` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test` or `--diagnostics` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It ignores links. It also skips system sleep, power changes and auto-stop. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|

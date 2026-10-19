@@ -165,6 +165,18 @@ To go back to an older version, run the installer with that version. See [Instal
 
 If **Hide Icon While Colima Is Stopped** is on, the icon hides while Colima is stopped. To show it, open ColimaBar from Spotlight. See [Hide the icon](usage.md#hide-the-icon).
 
+If the icon is behind the camera housing or the menu bar is full, ColimaBar opens the dashboard as a window. Hold Command and drag other icons away, or quit an app with a menu bar icon.
+
+## A link does nothing
+
+1. Make sure that ColimaBar runs. If ColimaBar runs as a debug run (`--snapshot`, `--popover` …), it ignores links. Quit it and open ColimaBar normally.
+2. Look for a notification. ColimaBar says why it refused the link. If notifications are off for ColimaBar, an alert window shows the text instead.
+3. If a question appears, answer it. A link that starts, stops or restarts a VM asks while **Ask before a link starts, stops or restarts Colima** is on.
+4. If the link has a profile, make sure that `colima list` shows it. A link never creates a VM.
+5. If macOS opens another app or none, register ColimaBar again: `/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f /Applications/ColimaBar.app` (or `~/Applications/ColimaBar.app`). Then try again.
+
+See [Links](usage.md#links-url-scheme).
+
 ## Report a bug
 
 Open [Doctor](usage.md#doctor) and click **Report an Issue…** (the right-click menu has it too). ColimaBar then saves a [diagnostics file](usage.md#save-diagnostics-and-report-an-issue) and opens the bug report form with the versions filled in. Drag the file into the **Diagnostics** box.

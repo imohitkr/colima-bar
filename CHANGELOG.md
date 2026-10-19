@@ -6,6 +6,14 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- ColimaBar opens `colimabar://` links: `open`, `doctor`, `start`, `stop` and `restart`. The last three take `profile=NAME`. Use them from Raycast, Alfred, Shortcuts or a script. ColimaBar asks before a link starts, stops or restarts a VM. The System tab setting **Ask before a link starts, stops or restarts Colima** turns the question off. A link never gives data back, and never creates a VM. See [Links](docs/usage.md#links-url-scheme).
+
+### Fixed
+
+- The dashboard did not show when the icon was behind the camera housing or when the menu bar was full. It now opens as a window.
+
 ## [0.9.0] - 2026-10-17
 
 ### Added

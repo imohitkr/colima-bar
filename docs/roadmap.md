@@ -6,7 +6,6 @@ These features are planned. They have no target version yet. The milestones are 
 
 ## 1. Automation
 
-- A `colimabar://` URL scheme to start, stop and open the dashboard from Raycast, Alfred or Shortcuts.
 - A `colimabar` command for the terminal, for example `colimabar status --json`.
 - A global hotkey.
 

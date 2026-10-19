@@ -177,6 +177,8 @@ enum Help {
         "Open the last lines that ColimaBar saved before Docker removed this container. ColimaBar keeps them for 5 minutes."
     static let login =
         "Start ColimaBar when you log in. If it crashes, start it again immediately. Thus the ColimaBar socket continues to work."
+    static let askBeforeLinks =
+        "Apps, scripts and web pages can open colimabar:// links. With this on, ColimaBar asks before a link starts, stops or restarts a VM. Links that open the dashboard or Doctor never ask."
     static let exportSettings =
         "Save the ColimaBar settings to a JSON file. Use the file to set up ColimaBar on a different Mac."
     static let importSettings =

@@ -191,6 +191,8 @@ struct SystemTab: View {
                     Button("Open") { SMAppService.openSystemSettingsLoginItems() }.controlSize(.mini)
                 }
             }
+            Toggle("Ask before a link starts, stops or restarts Colima", isOn: $model.askBeforeLinks)
+                .hint(Help.askBeforeLinks)
             HStack(spacing: 6) {
                 Button("Export Settings…") { SettingsFilePanel.export(model: model) }
                     .hint(Help.exportSettings)

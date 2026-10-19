@@ -106,6 +106,14 @@ final class ColimaModel {
             if autoStart { checkDockerContext() }
         }
     }
+    /// Ask before a `colimabar://` link starts, stops or restarts a VM. Not in
+    /// the settings file (`SettingsTransfer`).
+    var askBeforeLinks = Defaults.bool(.askBeforeLinks) ?? true {
+        didSet {
+            guard askBeforeLinks != oldValue else { return }
+            Defaults.set(askBeforeLinks, .askBeforeLinks)
+        }
+    }
     var autoStop = Defaults.bool(.autoStop) ?? false {
         didSet {
             Defaults.set(autoStop, .autoStop)

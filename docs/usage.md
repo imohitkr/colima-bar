@@ -248,7 +248,7 @@ When Colima is stopped, the icon leaves the menu bar. ColimaBar continues to run
 
 The icon stays visible while an action runs, while the dashboard is open and while the VM of a different profile runs.
 
-To show the icon while Colima is stopped, open ColimaBar from Spotlight. The icon and the dashboard appear. When you close the dashboard, the icon hides again. The first time the icon hides, ColimaBar sends a notification that tells you this.
+To show the icon while Colima is stopped, open ColimaBar from Spotlight, or open the link `colimabar://open`. The icon and the dashboard appear. If the icon is behind the camera housing or the menu bar is full, the dashboard opens as a window. When you close the dashboard, the icon hides again. The first time the icon hides, ColimaBar sends a notification that tells you this.
 
 ## Notifications
 
@@ -334,6 +334,41 @@ ColimaBar runs `colima delete --profile NAME --data --force`. Then it removes th
 You can delete a different profile while its VM runs. Colima stops it first.
 
 You can also delete `default`. The warning then tells you that a plain `colima start` creates it again with an empty disk. If you delete the selected `default` profile, ColimaBar switches to a different profile, if you have one.
+
+## Links (URL scheme)
+
+Apps, scripts and web pages can open `colimabar://` links. A link can open the dashboard, or start, stop or restart a VM.
+
+| Link | Action |
+|---|---|
+| `colimabar://open` | Open the dashboard. |
+| `colimabar://doctor` | Open the dashboard on the Doctor page. |
+| `colimabar://start` | Start the VM. |
+| `colimabar://stop` | Stop the VM. |
+| `colimabar://restart` | Restart the VM. |
+
+`start`, `stop` and `restart` take one parameter: `profile=NAME`. Example: `colimabar://start?profile=work`. Without it, a link uses the selected profile. No other parameter works.
+
+Rules:
+
+- The scheme and the route are not case sensitive. The profile name is.
+- A link never creates a VM. If the profile is not in `colima list`, ColimaBar sends a notification and does nothing. This is also true for `default`.
+- ColimaBar does nothing if the VM already has the state that the link wants. For example, `start` on a running VM.
+- ColimaBar refuses a link while the profile has a running action, while Colima is not installed, while ColimaBar cannot read the profiles, and while ColimaBar restarts for an update. It sends one notification. If notifications are off for ColimaBar, an alert window shows the text.
+- `restart` on a stopped VM does nothing and sends a notification. Use `start`.
+- ColimaBar asks before a link starts, stops or restarts a VM. To stop the question, tick **Do not ask again for links**, or turn off **Ask before a link starts, stops or restarts Colima** on the System tab. The setting is not in the settings file, because a file must not turn off a safety question.
+- Links that open the dashboard or Doctor never ask.
+- A link never gives data back to the caller, and never saves a file.
+- A debug run ignores all links.
+
+Examples:
+
+- Terminal: `open -g 'colimabar://start?profile=work'`
+- Raycast: make a Quicklink with the link `colimabar://stop`.
+- Alfred: make a Custom Search with the link `colimabar://start?profile={query}`.
+- Shortcuts: use the action **Open URLs** with the link.
+
+macOS learns the scheme when ColimaBar runs from an Applications folder. If a link does nothing, see [A link does nothing](troubleshooting.md#a-link-does-nothing).
 
 ## The login item
 

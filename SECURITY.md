@@ -44,6 +44,7 @@ These notes describe how ColimaBar works. They help you decide if a problem is a
 
   If ColimaBar changes a route that points to a different daemon, report it.
 - **`colima-ctl.sh`.** The app bundle contains this script. It runs VM actions and changes `colima.yaml`. Injection through a profile name or a setting is a vulnerability.
+- **`colimabar://` links.** Any app or web page can open a link. A link can only open the dashboard or Doctor, or start, stop or restart an existing VM. It never returns data, writes a file or opens a panel. Its only parameter is a profile name that must pass `ProfileName.isValid` and be in `colima list`. While **Ask before a link starts, stops or restarts Colima** is on, ColimaBar asks first. The setting is not in the settings file. A link that runs a command, reads data, creates a VM, or skips the question while the setting is on is a vulnerability.
 - **Import Settings…** reads a JSON file that you choose. A setting from such a file that changes behavior beyond its documented values is a vulnerability.
 - **Code signing.** ColimaBar has an ad-hoc signature. Apple does not notarize it. The signature only shows that the app is not damaged. It does not show who built it.
 - **Download integrity.** GitHub Actions signs a build provenance attestation for each release file. To check a download, follow [Verify a download](docs/install.md#verify-a-download). If a release file fails this check, report it.

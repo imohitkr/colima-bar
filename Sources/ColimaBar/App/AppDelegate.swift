@@ -29,8 +29,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
     }
 
-    private let model = ColimaModel()
-    private let ui = ViewState()
+    // Internal, so AppDelegate+Links can use them.
+    let model = ColimaModel()
+    let ui = ViewState()
+    /// The links that reach the app (see AppDelegate+Links). A debug run
+    /// drops them all.
+    let links = LinkInbox(acceptsLinks: !AppDelegate.isDebugRun)
+    /// When this process started. A link right after launch waits for the icon.
+    let launchedAt = Date()
     // Implicitly unwrapped: the status bar exists only after launch, so
     // applicationDidFinishLaunching sets it, and nothing reads it before.
     private var item: NSStatusItem!
@@ -48,9 +54,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// An older copy started this one to replace itself after an update
     /// (see relaunchIfUpdated()).
     static let isReplacement = CommandLine.arguments.contains("--replace")
-    private var relaunching = false
+    private(set) var relaunching = false
 
     func applicationWillFinishLaunching(_ note: Notification) {
+        // First, so a link that launched the app is not lost. The launch
+        // event comes between this call and applicationDidFinishLaunching.
+        installLinkHandler()
         // Before launch completes, so a notification click that launched us
         // isn't lost.
         Notifier.shared.install()
@@ -130,9 +139,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // would have done. Read the request in every case, so it is used once.
         if !Self.isDebugRun, Self.takeRevealRequest() || CommandLine.arguments.contains("--reveal") {
             model.revealIcon = true
-            reveal(after: 1)
+            revealDashboard(afterLaunch: true)
         }
         if CommandLine.arguments.contains("--window") { showWindow() }
+        startLinks()
         // Debug: `--diagnostics PATH` writes the diagnostics file and quits.
         // It reads only, opens nothing, and exits with 1 if it fails.
         if let i = CommandLine.arguments.firstIndex(of: "--diagnostics") {
@@ -246,29 +256,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
         } else if let other = others.first {
             if let url = other.bundleURL {
+                // Links that launched this copy go to the running copy. Else
                 // openApplication on a running app delivers a reopen event.
-                NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+                if forwardLinks(to: url) != .forwarded {
+                    NSWorkspace.shared.openApplication(at: url, configuration: NSWorkspace.OpenConfiguration())
+                    // Give the open request time to be sent before exiting.
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+                }
             } else {
                 other.activate()
+                RunLoop.current.run(until: Date().addingTimeInterval(0.5))
             }
-            // Give the open request time to be sent before exiting.
-            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
             exit(0)
         }
         guard LoginItem.isEnabled else { return }
         LoginItem.refreshIfNeeded()
+        // The agent takes the links that this copy holds. If it does not
+        // start, this copy handles them (see below).
+        let handoffStamp = handOffLinks()
+        let handedOffCount = handoffStamp == nil ? 0 : links.pending.count
         // Hand over only once the agent is seen running; if launchd refuses to
         // start it, carry on as a normal instance so the proxy still runs.
         if LoginItem.kickstart() {
             let deadline = Date().addingTimeInterval(5)
             while Date() < deadline {
-                let agentUp = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
-                    .contains { $0 != .current && !$0.isTerminated }
-                if agentUp { exit(0) }
+                let agent = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
+                    .first { $0 != .current && !$0.isTerminated }
+                if let agent {
+                    // Links that came while this copy waited go to the agent
+                    // by a normal open request. It is up now.
+                    let late = Array(links.pending.dropFirst(handedOffCount))
+                    if !late.isEmpty {
+                        if let url = agent.bundleURL {
+                            _ = forward(late, to: url)
+                        } else {
+                            log.error("\(late.count, privacy: .public) links came late and are lost")
+                        }
+                    }
+                    exit(0)
+                }
                 RunLoop.current.run(until: Date().addingTimeInterval(0.2))
             }
             log.error("login agent didn't start; running unsupervised")
         }
+        if let handoffStamp { takeBackHandoff(stamp: handoffStamp) }
     }
 
     /// launchd stops the agent with SIGTERM (logout, `launchctl bootout`,
@@ -406,7 +437,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// Opens the dashboard popover on the Doctor page.
     @objc private func openDoctor() {
         ui.showDoctor = true
-        if !popover.isShown { togglePopover() }
+        revealDashboard()
     }
     @objc private func reportIssue() { DiagnosticsPanel.save(model: model, report: true) }
     @objc private func quit() { NSApp.terminate(nil) }
@@ -540,10 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     // not offer the same install again.
                     if reveal { Updater.shared.phase = .idle } else { Updater.shared.relaunchDidFail() }
                     Defaults.remove(.revealOnLaunch)
-                    if reveal {
-                        if self.model.iconHidden { self.model.revealIcon = true }
-                        self.reveal()
-                    }
+                    if reveal { self.revealDashboard() }
                     return
                 }
                 NSApp.terminate(nil)
@@ -556,27 +584,52 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// hidden icon back and opens the dashboard so Colima can be started.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         guard item != nil, !relaunchIfUpdated() else { return false }
-        // Only override the option while the icon is actually hidden;
-        // otherwise the next stop would leave it visible.
-        if model.iconHidden { model.revealIcon = true }
-        reveal()
+        revealDashboard()
         return false
     }
 
-    /// Shows the icon and opens the dashboard: the popover when the icon is
-    /// on screen, otherwise the window.
-    private func reveal(after delay: Double = 0.25) {
+    /// Shows the icon and opens the dashboard. Reopen, `--reveal`, links, the
+    /// Doctor menu item and the shortcuts all call it. It opens the popover
+    /// only when the icon can anchor it: the button is on screen and not under
+    /// the camera housing (see StatusItemPlacement). Otherwise it opens the
+    /// window. The popover can still land off screen, so the next run loop
+    /// turn checks it too.
+    /// There is no delay when the icon was visible. After it was hidden, the
+    /// delay is 0.25 s (1 s right after launch), because macOS places a
+    /// just-shown status item asynchronously.
+    func revealDashboard(afterLaunch: Bool = false) {
+        // Only override the option while the icon is actually hidden;
+        // otherwise the next stop would leave it visible.
+        let wasHidden = model.iconHidden || !item.isVisible
+        if model.iconHidden { model.revealIcon = true }
         appliedHidden = false
         item.isVisible = true
-        // macOS places a just-shown status item asynchronously; anchor the
-        // popover once it is on screen, or fall back to the window.
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-            guard let self, !self.popover.isShown else { return }
-            if let w = self.item.button?.window, w.screen != nil, w.isVisible,
-                w.occlusionState.contains(.visible)
-            {
-                self.togglePopover()
-            } else {
+        let delay = afterLaunch ? 1 : (wasHidden ? 0.25 : 0)
+        guard delay > 0 else {
+            placeDashboard()
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.placeDashboard() }
+    }
+
+    private func placeDashboard() {
+        guard !popover.isShown else {
+            NSApp.activate()
+            return
+        }
+        guard let w = item.button?.window, w.screen != nil, w.isVisible, w.occlusionState.contains(.visible),
+            StatusItemPlacement.canAnchor(item: w.frame, screens: ScreenGeometry.current)
+        else {
+            showWindow()
+            return
+        }
+        togglePopover()
+        // A popover that opens off screen shows nothing: use the window.
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.popover.isShown else { return }
+            let frame = self.popover.contentViewController?.view.window?.frame ?? .zero
+            if !StatusItemPlacement.isOnScreen(frame, screens: ScreenGeometry.current) {
+                self.log.notice("the popover is off screen; opening the window")
                 self.showWindow()
             }
         }
@@ -609,7 +662,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     // MARK: - Detached window
 
-    private func showWindow() {
+    func showWindow() {
         popover.performClose(nil)
         if window == nil {
             let w = (Self.isDebugRun ? SnapshotWindow.self : NSWindow.self).init(
