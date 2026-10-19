@@ -16,6 +16,9 @@ enum Paths {
     static func busy(_ profile: String) -> String { "\(cacheDir)/busy.\(profile)" }
     /// colima-ctl.sh's stderr (colima's own output included) when ColimaBar runs it.
     static let ctlLog = "\(cacheDir)/ctl.log"
+    /// The file that a normal run of the app writes for the `colimabar`
+    /// command (see AppStatusFile).
+    static let appStatus = "\(cacheDir)/app-status.json"
     /// The stable socket every docker client is pointed at: ColimaBar's
     /// auto-start proxy while it runs, a symlink to Colima's socket otherwise.
     static let proxySocket = "\(cacheDir)/docker.sock"

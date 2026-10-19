@@ -31,10 +31,12 @@ mkdir -p Resources
 [ -f Resources/AppIcon.icns ] || swift scripts/make-icon.swift Resources/AppIcon.icns
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Library/LaunchAgents"
 cp "$BIN" "$APP/Contents/MacOS/ColimaBar"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 install -m 755 scripts/colima-ctl.sh scripts/uninstall.sh "$APP/Contents/Resources/"
+# The `colimabar` command. It goes in before the signature, so the signature seals it.
+install -m 755 scripts/colimabar.sh "$APP/Contents/Resources/bin/colimabar"
 
 cat > "$APP/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

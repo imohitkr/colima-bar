@@ -6,9 +6,9 @@ import Testing
 @Suite struct DiagnosticsBundleTests {
     private let redactor = Redactor(home: "/Users/jdoe", userNames: ["jdoe"])
 
-    private func render(_ sections: [DiagnosticsSection], debug: Bool = false) -> String {
+    private func render(_ sections: [DiagnosticsSection], runNote: String? = nil) -> String {
         DiagnosticsBundle.render(
-            sections: sections, date: Date(timeIntervalSince1970: 0), version: "0.9.0", isDebugRun: debug,
+            sections: sections, date: Date(timeIntervalSince1970: 0), version: "0.9.0", runNote: runNote,
             elapsed: 1.5, redactor: redactor)
     }
 
@@ -26,9 +26,15 @@ import Testing
     }
 
     @Test func theSummaryNamesADebugRun() {
-        let text = render([], debug: true)
-        #expect(text.contains("(debug run)"))
+        let text = render([], runNote: "debug run")
+        #expect(text.contains("ColimaBar: 0.9.0 (debug run)"))
         #expect(!render([]).contains("debug run"))
+    }
+
+    @Test func theSummaryNamesTheCommandLine() {
+        let text = render([], runNote: "command line")
+        #expect(text.contains("ColimaBar: 0.9.0 (command line)"))
+        #expect(!render([]).contains("command line"))
     }
 
     @Test func theHomeFolderIsGoneFromEverySection() {
@@ -95,7 +101,7 @@ import Testing
 
     @Test func notesShowInTheSummary() {
         let text = DiagnosticsBundle.render(
-            sections: [], date: Date(timeIntervalSince1970: 0), version: "0.9.0", isDebugRun: false, elapsed: 1,
+            sections: [], date: Date(timeIntervalSince1970: 0), version: "0.9.0", runNote: nil, elapsed: 1,
             notes: ["Mac names: not all read; check the file before you share it."], redactor: redactor)
         #expect(text.contains("Note: Mac names: not all read; check the file before you share it."))
     }

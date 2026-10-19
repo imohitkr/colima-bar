@@ -3,7 +3,8 @@ import Foundation
 @testable import ColimaBar
 
 /// A small app bundle for update tests, in a temporary folder. It is not
-/// ColimaBar. The executable is a copy of /usr/bin/true. Never point a test
+/// ColimaBar. The executable is a copy of /usr/bin/true. The `colimabar`
+/// command is a one-line script. Never point a test
 /// at /Applications or ~/Applications.
 enum FakeBundle {
     /// Makes `<folder>/<name>` and, unless `sign` is false, signs it ad-hoc.
@@ -11,7 +12,8 @@ enum FakeBundle {
     @discardableResult
     static func make(
         in folder: String, name: String = "ColimaBar.app", id: String = "com.imohitkr.ColimaBar",
-        version: String = "0.9.1", executable: String = "ColimaBar", withScript: Bool = true, sign: Bool = true,
+        version: String = "0.9.1", executable: String = "ColimaBar", withScript: Bool = true, withCommand: Bool = true,
+        commandIsExecutable: Bool = true, sign: Bool = true,
         signIdentifier: String? = nil
     ) async throws -> URL {
         let fm = FileManager.default
@@ -22,6 +24,13 @@ enum FakeBundle {
         try fm.createDirectory(at: resources, withIntermediateDirectories: true)
         try fm.copyItem(at: URL(fileURLWithPath: "/usr/bin/true"), to: macOS.appendingPathComponent(executable))
         if withScript { try Data("#!/bin/sh\n".utf8).write(to: resources.appendingPathComponent("colima-ctl.sh")) }
+        if withCommand {
+            let bin = resources.appendingPathComponent("bin")
+            try fm.createDirectory(at: bin, withIntermediateDirectories: true)
+            let command = bin.appendingPathComponent("colimabar")
+            try Data("#!/bin/sh\n".utf8).write(to: command)
+            chmod(command.path, commandIsExecutable ? 0o755 : 0o644)
+        }
         let plist: [String: Any] = [
             "CFBundleIdentifier": id, "CFBundleExecutable": executable,
             "CFBundleShortVersionString": version,

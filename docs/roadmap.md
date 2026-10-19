@@ -6,7 +6,6 @@ These features are planned. They have no target version yet. The milestones are 
 
 ## 1. Automation
 
-- A `colimabar` command for the terminal, for example `colimabar status --json`.
 - A global hotkey.
 
 ## 2. VM configuration

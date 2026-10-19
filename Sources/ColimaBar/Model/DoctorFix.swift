@@ -13,6 +13,19 @@ enum DoctorFix: Equatable, Sendable {
     /// Runs `colima-ctl.sh repair` (the same as the Repair button).
     case repair
 
+    /// A fixed name for scripts: the `fix` field of `colimabar doctor --json`.
+    /// Do not change a value.
+    var id: String {
+        switch self {
+        case .useColimabar: "useColimabar"
+        case .setRoutes: "setRoutes"
+        case .copyLine: "copyLine"
+        case .useOsxkeychain: "useOsxkeychain"
+        case .addPluginFolder: "addPluginFolder"
+        case .repair: "repair"
+        }
+    }
+
     var label: String {
         switch self {
         case .useColimabar: "Use colimabar"

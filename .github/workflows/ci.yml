@@ -62,6 +62,18 @@ jobs:
             exit 1
           fi
 
+      # The signature must seal the `colimabar` command. The command must run
+      # and print the version of the Info.plist.
+      - name: Signature and command of the build
+        run: |
+          codesign --verify --deep --strict build/ColimaBar.app
+          expected=$(plutil -extract CFBundleShortVersionString raw -o - build/ColimaBar.app/Contents/Info.plist)
+          actual=$(build/ColimaBar.app/Contents/Resources/bin/colimabar version)
+          if [ "$actual" != "colimabar $expected" ]; then
+            echo "colimabar version printed '$actual', not 'colimabar $expected'." >&2
+            exit 1
+          fi
+
   # The same Swift format check as `make lint`. The rules are in .swift-format.
   # The official Swift image on Linux costs less than a macOS runner.
   lint:

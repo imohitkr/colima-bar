@@ -249,6 +249,10 @@ final class ColimaModel {
     @ObservationIgnored private var wakeToken = 0
     // Auto-stop state of the running profiles other than the selected one.
     @ObservationIgnored private var otherIdle: [String: OtherIdle] = [:]
+    /// The auto-stop times in the last status file that the app wrote, and
+    /// whether the last write failed (see ColimaModel+AppStatus).
+    @ObservationIgnored var appStatusTimes: [String: Date]?
+    @ObservationIgnored var appStatusWriteFailed = false
     // When the idle time of the selected profile started. `SuspendingClock`
     // stops while the Mac sleeps, as the VM does.
     @ObservationIgnored private var idleStart: SuspendingClock.Instant?
@@ -275,19 +279,19 @@ final class ColimaModel {
     static let alertCap = 20
     /// How long a proxy wake waits for another start or stop to finish.
     static let startWaitSeconds = 300
-    /// After a wake, Docker counts as ready after this many successful
-    /// probes in a row.
-    static let readinessStreak = 3
-    /// The readiness check gives up after this time.
-    static let readinessTimeout: TimeInterval = 60
-    /// The pause between two readiness probes.
-    static let readinessInterval: Duration = .milliseconds(500)
     /// Exit codes of a normal stop: no crash alert for them. 130 is SIGINT,
     /// 137 SIGKILL and 143 SIGTERM.
     nonisolated static let ignoredExitCodes: Set<String> = ["0", "130", "137", "143"]
 
-    init() {
-        let p = Defaults.string(.profile) ?? "default"
+    /// `profile` and `readOnly` are for the `colimabar` command. The command
+    /// shows a profile that the user names, and it must change nothing: a
+    /// read-only model counts as a debug run, so it never starts a proxy,
+    /// changes a route or a context, or writes a setting. The command never
+    /// calls `start()`. Assigning `profile` here runs no `didSet`.
+    init(profile named: String? = nil, readOnly: Bool = false) {
+        let p = named ?? Defaults.string(.profile) ?? "default"
+        profile = p
+        isDebug = readOnly
         let client = DockerAPI(socketPath: Paths.socket(p))
         api = client
         keeper = RemovedLogKeeper(api: client)
@@ -329,6 +333,7 @@ final class ColimaModel {
                 "power at start: battery \(p.onBattery, privacy: .public), low power \(p.lowPowerMode, privacy: .public), hot \(p.isHot, privacy: .public)"
             )
             powerObserver = observer
+            publishAppStatus()
         }
         Task { await refreshAll() }
         lastPing = Date()
@@ -415,7 +420,10 @@ final class ColimaModel {
     /// docker clients keep working without ColimaBar.
     func shutdown() {
         proxy.stop()
-        if !isDebug { profileProxies.shutdown() }
+        if !isDebug {
+            profileProxies.shutdown()
+            AppStatusFile.removeIfOwned()
+        }
     }
 
     /// Heartbeat (see tickInterval). Cheap work only: a stat() of the busy
@@ -468,6 +476,7 @@ final class ColimaModel {
         }
         checkIdle()
         checkOtherProfilesIdle()
+        publishAppStatus()
     }
 
     /// False when the profile's runtime is known and isn't docker (e.g.
@@ -550,7 +559,8 @@ final class ColimaModel {
         // name. profile's didSet switches over and refreshes again.
         // A disk shrink deletes the profile for a short time while its busy
         // marker exists: keep the profile then.
-        if profile != "default", readBusy() == nil, !all.isEmpty,
+        // A debug run changes no setting, so it keeps the profile.
+        if !isDebug, profile != "default", readBusy() == nil, !all.isEmpty,
             !all.contains(where: { ($0.name ?? "default") == profile })
         {
             log.notice("profile \(self.profile, privacy: .public) no longer exists; switching to default")
@@ -857,10 +867,7 @@ final class ColimaModel {
     /// endpoint that goes through containerd.
     private func performWake(_ p: String) async -> Bool {
         let probe = DockerAPI(socketPath: Paths.socket(p))
-        // GET /images/json is served by containerd's image store.
-        let probePath =
-            "/images/json?filters=" + DockerAPI.percentEncoded(#"{"reference":["colimabar-readiness-probe"]}"#)
-        func ready() async -> Bool { await probe.get(probePath, timeout: 3)?.ok ?? false }
+        let ready = ReadinessGate.dockerProbe(socketPath: Paths.socket(p))
 
         if readBusy(p) == nil, await ready() { return true }
         // A deleted profile: `colima start` would provision a new VM. A disk
@@ -907,27 +914,20 @@ final class ColimaModel {
             if !r.ok { log.error("auto-start: colima-ctl.sh start exited \(r.status) for \(p, privacy: .public)") }
             checkDockerContext()
         }
-        var streak = 0
-        // SuspendingClock: a system sleep during the wait does not use up the time.
-        let deadline = SuspendingClock.now + .seconds(Self.readinessTimeout)
-        while SuspendingClock.now < deadline {
-            streak = await ready() ? streak + 1 : 0
-            if streak >= Self.readinessStreak {
-                // Refresh the cached API version from the real daemon (a Colima
-                // update can change it) before more pings are answered locally.
-                if let v = await probe.get("/_ping", timeout: 3)?.headers["api-version"] {
-                    profileProxies.setAPIVersion(v, for: p)
-                    if p == profile {
-                        proxy.apiVersion = v
-                        profileProxies.apiVersion = v
-                        Defaults.set(v, .apiVersion)
-                    }
+        if await ReadinessGate.wait(probe: ready) {
+            // Refresh the cached API version from the real daemon (a Colima
+            // update can change it) before more pings are answered locally.
+            if let v = await probe.get("/_ping", timeout: 3)?.headers["api-version"] {
+                profileProxies.setAPIVersion(v, for: p)
+                if p == profile {
+                    proxy.apiVersion = v
+                    profileProxies.apiVersion = v
+                    Defaults.set(v, .apiVersion)
                 }
-                Task { await refreshAll() }
-                if let startedVersions { recordGoodWake(p, versions: await startedVersions.value) }
-                return true
             }
-            try? await Task.sleep(for: Self.readinessInterval)
+            Task { await refreshAll() }
+            if let startedVersions { recordGoodWake(p, versions: await startedVersions.value) }
+            return true
         }
         Notifier.shared.post("Colima profile \(p) didn't become ready. Check the Colima log.")
         return false
@@ -1129,6 +1129,21 @@ final class ColimaModel {
                 run(.autoStop, "\(limit.minutes)", profile: p)
             }
         }
+    }
+
+    /// When auto-stop stops each profile that is idle now, by profile: the
+    /// selected profile and the other running profiles. The `colimabar`
+    /// command reads it from the status file.
+    func autoStopTimes() -> [String: Date] {
+        var times: [String: Date] = [:]
+        if let autoStopAt { times[profile] = autoStopAt }
+        let minutes = autoStopLimit.minutes
+        for (name, idle) in otherIdle {
+            guard let since = idle.since else { continue }
+            times[name] = AutoStopRule.stopTime(
+                idleSince: since, now: .now, wallNow: Date(), idleMinutes: minutes)
+        }
+        return times
     }
 
     /// The number of running containers on a profile's socket, or nil if
@@ -1681,7 +1696,12 @@ final class ColimaModel {
         if let u = URL(string: "http://localhost:\(port)") { NSWorkspace.shared.open(u) }
     }
 
-    func notify(_ msg: String) { Notifier.shared.post(msg) }
+    /// The `colimabar` command has no notifications: it must not touch
+    /// `Notifier`. It writes its messages to the terminal.
+    func notify(_ msg: String) {
+        guard !AppDelegate.isCommandLine else { return }
+        Notifier.shared.post(msg)
+    }
 
     // MARK: - Helpers
 

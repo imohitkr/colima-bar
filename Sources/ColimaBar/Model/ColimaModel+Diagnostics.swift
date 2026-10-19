@@ -27,13 +27,15 @@ extension ColimaModel {
     /// nil. One run at a time. `stateKnown` is false if the last `colima
     /// list` gave no list (a debug run asks first).
     @discardableResult
-    func saveDiagnostics(to url: URL, report: Bool = false, stateKnown: Bool = true) async -> Error? {
+    func saveDiagnostics(
+        to url: URL, report: Bool = false, stateKnown: Bool = true, replace: Bool = true
+    ) async -> Error? {
         guard !isSavingDiagnostics else { return SaveError.busy }
         setSavingDiagnostics(true)
         defer { setSavingDiagnostics(false) }
         let collected = await collectDiagnostics(stateKnown: stateKnown)
         do {
-            try DiagnosticsProbe.write(collected.text, to: url)
+            try DiagnosticsProbe.write(collected.text, to: url, replace: replace)
         } catch {
             diagnosticsLog.error("diagnostics file not written: \(error.localizedDescription, privacy: .public)")
             notify("ColimaBar could not save the diagnostics file: \(error.localizedDescription)")
@@ -112,12 +114,12 @@ extension ColimaModel {
         }
         let seconds = Double((ContinuousClock.now - started).components.seconds)
         let elapsed = max(seconds, 0)
-        let isDebugRun = isDebug
+        let runNote = AppDelegate.isCommandLine ? "command line" : isDebug ? "debug run" : nil
         let version = AppDelegate.version
         // The redactor reads up to 2 MB: keep it off the main actor.
         let text = await Task.detached {
             DiagnosticsBundle.render(
-                sections: sections, date: Date(), version: version, isDebugRun: isDebugRun,
+                sections: sections, date: Date(), version: version, runNote: runNote,
                 elapsed: elapsed, notes: notes, redactor: hide)
         }.value
         let report = doctorReport.flatMap { $0.profile == p ? $0 : nil }

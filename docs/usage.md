@@ -335,6 +335,75 @@ You can delete a different profile while its VM runs. Colima stops it first.
 
 You can also delete `default`. The warning then tells you that a plain `colima start` creates it again with an empty disk. If you delete the selected `default` profile, ColimaBar switches to a different profile, if you have one.
 
+## Command line
+
+The `colimabar` command works in Terminal and in scripts. It is a part of the app, so it always has the version of ColimaBar. Homebrew links it. The installer links it into `~/.local/bin` or `~/bin`. For other installs, see [Use the command in your PATH](install.md#use-the-command-in-your-path).
+
+```sh
+colimabar status
+colimabar start --profile work
+colimabar doctor --json
+```
+
+| Command | What it does |
+|---|---|
+| `colimabar status` | Shows the profile, the VM, the action that runs, auto-start, auto-stop, the socket, the docker context and the app. |
+| `colimabar start` | Starts the VM. It returns when Docker is ready. |
+| `colimabar stop` | Stops the VM. |
+| `colimabar restart` | Stops and starts the VM. It returns when Docker is ready. |
+| `colimabar open` | Opens the dashboard. It starts ColimaBar if it does not run. |
+| `colimabar doctor` | Runs the [Doctor](#doctor) checks and prints the report. |
+| `colimabar diagnostics [PATH]` | Writes the [diagnostics file](#save-diagnostics-and-report-an-issue). `PATH` is a file or a folder. The default is the current folder. The command never overwrites a file. It prints the path of the file. Read the file before you share it. |
+| `colimabar version` | Shows the version. |
+| `colimabar help` | Shows the commands. |
+
+`status`, `start`, `stop`, `restart`, `doctor` and `diagnostics` take `--profile NAME` (or `-p NAME`). Without it, the command uses the profile that ColimaBar shows. `status` and `doctor` take `--json`.
+
+Rules:
+
+- `status`, `doctor` and `diagnostics` never start the VM. ColimaBar does not need to run. Without ColimaBar, `status` cannot tell when auto-stop stops the VM.
+- `start`, `stop` and `restart` use the same script as the app. They ask no question, and they do not show the [upgrade warning](#upgrade-warning). They never create a VM. If the profile is not in `colima list`, the command fails. This is true for every profile but `default`.
+- If another action of the profile runs, the command waits until it ends, for 15 minutes at most. `start` on a running VM and `stop` on a stopped VM do nothing and exit with 0.
+- The command uses the `COLIMA_HOME` of your shell, as `colima` does.
+- The output has no names or counts of containers, images, volumes or networks.
+
+Exit codes:
+
+| Code | Meaning |
+|---|---|
+| 0 | Done. For `doctor`: no problem. A warning is not a problem. |
+| 1 | Failed, or Doctor found a problem. Also: the profile is missing, Colima is not installed, or Docker is not ready after a start. |
+| 2 | Usage error. |
+| 3 | Not done: another VM action holds the lock of the profile. |
+| 130 | You stopped the command with Control-C. SIGTERM gives 143. |
+
+For `start`, `stop` and `restart`, the log of the script is `~/.cache/colima-bar/ctl.log`. If a command fails, run `colimabar doctor`.
+
+### JSON
+
+`status --json` and `doctor --json` write JSON with the key `schemaVersion` (now 1). Every key is always there. A key has the value `null` when it has no value. A new key does not change the version. If a key is renamed or removed, or its type changes, the version goes up. The text output can change at any time, so scripts must read the JSON.
+
+`status --json` has these keys:
+
+- `version`, `profile`, `selectedInApp`
+- `vm`: `state`, `colimaStatus`, `action`, `runtime`, `arch`, `cpus`, `memoryGiB`, `diskGiB`. `state` is `running`, `stopped`, `broken`, `missing`, `notInstalled` or `unknown`.
+- `autoStart`
+- `autoStop`: `enabled`, `idleMinutes`, `stopsAt` (a date in UTC, or `null`), `minutesLeft`. The times come from ColimaBar, so they are `null` while it does not run.
+- `socket`: `path` and `kind`. `kind` is `proxy` (the proxy of ColimaBar), `link` (a link to the socket of Colima), `stale`, `missing` or `other`. The path is the stable socket if ColimaBar shows the profile, else the socket of the profile.
+- `dockerContext`
+- `app`: `running` and `version`
+
+`status` exits with 0 if Colima lists the profile, and with 1 if it does not.
+
+`doctor --json` has `schemaVersion`, `version`, `profile`, `problems`, `warnings` and `checks`. Each check has `id`, `title`, `status` (`ok`, `warning`, `problem` or `skipped`), `detail` and `fix`. `fix` is the name of the fix that the Doctor page offers (for example `useColimabar`), or `null`. The command makes no fix.
+
+Examples:
+
+- A shell prompt (starship): `[custom.colima]` with `command = "colimabar status --json | jq -r .vm.state"`, `when = "command -v colimabar"` and `shell = ["bash", "--noprofile", "--norc"]`. Starship has no `interval` for a custom module. It runs the command at each prompt, and it stops the command after `command_timeout` (500 ms by default). The call takes about 0.2 s. If the prompt shows no state, raise `command_timeout`.
+- A script that waits for Docker: `colimabar start && docker ps`.
+- A check in a script: `colimabar doctor --json | jq -e '.problems == 0'`.
+- Raycast: make a Script Command that runs `colimabar status`. A Script Command has a short `PATH`, so use the full path, for example `/opt/homebrew/bin/colimabar` or `/Applications/ColimaBar.app/Contents/Resources/bin/colimabar`. Or use the [links](#links-url-scheme).
+
 ## Links (URL scheme)
 
 Apps, scripts and web pages can open `colimabar://` links. A link can open the dashboard, or start, stop or restart a VM.

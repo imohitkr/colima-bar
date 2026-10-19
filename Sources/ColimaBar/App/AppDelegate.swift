@@ -11,6 +11,12 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSWindowDelegate {
     static func main() {
+        // The `colimabar` command runs this binary with `--cli` (see
+        // scripts/colimabar.sh). It must not create NSApplication: no Dock
+        // icon, no status item, no check-in with LaunchServices.
+        if isCommandLine {
+            CLIRunner.main(Array(CommandLine.arguments.dropFirst(2)))
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -22,8 +28,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     static let bundleID = "com.imohitkr.ColimaBar"
     /// Snapshot/debug runs sit beside the real instance and must not touch
     /// the proxy socket, docker routing or login items.
-    static let isDebugRun = CommandLine.arguments.contains {
-        ["--snapshot", "--popover", "--notify-test", "--diagnostics"].contains($0)
+    /// The `colimabar` command counts as a debug run too.
+    static let isDebugRun = isDebugRun(arguments: CommandLine.arguments)
+    /// True if the first argument is `--cli`: this process is the `colimabar` command.
+    static let isCommandLine = isCommandLine(arguments: CommandLine.arguments)
+
+    /// `arguments` are the whole list, with the program name first.
+    nonisolated static func isCommandLine(arguments: [String]) -> Bool {
+        arguments.dropFirst().first == "--cli"
+    }
+
+    nonisolated static func isDebugRun(arguments: [String]) -> Bool {
+        isCommandLine(arguments: arguments)
+            || arguments.contains { ["--snapshot", "--popover", "--notify-test", "--diagnostics"].contains($0) }
     }
     static var version: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -222,6 +239,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// - Otherwise a second copy sends the running one a reopen event (which
     ///   brings a hidden icon back) and exits.
     private func ensureSingleSupervisedInstance() {
+        // A `colimabar` command (`--cli`) never calls NSApplication, so it does
+        // not check in with LaunchServices and is not in this list. Do not
+        // filter by activation policy: a copy that is still starting must count.
         let others = NSRunningApplication.runningApplications(withBundleIdentifier: Self.bundleID)
             .filter { $0 != .current }
         // An update can go to another path: the new copy in /Applications and

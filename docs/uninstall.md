@@ -10,7 +10,7 @@ This page tells you how to remove ColimaBar, and what stays on your Mac.
 2. Choose **Uninstall ColimaBar…**.
 3. Click **Uninstall** to confirm.
 
-ColimaBar runs its uninstall script in iTerm, or in Terminal when iTerm is not installed. The script asks for your password only to remove the `/var/run/docker.sock` link.
+ColimaBar runs its uninstall script in iTerm, or in Terminal when iTerm is not installed. The script asks for your password only to remove the `/var/run/docker.sock` link, and a `colimabar` command link in a folder that you cannot write to.
 
 ## Run the script manually
 
@@ -37,8 +37,9 @@ The script does these steps:
 3. It clears the launchd `DOCKER_HOST` and the testcontainers `docker.host` that ColimaBar set. It also clears the launchd `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`.
 4. It removes the `/var/run/docker.sock` symlink if it points to the ColimaBar socket. This step asks for your password.
 5. It deletes the app, the ColimaBar cache (`~/.cache/colima-bar`) and the ColimaBar settings.
-6. It creates `~/.cache/colima-bar/docker.sock` again, as a symlink to the Colima socket of the `default` profile.
-7. It creates each profile socket in `~/.cache/colima-bar/profiles` again, as a symlink to the Colima socket of its profile.
+6. It removes the `colimabar` command links in `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/bin`. It removes a link only if it points to the command inside `ColimaBar.app`. If the folder needs it, the script asks for your password.
+7. It creates `~/.cache/colima-bar/docker.sock` again, as a symlink to the Colima socket of the `default` profile.
+8. It creates each profile socket in `~/.cache/colima-bar/profiles` again, as a symlink to the Colima socket of its profile.
 
 ## What stays
 

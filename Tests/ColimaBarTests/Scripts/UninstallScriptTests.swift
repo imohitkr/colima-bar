@@ -135,6 +135,51 @@ import Testing
         #expect(sb.calls.last == "docker context use \(expected)")
     }
 
+    // MARK: - app_pids
+
+    /// An app (100) and two commands (200, 300) have the process name ColimaBar.
+    private func stubRunningProcesses(_ sb: ScriptSandbox) throws {
+        try sb.stub("pgrep", "printf '100\\n200\\n300\\n'")
+        try sb.stubProcesses([
+            .init(pid: 100, age: 60, command: "/Applications/ColimaBar.app/Contents/MacOS/ColimaBar"),
+            .init(pid: 200, age: 5, command: "/Applications/ColimaBar.app/Contents/MacOS/ColimaBar --cli start"),
+            .init(
+                pid: 300, age: 5, command: "/Applications/ColimaBar.app/Contents/MacOS/ColimaBar --cli status --json"),
+        ])
+    }
+
+    @Test func theAppPIDsIgnoreRunningCommands() async throws {
+        let sb = try ScriptSandbox()
+        try stubRunningProcesses(sb)
+        let r = try await call(sb, "app_pids")
+        #expect(r.status == 0)
+        #expect(r.out == "100\n")
+    }
+
+    @Test func onlyACommandRunningIsNotTheApp() async throws {
+        let sb = try ScriptSandbox()
+        try sb.stub("pgrep", "printf '200\\n'")
+        try sb.stubProcesses([.init(pid: 200, age: 5, command: "/x/ColimaBar --cli start")])
+        let r = try await call(sb, "app_pids; app_running")
+        #expect(r.status == 1)
+        #expect(r.out.isEmpty)
+    }
+
+    @Test func theAppCountsAsRunningWhileItsProcessExists() async throws {
+        let sb = try ScriptSandbox()
+        try stubRunningProcesses(sb)
+        #expect(try await call(sb, "app_running").status == 0)
+    }
+
+    @Test func stoppingTheAppSignalsTheAppAndNotTheCommand() async throws {
+        let sb = try ScriptSandbox()
+        try stubRunningProcesses(sb)
+        // The function replaces the builtin kill, so the test signals no process.
+        let r = try await call(sb, "kill() { echo \"kill $*\"; }; term_app")
+        #expect(r.status == 0)
+        #expect(r.out == "kill -TERM 100\n")
+    }
+
     @Test func theScriptUsesTheHelpers() throws {
         let text = try script()
         // It switches away from and removes only colimabar and the contexts of colimabar_contexts.
@@ -147,5 +192,54 @@ import Testing
         let rm = try #require(text.range(of: "rm -rf ~/Applications/ColimaBar.app"))
         let link = try #require(text.range(of: "link_profile_sockets ${PROFILE_NAMES[@]"))
         #expect(read.lowerBound < rm.lowerBound && rm.lowerBound < link.lowerBound)
+    }
+
+    // MARK: - The links of the command
+
+    private let suffix = "/ColimaBar.app/Contents/Resources/bin/colimabar"
+
+    @Test func onlyAnOwnLinkIsRemoved() async throws {
+        let sb = try ScriptSandbox()
+        let fm = FileManager.default
+        for dir in ["a", "b", "c", "d"] {
+            try fm.createDirectory(atPath: "\(sb.root)/\(dir)", withIntermediateDirectories: true)
+        }
+        symlink("/Applications\(suffix)", sb.root + "/a/colimabar")  // ours
+        symlink("/usr/bin/true", sb.root + "/b/colimabar")  // a link of the user
+        fm.createFile(atPath: sb.root + "/c/colimabar", contents: nil)  // a file
+        let r = try await call(sb, "remove_command_links '\(sb.root)/a' '\(sb.root)/b' '\(sb.root)/c' '\(sb.root)/d'")
+        #expect(r.status == 0 && r.out == "Removed \(sb.root)/a/colimabar\n")
+        #expect(!fm.fileExists(atPath: sb.root + "/a/colimabar"))
+        #expect((try? fm.destinationOfSymbolicLink(atPath: sb.root + "/b/colimabar")) == "/usr/bin/true")
+        #expect(fm.fileExists(atPath: sb.root + "/c/colimabar"))
+    }
+
+    @Test func aFolderThatTheUserCannotWriteNeedsSudo() async throws {
+        let sb = try ScriptSandbox()
+        let dir = sb.root + "/system-bin"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        symlink("/Applications\(suffix)", dir + "/colimabar")
+        chmod(dir, 0o555)
+        defer { chmod(dir, 0o755) }
+        // A stub sudo that logs and does not run the command.
+        try sb.stub("sudo", "printf 'sudo %s\\n' \"$*\" >> \"\(sb.log)\"\nexit 0")
+        let r = try await call(sb, "remove_command_links '\(dir)'")
+        #expect(r.out == "Removing \(dir)/colimabar (needs sudo)\n")
+        #expect(sb.calls == ["sudo rm -f \(dir)/colimabar"])
+    }
+
+    @Test func theFoldersOfTheLinksAreTheOnesOfHomebrewTheInstallerAndTheUser() async throws {
+        let sb = try ScriptSandbox()
+        let r = try await call(sb, "command_link_dirs")
+        #expect(
+            r.out.split(separator: "\n").map(String.init)
+                == ["/opt/homebrew/bin", "/usr/local/bin", sb.home + "/.local/bin", sb.home + "/bin"])
+    }
+
+    @Test func theScriptRemovesTheLinksAfterItRemovedTheApp() throws {
+        let text = try script()
+        let rm = try #require(text.range(of: "rm -rf ~/Applications/ColimaBar.app"))
+        let links = try #require(text.range(of: "remove_command_links \"$dir\""))
+        #expect(rm.lowerBound < links.lowerBound)
     }
 }

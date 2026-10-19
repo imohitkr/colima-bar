@@ -6,6 +6,9 @@ import os
 enum UpdateVerifier {
     static let bundleID = "com.imohitkr.ColimaBar"
     static let appName = "ColimaBar.app"
+    /// The `colimabar` command in the bundle. A copy without it would leave
+    /// the links of the user and of Homebrew broken.
+    static let commandPath = "Contents/Resources/bin/colimabar"
     private static let log = Logger(category: "update")
 
     /// Step 1: the byte count and the SHA-256 digest equal the API values.
@@ -85,7 +88,7 @@ enum UpdateVerifier {
     }
 
     /// Steps 4 to 6 for an unpacked app: the signature, the plist, the
-    /// bundled script and the quarantine flag. It removes the quarantine
+    /// bundled files (the binary, the script and the command) and the quarantine flag. It removes the quarantine
     /// flag from the unpacked copy only (URLSession sets none).
     static func verifyBundle(_ app: URL, tag: String, running: String) async throws {
         try await checkSignature(app)
@@ -94,7 +97,8 @@ enum UpdateVerifier {
         guard
             FileManager.default.isExecutableFile(
                 atPath: app.appendingPathComponent("Contents/MacOS/ColimaBar").path),
-            FileManager.default.fileExists(atPath: app.appendingPathComponent("Contents/Resources/colima-ctl.sh").path)
+            FileManager.default.fileExists(atPath: app.appendingPathComponent("Contents/Resources/colima-ctl.sh").path),
+            FileManager.default.isExecutableFile(atPath: app.appendingPathComponent(commandPath).path)
         else { throw UpdateError.bundleInvalid("a bundled file is missing") }
         try await clearQuarantine(app)
     }

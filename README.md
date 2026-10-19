@@ -82,6 +82,7 @@ If your `~/.zshrc` sets `DOCKER_HOST`, replace that line with the [shell snippet
 
 - Left-click the menu bar icon to open the dashboard. Move the pointer over a control to see what it does.
 - Right-click or Control-click the icon to start, stop or restart Colima, change options, check for updates, uninstall or quit.
+- In Terminal, run `colimabar status`, `colimabar start` or `colimabar doctor`. Add `--json` for scripts. See [Command line](docs/usage.md#command-line).
 
 The [Usage guide](docs/usage.md) describes the icon, each tab and each menu item.
 
