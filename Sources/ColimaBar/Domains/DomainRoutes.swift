@@ -25,6 +25,10 @@ struct DomainRoutes: Equatable, Sendable {
         case labelPortNotWeb(Int)
         /// An entry of `dev.colimabar.domains` that gives no name.
         case nameDropped(String)
+        /// The derived name lost non-ASCII characters. The text is the container, service or project name (cut to 40).
+        case nameNotASCII(String)
+        /// The derived name has no character left: the container gets no derived name.
+        case nameEmpty
     }
 
     enum Resolution: Equatable, Sendable {
@@ -82,12 +86,11 @@ struct DomainRoutes: Equatable, Sendable {
 
         var picked: [String: DomainCandidate.PortMap] = [:]
         for c in sorted {
+            if c.domains == .off { continue }
             let choice = choose(c)
             if let port = choice.port { picked[c.id] = port }
             if !choice.notes.isEmpty { table.notes[c.id, default: []].append(contentsOf: choice.notes) }
-            if c.domains != .off {
-                for piece in c.droppedEntries { table.notes[c.id, default: []].append(.nameDropped(piece)) }
-            }
+            for piece in c.droppedEntries { table.notes[c.id, default: []].append(.nameDropped(piece)) }
         }
 
         var claims: [Claim] = []
@@ -111,8 +114,16 @@ struct DomainRoutes: Equatable, Sendable {
             if let project = c.project.flatMap(DomainName.label), let service = c.service.flatMap(DomainName.label) {
                 derived[c.id] = "\(service).\(project)"
                 groups["\(project)/\(service)", default: []].append(c)
+                for raw in [c.project, c.service].compactMap({ $0 }) where DomainName.lostCharacters(raw) {
+                    table.notes[c.id, default: []].append(.nameNotASCII(String(raw.prefix(40))))
+                }
             } else if let own = DomainName.label(c.name) {
                 derived[c.id] = own
+                if DomainName.lostCharacters(c.name) {
+                    table.notes[c.id, default: []].append(.nameNotASCII(String(c.name.prefix(40))))
+                }
+            } else {
+                table.notes[c.id, default: []].append(.nameEmpty)
             }
         }
         var replica: [String: (number: Int, plain: Bool, size: Int)] = [:]
@@ -192,6 +203,13 @@ struct DomainRoutes: Equatable, Sendable {
             won[c.id, default: []].append(claim)
         }
 
+        // One note of a kind is enough, whatever the number of names that trigger it.
+        for (id, list) in table.notes {
+            var seen: [Note] = []
+            for note in list where !seen.contains(note) { seen.append(note) }
+            table.notes[id] = seen
+        }
+
         // The derived primary comes first, then the names in claim order.
         for (id, list) in won {
             let ordered = list.filter(\.primary) + list.filter { !$0.primary }
@@ -228,7 +246,7 @@ struct DomainRoutes: Equatable, Sendable {
             }
         }
         for p in DomainPorts.preferred {
-            if let m = c.ports.first(where: { $0.containerPort == p }) { return (m, notes) }
+            if let m = c.ports.first(where: { $0.containerPort == p && !isNonWeb($0.hostPort) }) { return (m, notes) }
         }
         return (c.ports.first { !isNonWeb($0.containerPort) && !isNonWeb($0.hostPort) }, notes)
     }

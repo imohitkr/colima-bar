@@ -498,7 +498,7 @@ The proxy never starts the VM. If the VM is stopped, the proxy answers with a pa
 - A container that Compose did not start gets `NAME.localhost`.
 - If a service has two or more containers, each one gets `SERVICE-N.PROJECT.localhost`, where N is the container number. The lowest number also gets the plain name.
 - A subdomain goes to its parent. `api.web.shop.localhost` reaches `web.shop.localhost`.
-- ColimaBar turns each name into a valid host name: lower case letters, digits and `-`. It changes `_`, `.` and spaces to `-`.
+- ColimaBar turns each name into a valid host name: lower case letters, digits and `-`. It changes `_`, `.` and spaces to `-`. It leaves out other characters. If it leaves out a non-ASCII character, or nothing is left, the container shows a warning. Use the label `dev.colimabar.domains` to set the name then.
 - If two containers want one name, the order is: a name from a label, the derived name of a container, the plain name of the lowest replica, then the older container. The container that loses shows a warning icon in its row. Its hint names the owner. The hint also lists any other note about the names of the container.
 - A name that is longer than 63 characters is cut. For a replica, ColimaBar cuts the service part, so that `SERVICE-N` still fits.
 
@@ -508,9 +508,9 @@ A container gets a name only if it publishes a TCP port on this Mac. ColimaBar p
 
 1. The label `dev.colimabar.port`. The label `dev.orbstack.http-port` works too. If the container does not publish that port, it gets no name. If the label value is not a port, the container shows a warning, and ColimaBar picks the port with steps 2 and 3. The first of the two labels that is set decides.
 2. The first published port from this list: 80, 8080, 3000, 8000, 5000, 5173, 4200, 8888, 443, 8443.
-3. The lowest published port that is not a database or another known non-web port.
+3. The lowest published port that is not a database or another known non-web port. Steps 2 and 3 skip a port that is published at a database port of the Mac, for example container port 80 at host port 5432.
 
-The proxy connects to ports 443 and 8443 with TLS and accepts any certificate. Your browser still uses plain HTTP to the proxy. If a container publishes a port only on `::1`, the proxy connects to `::1`. Else it connects to `127.0.0.1`.
+The proxy connects to ports 443 and 8443 with TLS and accepts any certificate. Your browser still uses plain HTTP to the proxy. If a container publishes a port only on `::1` or only on `::`, the proxy connects to `::1`. Else it connects to `127.0.0.1`.
 
 The proxy ignores a label port that is a database or another known non-web port, for example 5432, so that a web page cannot send HTTP to a database. The container shows a warning, and ColimaBar picks the port with steps 2 and 3.
 
@@ -537,7 +537,7 @@ The proxy listens on port 80. If port 80 is busy, or a running container publish
 
 If a container starts to publish the port of the proxy, the proxy moves to the other port. It moves at most once in 30 seconds. A move that the limit holds back happens when the 30 seconds end. A container whose port forward failed in the meantime may need a restart.
 
-If the proxy listens on 8080, ColimaBar goes back to port 80 when port 80 is free and no container publishes it. It checks after a change of the containers and after a wake. If no port is free, the caption says so. ColimaBar tries again when the published ports of the containers change, or after a wake. A link shows only while the proxy listens, so a link never points to another program on port 80.
+If the proxy listens on 8080, ColimaBar goes back to port 80 when port 80 is free and no container publishes it. It checks after a change of the containers and after a wake. If no port is free, the caption says so. ColimaBar tries again when the published ports of the containers change, after a wake, and from time to time: 5 seconds, 15 seconds and 60 seconds after the failure, then every 5 minutes. While the proxy listens on 8080, ColimaBar also checks port 80 about every 30 seconds. A link shows only while the proxy listens, so a link never points to another program on port 80.
 
 ### Error pages
 

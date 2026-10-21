@@ -170,11 +170,11 @@ final class ColimaModel {
         }
     }
     /// Open containers at .localhost names (`ColimaModel+Domains`). Off by default.
-    var domainsEnabled = Defaults.bool(.domains) ?? false {
+    var domainsEnabled = false {
         didSet {
             guard domainsEnabled != oldValue else { return }
             // A debug run never writes a setting.
-            if !isDebug { Defaults.set(domainsEnabled, .domains) }
+            if !isDebug { domainsStore.set(domainsEnabled, forKey: Defaults.Key.domains.rawValue) }
             domainsSettingChanged()
         }
     }
@@ -337,6 +337,8 @@ final class ColimaModel {
     @ObservationIgnored private(set) var isDebug = false
     /// The proxy of container domains. It listens only while the setting is on.
     @ObservationIgnored let domainProxy: any DomainProxying
+    /// Where the setting is saved. A test process gets its own empty store, so no test reads or writes the real one.
+    @ObservationIgnored let domainsStore: UserDefaults
     @ObservationIgnored var domainCandidates: [DomainCandidate] = []
     /// The host ports of every running container, internal ones too.
     @ObservationIgnored var domainPublished: Set<Int> = []
@@ -345,6 +347,12 @@ final class ColimaModel {
     /// The published ports at the last start. A change gives a failed proxy a new try.
     @ObservationIgnored var domainStartPublished: Set<Int> = []
     @ObservationIgnored var domainRecheck: Task<Void, Never>?
+    /// The wait before the next try of a failed proxy.
+    @ObservationIgnored var domainRetry: Task<Void, Never>?
+    /// The tries since the proxy failed. It sets the wait (`DomainTimings.failureDelay`).
+    @ObservationIgnored var domainRetryCount = 0
+    /// The last time that a tick moved the proxy back to port 80, or tried it.
+    @ObservationIgnored var domainMoveBackAt = Date.distantPast
     @ObservationIgnored var domainMoveBackProbing = false
     @ObservationIgnored var domainTimings = DomainTimings()
     /// COLIMABAR_DOMAINS=1 in a debug run: show the names, start nothing.
@@ -433,14 +441,20 @@ final class ColimaModel {
     /// changes a route or a context, or writes a setting. The command never
     /// calls `start()`. Assigning `profile` here runs no `didSet`.
     /// `dockerAPI` is for tests: a fake daemon instead of the socket of the profile.
-    /// `domainProxy` and `domainsEnabled` are for tests too: a fake proxy, and
-    /// a start value of the setting that does not read or write a default.
+    /// `domainProxy`, `domainsEnabled` and `domainsStore` are for tests too: a
+    /// fake proxy, a start value of the setting, and a store for it. A test
+    /// process that passes none gets an inert proxy and an empty store, so a
+    /// model never binds a port or touches the saved setting by accident.
     init(
         profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil,
-        domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil
+        domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil, domainsStore: UserDefaults? = nil
     ) {
-        self.domainProxy = domainProxy ?? DomainProxy()
-        if let domainsEnabled { self.domainsEnabled = domainsEnabled }
+        let inTest = TestProcess.isRunning
+        self.domainProxy = domainProxy ?? (inTest ? InertDomainProxy() : DomainProxy())
+        let store = domainsStore ?? (inTest ? TestProcess.emptyStore() : .standard)
+        self.domainsStore = store
+        self.domainsEnabled =
+            domainsEnabled ?? (store.object(forKey: Defaults.Key.domains.rawValue) as? Bool) ?? false
         let p = named ?? Defaults.string(.profile) ?? "default"
         profile = p
         isDebug = readOnly
@@ -577,6 +591,7 @@ final class ColimaModel {
     func shutdown() {
         proxy.stop()
         if !isDebug {
+            invalidateDomainTasks()
             domainProxy.stop()
             profileProxies.shutdown()
             AppStatusFile.removeIfOwned()
@@ -597,6 +612,7 @@ final class ColimaModel {
             contextRetryAt = nil
             checkDockerContext()
         }
+        domainsHeartbeat()
         let b = readBusy()
         if b != busy {
             let finished = busy != nil && b == nil

@@ -27,9 +27,12 @@ struct HTTPHead: Equatable, Sendable {
 
     static func parse(_ bytes: [UInt8]) -> Result<HTTPHead, Problem> {
         guard let end = headEnd(bytes) else {
+            // A bad byte is bad at once, also before the head ends. A last CR may start the CRLF that is still to come.
+            guard hasOnlyCRLFLineEnds(bytes[...], partial: true) else { return .failure(.malformed) }
             return .failure(bytes.count >= maxBytes ? .tooLarge : .incomplete)
         }
         guard end <= maxBytes else { return .failure(.tooLarge) }
+        guard hasOnlyCRLFLineEnds(bytes[0..<end]) else { return .failure(.malformed) }
         // Latin-1 maps each byte to one character, so no byte makes the text fail.
         let text = String(bytes[0..<(end - 4)].map { Character(Unicode.Scalar($0)) })
         let lines = text.components(separatedBy: "\r\n")
@@ -63,6 +66,19 @@ struct HTTPHead: Equatable, Sendable {
         if let x = DomainName.normalizedHost(a), let y = DomainName.normalizedHost(b) { return x == y }
         return a.trimmingCharacters(in: .whitespaces).lowercased()
             == b.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    /// False for a NUL, a bare CR or a bare LF. With `partial`, a CR at the end is no error: its LF may follow.
+    /// A lenient upstream may read them as a line end.
+    private static func hasOnlyCRLFLineEnds(_ head: ArraySlice<UInt8>, partial: Bool = false) -> Bool {
+        var previous: UInt8 = 0
+        for byte in head {
+            if byte == 0 { return false }
+            if byte == 10, previous != 13 { return false }
+            if previous == 13, byte != 10 { return false }
+            previous = byte
+        }
+        return partial || previous == 10
     }
 
     /// The index after the first CRLFCRLF, or nil.

@@ -19,19 +19,6 @@ import Testing
           "Ports":[{"IP":"0.0.0.0","PublicPort":5432,"PrivatePort":5432,"Type":"tcp"}]}]
         """
 
-    /// Restores the saved setting after a test that writes it.
-    private func keepingDomainsSetting(_ body: () throws -> Void) rethrows {
-        let saved = Defaults.bool(.domains)
-        defer { if let saved { Defaults.set(saved, .domains) } else { Defaults.remove(.domains) } }
-        try body()
-    }
-
-    private func keepingDomainsSetting(_ body: () async throws -> Void) async rethrows {
-        let saved = Defaults.bool(.domains)
-        defer { if let saved { Defaults.set(saved, .domains) } else { Defaults.remove(.domains) } }
-        try await body()
-    }
-
     /// A model that is not a debug run, with a fake proxy and short times.
     private func rig(
         enabled: Bool = true, gap: TimeInterval = 0, launchRetry: TimeInterval = 0.01, failureRetry: TimeInterval = 0.05
@@ -57,70 +44,60 @@ import Testing
     }
 
     @Test func aDebugRunStartsNoProxyAndWritesNoSetting() {
-        keepingDomainsSetting {
-            Defaults.remove(.domains)
-            let fake = FakeDomainProxy()
-            let model = ColimaModel(profile: "domains-test-a", readOnly: true, domainProxy: fake)
-            model.domainsEnabled = true
-            #expect(model.domainStatus.phase == .debugRun)
-            #expect(fake.starts.isEmpty)
-            #expect(model.domainProxy.port == nil)
-            #expect(model.domainStatus.caption(routeCount: 0) == Help.domainsDebug)
-            #expect(Defaults.bool(.domains) == nil)
-        }
+        let store = TestProcess.emptyStore()
+        let fake = FakeDomainProxy()
+        let model = ColimaModel(profile: "domains-test-a", readOnly: true, domainProxy: fake, domainsStore: store)
+        model.domainsEnabled = true
+        #expect(model.domainStatus.phase == .debugRun)
+        #expect(fake.starts.isEmpty)
+        #expect(model.domainProxy.port == nil)
+        #expect(model.domainStatus.caption(routeCount: 0) == Help.domainsDebug)
+        #expect(store.object(forKey: Defaults.Key.domains.rawValue) == nil)
     }
 
     @Test func aSavedSettingDoesNotShowNamesInADebugRun() throws {
-        try keepingDomainsSetting {
-            let model = ColimaModel(profile: "domains-test-a2", readOnly: true, domainsEnabled: true)
-            #expect(model.domainsEnabled)
-            #expect(!model.domainsActive)
-            model.setState(.running)
-            model.updateDomainRoutes(try list(shop))
-            #expect(model.domainRoutes == .empty)
-            model.domainsShownInDebug = true
-            #expect(model.domainsActive)
-        }
+        let model = ColimaModel(profile: "domains-test-a2", readOnly: true, domainsEnabled: true)
+        #expect(model.domainsEnabled)
+        #expect(!model.domainsActive)
+        model.setState(.running)
+        model.updateDomainRoutes(try list(shop))
+        #expect(model.domainRoutes == .empty)
+        model.domainsShownInDebug = true
+        #expect(model.domainsActive)
     }
 
     @Test func aDebugRunComputesNoRoutesUnlessItShowsThem() throws {
-        try keepingDomainsSetting {
-            let model = ColimaModel(profile: "domains-test-b", readOnly: true)
-            model.setState(.running)
-            model.updateDomainRoutes(try list(shop))
-            #expect(model.domainRoutes == .empty)
-            model.domainsShownInDebug = true
-            model.rebuildDomainRoutes()
-            #expect(model.domainRoutes.routes.keys.sorted() == ["admin.shop", "web.shop"])
-            #expect(model.domainProxy.routes == .empty)
-        }
+        let model = ColimaModel(profile: "domains-test-b", readOnly: true)
+        model.setState(.running)
+        model.updateDomainRoutes(try list(shop))
+        #expect(model.domainRoutes == .empty)
+        model.domainsShownInDebug = true
+        model.rebuildDomainRoutes()
+        #expect(model.domainRoutes.routes.keys.sorted() == ["admin.shop", "web.shop"])
+        #expect(model.domainProxy.routes == .empty)
     }
 
     @Test func theRoutesFollowTheVMState() throws {
-        try keepingDomainsSetting {
-            let model = ColimaModel(profile: "domains-test-c", readOnly: true)
-            model.domainsShownInDebug = true
-            model.setState(.running)
-            model.updateDomainRoutes(try list(shop))
-            #expect(model.domainRoutes.vmRunning)
-            model.setState(.stopped)
-            #expect(!model.domainRoutes.vmRunning)
-            #expect(model.domainRoutes.resolve(host: "web.shop.localhost") == .vmStopped)
-            #expect(model.domainRoutes.profile == "domains-test-c")
-        }
+        let model = ColimaModel(profile: "domains-test-c", readOnly: true)
+        model.domainsShownInDebug = true
+        model.setState(.running)
+        model.updateDomainRoutes(try list(shop))
+        #expect(model.domainRoutes.vmRunning)
+        model.setState(.stopped)
+        #expect(!model.domainRoutes.vmRunning)
+        #expect(model.domainRoutes.resolve(host: "web.shop.localhost") == .vmStopped)
+        #expect(model.domainRoutes.profile == "domains-test-c")
     }
 
     @Test func clearingTheVMDataEmptiesTheRoutes() throws {
-        try keepingDomainsSetting {
-            let model = ColimaModel(profile: "domains-test-d", readOnly: true)
-            model.domainsShownInDebug = true
-            model.setState(.running)
-            model.updateDomainRoutes(try list(shop))
-            #expect(model.domainRoutes.count == 1)
-            model.clearVMData(because: .vmStopped)
-            #expect(model.domainRoutes.routes.isEmpty)
-            #expect(model.domainCandidates.isEmpty)
-        }
+        let model = ColimaModel(profile: "domains-test-d", readOnly: true)
+        model.domainsShownInDebug = true
+        model.setState(.running)
+        model.updateDomainRoutes(try list(shop))
+        #expect(model.domainRoutes.count == 1)
+        model.clearVMData(because: .vmStopped)
+        #expect(model.domainRoutes.routes.isEmpty)
+        #expect(model.domainCandidates.isEmpty)
     }
 
     @Test func aRefreshOfTheContainerListGivesTheRoutes() async throws {
@@ -130,8 +107,6 @@ import Testing
         }
         try daemon.start()
         defer { daemon.stop() }
-        let saved = Defaults.bool(.domains)
-        defer { if let saved { Defaults.set(saved, .domains) } else { Defaults.remove(.domains) } }
         let model = ColimaModel(
             profile: "domains-test-e", readOnly: true, dockerAPI: DockerAPI(socketPath: daemon.path))
         model.domainsShownInDebug = true
@@ -176,30 +151,39 @@ import Testing
     }
 
     @Test func theDiagnosticsLineHoldsCountsAndPortsOnly() throws {
-        try keepingDomainsSetting {
-            let model = ColimaModel(profile: "domains-test-g", readOnly: true)
-            model.domainsShownInDebug = true
-            model.setState(.running)
-            model.updateDomainRoutes(try list(shop))
-            model.setDomainStatus(DomainStatus(phase: .running, httpPort: 8080))
-            #expect(model.domainStatusText == "listening on port 8080, 1 containers with a name")
-            #expect(!model.domainStatusText.contains("shop"))
-        }
+        let model = ColimaModel(profile: "domains-test-g", readOnly: true)
+        model.domainsShownInDebug = true
+        model.setState(.running)
+        model.updateDomainRoutes(try list(shop))
+        model.setDomainStatus(DomainStatus(phase: .running, httpPort: 8080))
+        #expect(model.domainStatusText == "listening on port 8080, 1 containers with a name")
+        #expect(!model.domainStatusText.contains("shop"))
+    }
+
+    @Test func theSavedSettingStartsTheModelAndAModelInATestProcessReadsNoRealOne() {
+        let store = TestProcess.emptyStore()
+        store.set(true, forKey: Defaults.Key.domains.rawValue)
+        #expect(
+            ColimaModel(profile: "domains-test-i", domainProxy: FakeDomainProxy(), domainsStore: store).domainsEnabled)
+        // No argument: the test process gets an inert proxy and an empty store.
+        let plain = ColimaModel(profile: "domains-test-j")
+        #expect(!plain.domainsEnabled)
+        #expect(plain.domainProxy is InertDomainProxy)
     }
 
     @Test func theSettingIsInTheSnapshotAndApplies() {
-        keepingDomainsSetting {
-            Defaults.set(false, .domains)
-            let model = ColimaModel(profile: "domains-test-h", domainProxy: FakeDomainProxy())
-            #expect(model.settingsSnapshot[.domains] == .bool(false))
-            let note = model.apply(.init(setting: .domains, from: .bool(false), to: .bool(true)))
-            #expect(note == nil)
-            #expect(model.domainsEnabled)
-            #expect(model.settingsSnapshot[.domains] == .bool(true))
-            #expect(Defaults.bool(.domains) == true)
-            model.stopDomainProxy()
-            model.domainsEnabled = false
-        }
+        let store = TestProcess.emptyStore()
+        let key = Defaults.Key.domains.rawValue
+        store.set(false, forKey: key)
+        let model = ColimaModel(profile: "domains-test-h", domainProxy: FakeDomainProxy(), domainsStore: store)
+        #expect(model.settingsSnapshot[.domains] == .bool(false))
+        let note = model.apply(.init(setting: .domains, from: .bool(false), to: .bool(true)))
+        #expect(note == nil)
+        #expect(model.domainsEnabled)
+        #expect(model.settingsSnapshot[.domains] == .bool(true))
+        #expect(store.object(forKey: key) as? Bool == true)
+        model.stopDomainProxy()
+        model.domainsEnabled = false
     }
 
     // MARK: Proxy lifecycle
@@ -253,7 +237,8 @@ import Testing
     }
 
     @Test func aFailedProxyTriesAgainWhenThePublishedPortsChange() async throws {
-        let (model, proxy) = rig()
+        // The retry wait is much longer than the checks below.
+        let (model, proxy) = rig(failureRetry: 60)
         proxy.busyPorts = [80, 8080]
         model.startDomainProxy()
         #expect(await waitUntil { model.domainStatus.phase == .failed })
@@ -319,9 +304,9 @@ import Testing
         #expect(await waitUntil { model.domainStatus.httpPort == 8080 && model.domainStatus.phase == .running })
         // A route rebuild with port 80 still busy changes nothing.
         model.rebuildDomainRoutes()
-        try await Task.sleep(for: .milliseconds(100))
-        #expect(model.domainStatus.httpPort == 8080)
+        #expect(await waitUntil { !model.domainMoveBackProbing })
         #expect(proxy.starts.count == 2)
+        #expect(model.domainStatus.httpPort == 8080)
         proxy.busyPorts = []
         model.rebuildDomainRoutes()
         #expect(await waitUntil { model.domainStatus.httpPort == 80 && model.domainStatus.phase == .running })
@@ -387,7 +372,7 @@ import Testing
         #expect(await waitUntil { model.domainStatus.phase == .running })
         proxy.failListener()
         #expect(await waitUntil { model.domainStatus.phase == .failed })
-        #expect(model.domainStatus.caption(routeCount: 0) == "The proxy stopped. ColimaBar tries again in 5 seconds.")
+        #expect(model.domainStatus.caption(routeCount: 0) == "The proxy stopped. ColimaBar tries again soon.")
         #expect(await waitUntil { model.domainStatus.phase == .running })
         #expect(proxy.starts.count == 2)
         model.stopDomainProxy()
@@ -421,6 +406,91 @@ import Testing
         // The first start returned late. Its result must not replace the second one.
         #expect(model.domainStatus.phase == .running)
         #expect(model.domainStatus.httpPort == 80)
+        model.stopDomainProxy()
+    }
+
+    @Test func theRetryWaitsGrowAndStayAtFiveMinutes() {
+        let timings = DomainTimings()
+        #expect((0...5).map { timings.failureDelay(attempt: $0) } == [5, 15, 60, 300, 300, 300])
+    }
+
+    @Test func aFailedProxyKeepsTryingUntilAPortIsFree() async throws {
+        let (model, proxy) = rig(failureRetry: 0.01)
+        proxy.busyPorts = [80, 8080]
+        model.startDomainProxy()
+        // Each failed try plans the next one.
+        #expect(await waitUntil { proxy.starts.count >= 6 })
+        #expect(model.domainStatus.phase == .failed)
+        proxy.busyPorts = []
+        #expect(await waitUntil { model.domainStatus.phase == .running })
+        let tries = proxy.starts.count
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(proxy.starts.count == tries)
+        model.stopDomainProxy()
+    }
+
+    @Test func aListenerThatFailsAgainAfterTheRetryIsTriedAgain() async throws {
+        let (model, proxy) = rig(failureRetry: 0.01)
+        model.startDomainProxy()
+        #expect(await waitUntil { model.domainStatus.phase == .running })
+        proxy.failListener()
+        proxy.busyPorts = [80, 8080]
+        #expect(await waitUntil { proxy.starts.count >= 4 && model.domainStatus.phase == .failed })
+        proxy.busyPorts = []
+        #expect(await waitUntil { model.domainStatus.phase == .running })
+        model.stopDomainProxy()
+    }
+
+    @Test func aStaleFailureCallbackLeavesANewerStartAlone() async throws {
+        let (model, proxy) = rig(failureRetry: 60)
+        model.startDomainProxy()
+        #expect(await waitUntil { model.domainStatus.phase == .running })
+        let stale = try #require(proxy.onListenerFailure)
+        model.startDomainProxy()
+        #expect(await waitUntil { model.domainStatus.phase == .running && proxy.starts.count == 2 })
+        stale()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(model.domainStatus.phase == .running)
+        #expect(proxy.starts.count == 2)
+        model.stopDomainProxy()
+    }
+
+    @Test func invalidatingTheTasksStopsTheRetries() async throws {
+        let (model, proxy) = rig(failureRetry: 0.3)
+        proxy.busyPorts = [80, 8080]
+        model.startDomainProxy()
+        #expect(await waitUntil { model.domainStatus.phase == .failed })
+        let tries = proxy.starts.count
+        // What `shutdown()` does to the timers.
+        model.invalidateDomainTasks()
+        proxy.busyPorts = []
+        try await Task.sleep(for: .milliseconds(700))
+        #expect(proxy.starts.count == tries)
+        #expect(model.domainStatus.phase == .failed)
+    }
+
+    @Test func theHeartbeatMovesAProxyBackToPort80AfterTheGap() async throws {
+        let (model, proxy) = rig(gap: 0.2)
+        proxy.busyPorts = [80]
+        model.startDomainProxy()
+        #expect(await waitUntil { model.domainStatus.httpPort == 8080 && model.domainStatus.phase == .running })
+        proxy.busyPorts = []
+        // The first tick may fall inside the gap. Later ticks move the proxy.
+        #expect(
+            await waitUntil {
+                model.domainsHeartbeat()
+                return model.domainStatus.httpPort == 80 && model.domainStatus.phase == .running
+            })
+        model.stopDomainProxy()
+    }
+
+    @Test func theHeartbeatDoesNothingOnPort80() async throws {
+        let (model, proxy) = rig(gap: 0)
+        model.startDomainProxy()
+        #expect(await waitUntil { model.domainStatus.httpPort == 80 })
+        model.domainsHeartbeat()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(proxy.starts.count == 1)
         model.stopDomainProxy()
     }
 }

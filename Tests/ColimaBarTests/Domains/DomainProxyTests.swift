@@ -9,9 +9,11 @@ import Testing
     private typealias Rig = (proxy: DomainProxy, port: Int)
 
     private func started(
-        limits: DomainProxy.Limits = .init(), addresses: [String] = ["127.0.0.1"]
+        limits: DomainProxy.Limits = .init(), addresses: [String] = ["127.0.0.1"], unchecked: Bool = false
     ) async throws -> Rig {
-        let proxy = DomainProxy(addresses: addresses, limits: limits)
+        let proxy =
+            unchecked
+            ? DomainProxy(unchecked: addresses, limits: limits) : DomainProxy(addresses: addresses, limits: limits)
         let candidates = try [LoopbackListener.unusedPort(), LoopbackListener.unusedPort()].map { UInt16($0) }
         let port = try #require(await proxy.start(candidates: candidates))
         return (proxy, Int(port))
@@ -397,6 +399,46 @@ import Testing
         #expect(await canConnect(Int(port)))
     }
 
+    @Test func aStartRightAfterAStopReusesThePort() async throws {
+        let proxy = DomainProxy(addresses: ["127.0.0.1"])
+        defer { proxy.stop() }
+        let port = UInt16(try LoopbackListener.unusedPort())
+        for _ in 0..<5 {
+            #expect(await proxy.start(candidates: [port, UInt16(try LoopbackListener.unusedPort())]) == port)
+            proxy.stop()
+        }
+        #expect(await proxy.start(candidates: [port]) == port)
+        #expect(await canConnect(Int(port)))
+    }
+
+    @Test func twoStartsAtOnceLeaveOneListener() async throws {
+        let proxy = DomainProxy(addresses: ["127.0.0.1"])
+        defer { proxy.stop() }
+        let one = UInt16(try LoopbackListener.unusedPort())
+        let two = UInt16(try LoopbackListener.unusedPort())
+        async let a = proxy.start(candidates: [one])
+        async let b = proxy.start(candidates: [two])
+        _ = await (a, b)
+        let bound = try #require(proxy.port)
+        #expect(await canConnect(Int(bound)))
+        // The start that lost left no listener on its port.
+        let other = bound == one ? two : one
+        #expect(await refuses(Int(other)))
+        proxy.stop()
+        #expect(await refuses(Int(bound)))
+    }
+
+    @Test func aStopWhileAStartRunsLeavesNothingBound() async throws {
+        let proxy = DomainProxy(addresses: ["127.0.0.1"])
+        let port = UInt16(try LoopbackListener.unusedPort())
+        async let started = proxy.start(candidates: [port])
+        proxy.stop()
+        _ = await started
+        proxy.stop()
+        #expect(proxy.port == nil)
+        #expect(await refuses(Int(port)))
+    }
+
     @Test func aBusyPageEndsWithTheClientAndWithStop() async throws {
         var limits = DomainProxy.Limits()
         limits.maxSessions = 1
@@ -444,7 +486,7 @@ import Testing
 
     @Test func aMissingIPv6AddressStillServesIPv4() async throws {
         // 2001:db8::1 is a documentation address that no interface has.
-        let (proxy, port) = try await started(addresses: ["127.0.0.1", "2001:db8::1"])
+        let (proxy, port) = try await started(addresses: ["127.0.0.1", "2001:db8::1"], unchecked: true)
         defer { proxy.stop() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         proxy.routes = routes(["alpha": alpha.port])

@@ -36,6 +36,9 @@ enum DomainName {
         return out.isEmpty ? nil : out
     }
 
+    /// True when `label(raw)` drops a non-ASCII character of `raw`.
+    static func lostCharacters(_ raw: String) -> Bool { raw.unicodeScalars.contains { !$0.isASCII } }
+
     /// A relative name such as `admin.shop`: 1...8 labels, each [a-z0-9-]{1,63}
     /// with no `-` at an end, at most 200 bytes.
     static func isValidRelative(_ name: String) -> Bool {

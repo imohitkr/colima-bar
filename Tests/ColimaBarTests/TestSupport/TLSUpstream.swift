@@ -5,11 +5,10 @@ import Security
 /// A TLS HTTP server on 127.0.0.1 with a self-signed certificate. It stands
 /// in for a container that publishes a TLS port (443, 8443). It answers each
 /// request head with 200 and `tls-upstream sni=<server name> alpn=<protocol>`.
-/// `@unchecked Sendable`: the queue guards the listener, and the fields never change.
+/// `@unchecked Sendable`: the fields never change.
 final class TLSUpstream: @unchecked Sendable {
     let port: Int
     private let listener: NWListener
-    private let queue = DispatchQueue(label: "test.tls-upstream")
 
     /// nil when the identity or the listener fails.
     static func start() async -> TLSUpstream? {

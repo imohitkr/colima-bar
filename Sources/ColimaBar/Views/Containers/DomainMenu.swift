@@ -10,6 +10,7 @@ struct DomainMenu: View {
         Menu {
             ForEach(names, id: \.self) { rel in
                 Button(DomainLink.host(relative: rel, suffix: model.primaryDomainSuffix)) { model.openDomain(rel) }
+                    .disabled(model.domainURL(rel) == nil)
             }
         } label: {
             Image(systemName: "globe")

@@ -9,10 +9,17 @@ import Foundation
 struct DomainTimings: Sendable {
     /// The wait before the second try of port 80 at the launch.
     var launchRetry: TimeInterval = 1
-    /// The wait before a try after the proxy stopped on its own.
+    /// The wait before the first try after the proxy failed. The next waits are
+    /// 3, 12 and 60 times as long (5 s, 15 s, 60 s, then 5 min).
     var failureRetry: TimeInterval = 5
     /// How long the proxy waits before it moves again for a port.
     var rebindGap: TimeInterval = ColimaModel.domainRebindGap
+
+    /// The wait before try `attempt` (0 is the first) of a failed proxy.
+    func failureDelay(attempt: Int) -> TimeInterval {
+        let steps: [Double] = [1, 3, 12, 60]
+        return failureRetry * steps[min(max(attempt, 0), steps.count - 1)]
+    }
 }
 
 extension ColimaModel {
@@ -127,15 +134,15 @@ extension ColimaModel {
         let candidates = DomainPorts.candidates(DomainPorts.http, published: domainStartPublished)
         guard !candidates.isEmpty else {
             domainProxy.stop()
-            setDomainStatus(
-                DomainStatus(
-                    phase: .failed,
-                    problem: "Containers use ports 80 and 8080. ColimaBar tries again when the container ports change.")
+            setDomainFailed(
+                "Containers use ports 80 and 8080. ColimaBar tries again when the container ports change, and from time to time."
             )
             return
         }
+        domainRetry?.cancel()
+        domainRetry = nil
         domainProxy.onListenerFailure = { [weak self] in
-            Task { @MainActor in self?.domainListenerFailed() }
+            Task { @MainActor in self?.domainListenerFailed(token: token) }
         }
         let first = DomainPorts.http[0]
         let delay = domainTimings.launchRetry
@@ -155,26 +162,36 @@ extension ColimaModel {
             if port == nil, !rest.isEmpty { port = await proxy.start(candidates: rest) }
             guard token == domainStartToken else { return }
             if let port {
+                domainRetryCount = 0
                 setDomainStatus(DomainStatus(phase: .running, httpPort: port))
                 // A container may have published the port while the proxy started.
                 if Self.domainConflictPort(status: domainStatus, published: domainRoutes.publishedHostPorts) {
                     rebindDomainProxy()
                 }
             } else {
-                setDomainStatus(
-                    DomainStatus(
-                        phase: .failed,
-                        problem:
-                            "Ports 80 and 8080 are busy. ColimaBar tries again when the container ports change or the Mac wakes."
-                    ))
+                setDomainFailed(
+                    "Ports 80 and 8080 are busy. ColimaBar tries again from time to time, when the container ports change and when the Mac wakes."
+                )
             }
         }
+    }
+
+    /// Makes every pending start, retry and recheck stale, so that no late timer starts the proxy. `shutdown()` calls it.
+    func invalidateDomainTasks() {
+        domainStartToken += 1
+        domainRecheck?.cancel()
+        domainRecheck = nil
+        domainRetry?.cancel()
+        domainRetry = nil
     }
 
     func stopDomainProxy() {
         domainStartToken += 1
         domainRecheck?.cancel()
         domainRecheck = nil
+        domainRetry?.cancel()
+        domainRetry = nil
+        domainRetryCount = 0
         domainProxy.stop()
         setDomainStatus(DomainStatus())
     }
@@ -219,6 +236,7 @@ extension ColimaModel {
         let first = DomainPorts.http[0]
         guard !(published ?? domainRoutes.publishedHostPorts).contains(Int(first)) else { return }
         domainMoveBackProbing = true
+        domainMoveBackAt = Date()
         let token = domainStartToken
         let proxy = domainProxy
         Task {
@@ -243,16 +261,36 @@ extension ColimaModel {
         }
     }
 
-    private func domainListenerFailed() {
-        guard !isDebug, domainsEnabled else { return }
+    /// The heartbeat calls it. A proxy on the fallback port looks for a free port 80, at most once in a rebind gap.
+    func domainsHeartbeat() {
+        guard !isDebug, domainsEnabled, domainStatus.phase == .running, domainStatus.usesFallback,
+            Date().timeIntervalSince(domainMoveBackAt) >= domainTimings.rebindGap
+        else { return }
+        moveDomainProxyBackToFirstPort()
+    }
+
+    /// `token` is the start whose handler called. A newer start or stop makes the call stale.
+    private func domainListenerFailed(token: Int) {
+        guard !isDebug, domainsEnabled, token == domainStartToken else { return }
         domainStartToken += 1
+        domainRetryCount = 0
+        setDomainFailed("The proxy stopped. ColimaBar tries again soon.")
+    }
+
+    /// Shows the failure and plans the next try: after 5 s, 15 s, 60 s, then each 5 min.
+    /// A change of the container ports, a wake or a new start also tries.
+    private func setDomainFailed(_ problem: String) {
+        setDomainStatus(DomainStatus(phase: .failed, problem: problem))
+        domainRetry?.cancel()
+        let delay = domainTimings.failureDelay(attempt: domainRetryCount)
+        domainRetryCount += 1
         let token = domainStartToken
-        let delay = domainTimings.failureRetry
-        setDomainStatus(
-            DomainStatus(phase: .failed, problem: "The proxy stopped. ColimaBar tries again in 5 seconds."))
-        Task {
+        domainRetry = Task {
             try? await Task.sleep(for: .seconds(delay))
-            guard token == domainStartToken, domainsEnabled else { return }
+            guard !Task.isCancelled, token == domainStartToken, domainsEnabled, !isDebug,
+                domainStatus.phase == .failed
+            else { return }
+            domainRetry = nil
             startDomainProxy()
         }
     }

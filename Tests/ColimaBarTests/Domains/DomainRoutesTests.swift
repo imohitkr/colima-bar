@@ -307,4 +307,52 @@ import Testing
         ])
         #expect(t.publishedHostPorts == [1, 2, 3])
     }
+
+    // MARK: Notes and ports
+
+    @Test func aContainerWithNoNameGetsNoPortNotes() {
+        let t = build([standalone("a", name: "db", labelPort: 5432, labelPortInvalid: "x", domains: .off)])
+        #expect(t.notes["a"] == nil)
+        #expect(t.names["a"] == nil)
+    }
+
+    @Test func aNoteAppearsOncePerContainer() {
+        let entry = C.Entry(name: "other.localhost", containerPort: 6379)
+        let t = build([
+            standalone("a", name: "app", domains: .names([entry, entry]), droppedEntries: ["x.example", "x.example"])
+        ])
+        #expect(t.notes["a"] == [.nameDropped("x.example"), .labelPortNotWeb(6379)])
+    }
+
+    @Test func thePreferredPortLoopSkipsAContainerPortPublishedAtADatabaseHostPort() {
+        let t = build([
+            standalone(
+                "a", name: "app", ports: [P(containerPort: 80, hostPort: 5432), P(containerPort: 9000, hostPort: 9001)])
+        ])
+        #expect(t.routes["app"]?.hostPort == 9001)
+        let only = build([standalone("b", name: "web", ports: [P(containerPort: 80, hostPort: 5432)])])
+        #expect(only.routes["web"] == nil)
+    }
+
+    @Test func aPortOnTheIPv6WildcardOnlyGivesAnIPv6OnlyRoute() {
+        let t = build([standalone("a", name: "app", ports: [P(containerPort: 80, hostPort: 8000, ipv6Only: true)])])
+        #expect(t.routes["app"]?.ipv6Only == true)
+    }
+
+    @Test func aNameThatLosesNonASCIICharactersGivesANote() {
+        let t = build([standalone("a", name: "Bücher-app")])
+        #expect(t.routes["bcher-app"]?.containerID == "a")
+        #expect(t.notes["a"] == [.nameNotASCII("Bücher-app")])
+    }
+
+    @Test func aComposeNameThatLosesNonASCIICharactersGivesANote() {
+        let t = build([compose("a", project: "shöp")])
+        #expect(t.notes["a"] == [.nameNotASCII("shöp")])
+    }
+
+    @Test func aNameWithNoASCIICharacterGivesAnEmptyNameNote() {
+        let t = build([standalone("a", name: "日本語")])
+        #expect(t.routes.isEmpty)
+        #expect(t.notes["a"] == [.nameEmpty])
+    }
 }

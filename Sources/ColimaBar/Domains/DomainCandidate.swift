@@ -84,7 +84,8 @@ struct DomainCandidate: Equatable, Sendable {
         var v6 = Set<PortMap>()
         for p in Self.tcpPorts(c) {
             let key = PortMap(containerPort: p.inner, hostPort: p.host)
-            if p.ip == "::1" { v6.insert(key) } else { v4.insert(key) }
+            // A port on "::" alone has no IPv4 listener: the proxy dials ::1.
+            if p.ip == "::1" || p.ip == "::" { v6.insert(key) } else { v4.insert(key) }
         }
         id = c.Id
         self.name = name

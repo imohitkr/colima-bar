@@ -372,14 +372,19 @@ enum Help {
         "The label dev.colimabar.port names port \(p), but the container does not publish it."
     }
     static func domainPortInvalid(_ value: String) -> String {
-        "The label dev.colimabar.port is \"\(value)\", which is not a port. The container uses its first web port."
+        "The label dev.colimabar.port is \"\(value)\", which is not a port. ColimaBar picks a web port instead, if there is one."
     }
     static func domainPortNotWeb(_ p: Int) -> String {
-        "The proxy ignores port \(p) in a label: it is not a web port. The container uses its first web port."
+        "The proxy ignores port \(p) in a label: it is not a web port. ColimaBar picks a web port instead, if there is one."
     }
     static func domainNameDropped(_ entry: String) -> String {
         "The label dev.colimabar.domains has the entry \"\(entry)\", which gives no name. Use ASCII names that end in .localhost."
     }
+    static func domainNameNotASCII(_ name: String) -> String {
+        "The name \"\(name)\" has characters that are not ASCII. ColimaBar leaves them out. Use the label dev.colimabar.domains to set the name."
+    }
+    static let domainNameEmpty =
+        "The name of this container has no ASCII letters or digits, so it gets no name. Use the label dev.colimabar.domains to set one."
     /// The hint for all notes of one container.
     static func domainNotes(_ notes: [DomainRoutes.Note], suffix: String) -> String {
         notes.map { note -> String in
@@ -389,6 +394,8 @@ enum Help {
             case .labelPortInvalid(let value): domainPortInvalid(value)
             case .labelPortNotWeb(let port): domainPortNotWeb(port)
             case .nameDropped(let entry): domainNameDropped(entry)
+            case .nameNotASCII(let name): domainNameNotASCII(name)
+            case .nameEmpty: domainNameEmpty
             }
         }.joined(separator: " ")
     }

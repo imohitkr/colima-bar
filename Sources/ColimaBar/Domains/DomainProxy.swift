@@ -55,10 +55,22 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
     private var sessions: [ObjectIdentifier: DomainSession] = [:]
     private var generation = 0
     private var boundPort: UInt16?
+    /// The latest close of listeners. A new start waits for it, even after `stop()`.
+    private var latestDrain: ListenerDrain?
+    /// The bind attempt that runs now. The next start or stop aborts it.
+    private var currentAttempt: Attempt?
     /// Connections that get the busy page. `stop()` cancels them.
     private var rejects: [ObjectIdentifier: NWConnection] = [:]
 
-    init(addresses: [String] = DomainProxy.loopbackAddresses, limits: Limits = .init()) {
+    /// The proxy serves the local Mac only: any other address stops the app.
+    convenience init(addresses: [String] = DomainProxy.loopbackAddresses, limits: Limits = .init()) {
+        precondition(
+            Set(addresses).isSubset(of: Self.loopbackAddresses), "The domain proxy binds loopback addresses only")
+        self.init(unchecked: addresses, limits: limits)
+    }
+
+    /// For a test that needs an address which the interface does not have.
+    init(unchecked addresses: [String], limits: Limits = .init()) {
         self.addresses = addresses
         self.limits = limits
     }
@@ -88,6 +100,8 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
     /// nil. A call replaces the listeners of an earlier start. `stop()`
     /// while a start runs makes the start return nil with nothing bound.
     func start(candidates: [UInt16]) async -> UInt16? {
+        // A test process never binds a port that the user's own tools may serve.
+        let candidates = TestProcess.isRunning ? candidates.filter { ![80, 443, 8080].contains($0) } : candidates
         let (gen, closing) = queue.sync { () -> (Int, ListenerDrain) in
             generation += 1
             return (generation, tearDownListeners())
@@ -124,22 +138,41 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
     /// The old listeners that are closing. `queue` guards it.
     private final class ListenerDrain: @unchecked Sendable {
         var remaining: Int
-        var waiter: (@Sendable () -> Void)?
+        private var waiters: [@Sendable () -> Void] = []
         init(_ count: Int) { remaining = count }
+
+        func listenerClosed() {
+            remaining -= 1
+            guard remaining == 0 else { return }
+            let run = waiters
+            waiters = []
+            for w in run { w() }
+        }
+
+        /// Runs `body` when nothing remains: at once, or later.
+        func notify(_ body: @escaping @Sendable () -> Void) {
+            if remaining <= 0 { body() } else { waiters.append(body) }
+        }
+    }
+
+    /// Resumes a continuation once, from `queue`.
+    private final class Once: @unchecked Sendable {
+        private var resume: (() -> Void)?
+        init(_ resume: @escaping () -> Void) { self.resume = resume }
+        func fire() {
+            guard let resume else { return }
+            self.resume = nil
+            resume()
+        }
     }
 
     /// Waits until every listener of `drain` is `.cancelled`, at most `closeTimeout`.
     private func waitForClose(_ drain: ListenerDrain) async {
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             queue.async {
-                guard drain.remaining > 0 else { return cont.resume() }
-                let timer = DispatchWorkItem { [drain] in
-                    guard let resume = drain.waiter else { return }
-                    drain.waiter = nil
-                    resume()
-                }
-                drain.waiter = { cont.resume() }
-                self.queue.asyncAfter(deadline: .now() + self.limits.closeTimeout, execute: timer)
+                let once = Once { cont.resume() }
+                drain.notify { once.fire() }
+                self.queue.asyncAfter(deadline: .now() + self.limits.closeTimeout) { once.fire() }
             }
         }
     }
@@ -173,22 +206,29 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
         for c in pending { c.cancel() }
     }
 
+    /// Cancels the bound listeners and the ones of a bind that runs now. The
+    /// drain also waits for an earlier drain, so a start after a stop waits too.
     @discardableResult
     private func tearDownListeners() -> ListenerDrain {
-        let drain = ListenerDrain(listeners.count)
-        for l in listeners {
+        var closing = listeners
+        if let attempt = currentAttempt {
+            closing += attempt.listeners.map(\.listener)
+            attempt.abort?()
+        }
+        let drain = ListenerDrain(closing.count)
+        if let previous = latestDrain, previous.remaining > 0 {
+            drain.remaining += 1
+            previous.notify { [drain] in drain.listenerClosed() }
+        }
+        for l in closing {
             l.stateUpdateHandler = { [drain] state in
-                guard case .cancelled = state else { return }
-                drain.remaining -= 1
-                if drain.remaining == 0, let resume = drain.waiter {
-                    drain.waiter = nil
-                    resume()
-                }
+                if case .cancelled = state { drain.listenerClosed() }
             }
             l.cancel()
         }
         listeners = []
         boundPort = nil
+        latestDrain = drain
         return drain
     }
 
@@ -199,16 +239,21 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
         var unavailable: Set<String> = []
         var done = false
         var timeout: DispatchWorkItem?
+        /// Ends the attempt with no success and cancels its listeners.
+        var abort: (@Sendable () -> Void)?
     }
 
     private func bind(_ port: UInt16, generation gen: Int, completion: @escaping @Sendable (Bool) -> Void) {
         guard generation == gen, let endpointPort = NWEndpoint.Port(rawValue: port) else { return completion(false) }
         let attempt = Attempt()
+        currentAttempt = attempt
 
         @Sendable func finish(_ success: Bool) {
             guard !attempt.done else { return }
             attempt.done = true
             attempt.timeout?.cancel()
+            attempt.abort = nil
+            if currentAttempt === attempt { currentAttempt = nil }
             if success, generation == gen {
                 var held: [NWListener] = []
                 for (address, listener) in attempt.listeners {
@@ -243,6 +288,7 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
             if ready > 0, ready + attempt.unavailable.count == addresses.count { finish(true) }
         }
 
+        attempt.abort = { finish(false) }
         for address in addresses {
             attempt.states[address] = .setup
             let tcp = NWProtocolTCP.Options()
@@ -255,6 +301,8 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
             guard let listener = try? NWListener(using: parameters) else {
                 for (_, l) in attempt.listeners { l.cancel() }
                 attempt.done = true
+                attempt.abort = nil
+                if currentAttempt === attempt { currentAttempt = nil }
                 return completion(false)
             }
             attempt.listeners.append((address, listener))

@@ -84,4 +84,33 @@ import Testing
         #expect(parse("GET / HTTP/1.1\r\n: a\r\n\r\n") == .failure(.malformed))
         #expect(parse("\r\n\r\n") == .failure(.malformed))
     }
+
+    @Test func aBareLineFeedIsMalformed() {
+        #expect(parse("GET / HTTP/1.1\nHost: a\r\n\r\n") == .failure(.malformed))
+        #expect(parse("GET / HTTP/1.1\r\nHost: a\nX: b\r\n\r\n") == .failure(.malformed))
+        // Also before the head is complete.
+        #expect(parse("GET / HTTP/1.1\nHost: a") == .failure(.malformed))
+        #expect(parse("GET / HTTP/1.1\r\nHost: a\rX") == .failure(.malformed))
+        #expect(parse("GET / HTTP/1.1\r\nHost: a\r") == .failure(.incomplete))
+        #expect(parse("GET / HTTP/1.1\r\nHost: a\r\nX: b\n\r\n") == .failure(.malformed))
+    }
+
+    @Test func aBareCarriageReturnIsMalformed() {
+        #expect(parse("GET / HTTP/1.1\r\nHost: a\rX: b\r\n\r\n") == .failure(.malformed))
+        #expect(parse("GET /\r HTTP/1.1\r\nHost: a\r\n\r\n") == .failure(.malformed))
+        #expect(parse("GET / HTTP/1.1\r\nHost: a\r\r\n\r\n") == .failure(.malformed))
+    }
+
+    @Test func aNulByteIsMalformed() {
+        var bytes = Array("GET / HTTP/1.1\r\nHost: a.localhost\r\nX: b\r\n\r\n".utf8)
+        bytes.insert(0, at: bytes.count - 8)
+        #expect(HTTPHead.parse(bytes) == .failure(.malformed))
+        let inTarget = Array("GET /a".utf8) + [0] + Array("b HTTP/1.1\r\nHost: a\r\n\r\n".utf8)
+        #expect(HTTPHead.parse(inTarget) == .failure(.malformed))
+    }
+
+    @Test func bytesAfterTheHeadMayHoldAnyByte() throws {
+        let parsed = try head("POST / HTTP/1.1\r\nHost: a\r\n\r\nA\nB\rC")
+        #expect(parsed.host == "a")
+    }
 }

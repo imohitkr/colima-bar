@@ -109,6 +109,7 @@ struct ContainerRow: View {
                         Button("Open \(DomainLink.host(relative: rel, suffix: model.primaryDomainSuffix))") {
                             model.openDomain(rel)
                         }
+                        .disabled(model.domainURL(rel) == nil)
                     }
                     if let url = names.first.flatMap({ model.domainURL($0) }) {
                         Button("Copy Address") { Pasteboard.copy(url.absoluteString) }

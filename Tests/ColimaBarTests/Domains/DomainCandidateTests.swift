@@ -55,9 +55,21 @@ import Testing
     }
 
     @Test func aPortOnBothLoopbackAddressesUsesIPv4() throws {
-        let ports = [port("::1", 1001, 80), port("127.0.0.1", 1001, 80), port("::1", 1002, 81), port("::", 1002, 81)]
+        let ports = [
+            port("::1", 1001, 80), port("127.0.0.1", 1001, 80), port("::1", 1002, 81), port("0.0.0.0", 1002, 81),
+        ]
         let c = try #require(DomainCandidate(try api(ports: "[\(ports.joined(separator: ","))]")))
         #expect(c.ports == [.init(containerPort: 80, hostPort: 1001), .init(containerPort: 81, hostPort: 1002)])
+    }
+
+    @Test func aPortOnlyOnTheIPv6WildcardCountsAsIPv6Only() throws {
+        let ports = [port("::", 1001, 80), port("::", 1002, 81), port("0.0.0.0", 1002, 81)]
+        let c = try #require(DomainCandidate(try api(ports: "[\(ports.joined(separator: ","))]")))
+        #expect(
+            c.ports == [
+                .init(containerPort: 80, hostPort: 1001, ipv6Only: true),
+                .init(containerPort: 81, hostPort: 1002),
+            ])
     }
 
     @Test func everyRunningContainerCountsForThePublishedPorts() throws {
