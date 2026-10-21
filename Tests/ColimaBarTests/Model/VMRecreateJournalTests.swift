@@ -28,6 +28,23 @@ import Testing
         #expect(text.contains("\"phase\" : \"restore\""))
     }
 
+    @Test func aVolumeNameOrAFolderThatCouldLeaveTheFolderGivesNothing() {
+        for name in ["../x", "a/b", "", "-x", "a b", "é"] {
+            var bad = journal()
+            bad.volumes = [.init(name: name, file: "a.tar")]
+            #expect(VMRecreateJournal.load(bad.encoded()) == nil, "\(name)")
+        }
+        for folder in ["relative/path", "/Users/me/../other"] {
+            var bad = journal()
+            bad.folder = folder
+            #expect(VMRecreateJournal.load(bad.encoded()) == nil, "\(folder)")
+        }
+        var ok = journal()
+        ok.folder = ""
+        ok.volumes = [.init(name: "my_vol-1.x", file: "a.tar")]
+        #expect(VMRecreateJournal.load(ok.encoded()) == ok)
+    }
+
     @Test func aWrongFormatVersionOrProfileGivesNothing() throws {
         var bad = journal()
         bad.format = "other"

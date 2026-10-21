@@ -191,7 +191,7 @@ The progress strip under the header shows each step: the backup of each volume, 
 
 After the VM runs again, ColimaBar restores only the volumes that are missing and loads the images only if one is missing. If the data disk stayed, it restores nothing, and the notification says "Volumes and images are still there." A VM that was stopped starts once, then stops again.
 
-If ColimaBar quits during the change, the script goes on. At the next launch, a notice on the System tab and on the stopped screen says what is left, and shows **Restore Backups…**, **Show Folder** and **Dismiss**. **Restore Backups…** asks for the backup folder and restores what is missing. **Dismiss** deletes the journal and keeps the folder. If the Mac sleeps during a backup, that step fails. Before the VM changes, nothing changed. After it, use **Restore Backups…**. See [A VM type change fails](troubleshooting.md#a-vm-type-change-fails).
+If ColimaBar quits during the change, the script goes on. At the next launch, a notice on the System tab and on the stopped screen says what is left, and shows **Restore Backups…**, **Show Folder** and **Dismiss**. **Restore Backups…** asks for the backup folder and restores what is missing. **Dismiss** deletes the journal and keeps the folder. A new change does not start while a notice waits: restore or dismiss first. While a change runs, ColimaBar refuses all other actions. If the VM has a Docker data disk in the qcow2 format, the vz VM type is refused and nothing changes. If the Mac sleeps during a backup, that step fails. Before the VM changes, nothing changed. After it, use **Restore Backups…**. See [A VM type change fails](troubleshooting.md#a-vm-type-change-fails).
 
 ### Doctor
 
@@ -410,8 +410,6 @@ When the Mac wakes from sleep, ColimaBar does these steps:
 3. If Docker does not answer, it sends one notification with a **Restart** button.
 4. If Docker answers and the clock of the VM is more than 2 seconds off, it waits 20 seconds for Lima to fix it. If the clock is still off, ColimaBar sets it to the time of the Mac. If ColimaBar cannot set the clock, it sends a notification with a **Restart** button.
 5. If Docker answers, ColimaBar waits 15 seconds for the network. Then it checks the published ports of the VM. If a port answers in the VM but not on the Mac, it checks again after 5 seconds. If the port still fails, ColimaBar sends a notification with a **Restart** button.
-
-A backup or restore of a VM type change fails if the Mac sleeps in the middle of a transfer. See [Change the VM type or mount type](#change-the-vm-type-or-mount-type).
 
 The **Restart** button restarts only a profile that still exists, has no running action and has a running VM. Else ColimaBar sends a short notice and does nothing. The check never starts a VM. Auto-stop does not count the sleep time. See [Auto-stop](auto-stop.md#when-the-mac-sleeps).
 

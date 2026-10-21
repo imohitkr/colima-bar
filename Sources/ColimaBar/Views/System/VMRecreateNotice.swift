@@ -15,6 +15,10 @@ struct VMRecreateNotice: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(Self.text(journal, recovery))
                     .font(.system(size: 11)).fixedSize(horizontal: false, vertical: true)
+                if let next = Self.nextStep(journal, recovery, running: model.state == .running) {
+                    Text(next).font(.system(size: 11)).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack(spacing: 6) {
                     if recovery == .restorePending, model.state == .running, !journal.folder.isEmpty {
                         Button("Restore Backups…") { restore(journal) }
@@ -48,6 +52,13 @@ struct VMRecreateNotice: View {
         case .configMissing:
             "A VM type change of profile \(j.profile) did not finish. colima.yaml is missing. A copy is in ~/.cache/colima-bar/colima.\(j.profile).yaml.recreate."
         }
+    }
+
+    /// What the user does next, or nil if nothing is left to explain.
+    static func nextStep(_ j: VMRecreateJournal, _ recovery: VMRecreateJournal.Recovery, running: Bool) -> String? {
+        guard recovery == .restorePending else { return nil }
+        if j.folder.isEmpty { return "No backup was made. Check that your containers and volumes are still there." }
+        return running ? nil : "Start the VM, then click Restore Backups."
     }
 
     /// The folder panel starts in the backup folder. The user's pick gives

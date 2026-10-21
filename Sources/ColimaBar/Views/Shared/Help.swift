@@ -176,6 +176,9 @@ enum Help {
     static let vmRecreate =
         "Delete the VM and create it again with the new types. ColimaBar can back up the volumes and save the images first. You must type the profile name to confirm."
     static let recreateBusy = "A VM type change runs now. Wait until it ends."
+    static let recreatePending =
+        "A VM type change did not finish. Click Restore Backups, or Dismiss, in the System tab first."
+    static let recreateDirty = "Apply or discard your other edits first."
     static let recreateNoConfig = "This profile has no colima.yaml. Start it once to create one."
     static let recreateCancel =
         "Stop this step. Nothing in the VM has changed yet, or the backups stay for a later restore."

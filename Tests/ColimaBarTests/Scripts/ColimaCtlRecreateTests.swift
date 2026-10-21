@@ -11,9 +11,10 @@ import Testing
     private let yamlPath = ".config/colima/work/colima.yaml"
     private let state = ".cache/colima-bar"
 
-    private func sandbox(_ text: String? = nil, qemu: Bool = true) throws -> ScriptSandbox {
+    private func sandbox(_ text: String? = nil, qemu: Bool = true, instance: Bool = true) throws -> ScriptSandbox {
         let sb = try ScriptSandbox()
         try sb.write(yamlPath, text ?? config)
+        if instance { try sb.write(".config/colima/_lima/colima-work/lima.yaml", "") }
         if qemu {
             try sb.stub("qemu-img", "exit 0")
             try sb.stub("qemu-system-aarch64", "exit 0")
@@ -149,8 +150,22 @@ import Testing
         #expect(sb.calls.isEmpty)
     }
 
+    /// Makes `uname -m` answer `arch`, so the host does not matter.
+    private func host(_ sb: ScriptSandbox, _ arch: String) throws {
+        try sb.stub("uname", "echo \(arch)")
+    }
+
+    private func writeDisk(_ sb: ScriptSandbox, magic: [UInt8]) throws {
+        let path = "\(sb.home)/.config/colima/_lima/_disks/colima-work/datadisk"
+        try FileManager.default.createDirectory(
+            atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try Data(magic + [0, 0, 0, 3] + Array(repeating: 0, count: 64)).write(to: URL(fileURLWithPath: path))
+        try sb.write(".config/colima/_store/colima-work.json", "{\"disk_formatted\": true}")
+    }
+
     @Test func vzIsRefusedForAnX86VM() async throws {
         let sb = try sandbox(config + "arch: x86_64\n")
+        try host(sb, "arm64")
         let r = try await recreate(sb, "vz", "sshfs")
         #expect(r.status == 1)
         #expect(notices(r).first == "An x86_64 VM of profile 'work' needs the qemu VM type.")
@@ -415,6 +430,257 @@ import Testing
                 )
             })
         #expect(sb.leavesNoLockOrBusyMarker)
+    }
+
+    // MARK: Host arch, data disk format and the network section
+
+    @Test(arguments: ["host", "", "x86_64"])
+    func vzRunsAnIntelVMOnAnIntelHost(arch: String) async throws {
+        let sb = try sandbox(config + (arch.isEmpty ? "" : "arch: \(arch)\n"))
+        try host(sb, "x86_64")
+        let r = try await recreate(sb, "vz", "sshfs")
+        #expect(r.status == 0, "\(r.out)")
+    }
+
+    @Test func vzIsRefusedForAnArchThatIsNotTheHost() async throws {
+        let sb = try sandbox(config + "arch: host\n")
+        try host(sb, "x86_64")
+        // The VM wants arm64 (aarch64), and this Mac is Intel.
+        try sb.write(yamlPath, config + "arch: aarch64\n")
+        let r = try await recreate(sb, "vz", "sshfs")
+        #expect(r.status == 1)
+        #expect(notices(r).first == "An aarch64 VM of profile 'work' needs the qemu VM type.")
+        #expect(sb.calls.isEmpty)
+    }
+
+    @Test func qemuLooksForTheQEMUOfTheResolvedArch() async throws {
+        let sb = try sandbox(qemu: false)
+        try sb.stub("qemu-img", "exit 0")
+        try sb.stub("qemu-system-x86_64", "exit 0")
+        try host(sb, "x86_64")
+        let script = try sb.copy("colima-ctl.sh")
+        let r = try await sb.bash(
+            [script, "vm-recreate", "qemu", "sshfs"],
+            env: [
+                "COLIMABAR_PROFILE": "work", "COLIMABAR_APP": "1",
+                "STUB_DELETE_DIR": "\(sb.home)/.config/colima/work",
+            ])
+        #expect(r.status == 0, "\(r.out)")
+    }
+
+    @Test func aRawDataDiskLetsVZPass() async throws {
+        let sb = try sandbox(config.replacingOccurrences(of: "vmType: vz", with: "vmType: qemu"))
+        try writeDisk(sb, magic: [0, 0, 0, 0])
+        let r = try await recreate(sb, "vz", "virtiofs")
+        #expect(r.status == 0, "\(r.out)")
+    }
+
+    @Test func aQcow2DataDiskRefusesVZBeforeAnyChange() async throws {
+        let old = config.replacingOccurrences(of: "vmType: vz", with: "vmType: qemu")
+        let sb = try sandbox(old)
+        try writeDisk(sb, magic: [0x51, 0x46, 0x49, 0xfb])
+        let r = try await recreate(sb, "vz", "virtiofs")
+        #expect(r.status == 1)
+        #expect(notices(r).first?.contains("is a qcow2 file") == true)
+        #expect(sb.calls.isEmpty)
+        #expect(yaml(sb) == old)
+    }
+
+    @Test func aQcow2DataDiskStillAllowsQEMU() async throws {
+        let sb = try sandbox()
+        try writeDisk(sb, magic: [0x51, 0x46, 0x49, 0xfb])
+        let r = try await recreate(sb, "qemu", "sshfs")
+        #expect(r.status == 0, "\(r.out)")
+    }
+
+    @Test(arguments: ["true # reachable", "\"true\"", "yes", "  true   "])
+    func qemuIsRefusedForAnAddressWrittenInOtherWays(value: String) async throws {
+        let sb = try sandbox(config + "network:\n  address: \(value)\n  dns: []\n")
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(notices(r).first?.contains("has a reachable IP address.") == true)
+        #expect(sb.calls.isEmpty)
+    }
+
+    @Test func anAddressThatIsFalseWithAnInlineCommentPasses() async throws {
+        let sb = try sandbox(config + "network:\n  address: false # no\n  mode: shared # default\n")
+        let r = try await recreate(sb)
+        #expect(r.status == 0, "\(r.out)")
+    }
+
+    @Test func bridgedModeWithAnInlineCommentIsRefused() async throws {
+        let sb = try sandbox(config + "network:\n  address: false\n  mode: bridged # fast\n")
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(notices(r).first?.hasPrefix("Bridged networking with qemu needs socket_vmnet.") == true)
+    }
+
+    // MARK: The live instance
+
+    @Test func theTypesOfTheLiveInstanceCountMoreThanTheFile() async throws {
+        // colima.yaml already says vz, but the VM was made with qemu: the change to vz is not a no-op.
+        let sb = try sandbox()
+        try sb.write(
+            ".config/colima/_lima/colima-work/colima.yaml",
+            config.replacingOccurrences(of: "vmType: vz", with: "vmType: qemu")
+                .replacingOccurrences(of: "virtiofs", with: "sshfs"))
+        let r = try await recreate(sb, "vz", "virtiofs")
+        #expect(r.status == 0, "\(r.out)")
+        #expect(dialogs(sb).contains("from qemu / sshfs to vz / virtiofs"))
+    }
+
+    @Test func aLiveInstanceThatHasTheTargetTypesNeedsNoChange() async throws {
+        // colima.yaml was edited, but the VM already runs the target types.
+        let sb = try sandbox(config.replacingOccurrences(of: "vmType: vz", with: "vmType: qemu"))
+        try sb.write(".config/colima/_lima/colima-work/colima.yaml", config)
+        let r = try await recreate(sb, "vz", "virtiofs")
+        #expect(r.status == 1)
+        #expect(notices(r).first == "profile 'work' uses vz and virtiofs already. Nothing changed.")
+        #expect(sb.calls.isEmpty)
+    }
+
+    // MARK: A profile with no instance, and the upgrade note
+
+    @Test func aProfileWithNoLimaInstanceSkipsTheDelete() async throws {
+        let sb = try sandbox(instance: false)
+        let r = try await recreate(sb)
+        #expect(r.status == 0, "\(r.out)")
+        #expect(!sb.calls.contains { $0.hasPrefix("colima delete") })
+        #expect(vmCalls(sb).contains("colima start --profile work"))
+        let new = try #require(yaml(sb))
+        #expect(new.contains("vmType: qemu\n"))
+    }
+
+    @Test func theUpgradeNoteAsksBeforeTheDialogOfTheChange() async throws {
+        let sb = try sandbox()
+        let r = try await recreate(
+            sb, env: ["COLIMABAR_UPGRADE_NOTE": "Colima changed a lot.", "STUB_OSASCRIPT_OUT": "Continue"])
+        #expect(r.status == 0, "\(r.out)")
+        #expect(dialogs(sb).contains("Colima changed a lot."))
+        #expect(dialogs(sb).contains("Change the VM of profile 'work'"))
+    }
+
+    @Test func aCancelledUpgradeNoteChangesNothing() async throws {
+        let sb = try sandbox()
+        let r = try await recreate(
+            sb,
+            env: [
+                "COLIMABAR_UPGRADE_NOTE": "Colima changed a lot.", "STUB_OSASCRIPT_EXIT": "1",
+                "STUB_OSASCRIPT_ERR": "execution error: User canceled. (-128)",
+            ])
+        #expect(r.status == 2)
+        #expect(vmCalls(sb).isEmpty)
+        #expect(yaml(sb) == config)
+        #expect(!dialogs(sb).contains("Change the VM of profile 'work'"))
+    }
+
+    // MARK: A Colima folder that is gone
+
+    @Test func aDeleteThatRemovesTheWholeColimaFolderMakesNoNewOne() async throws {
+        let sb = try sandbox()
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && exit 1
+            [ "$1" = delete ] && rm -rf "$HOME/.config/colima"
+            exit 0
+            """)
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(!sb.calls.contains { $0.hasPrefix("colima start") })
+        #expect(!exists(sb, ".config/colima"))
+        #expect(notices(r).first?.hasPrefix("The VM of profile 'work' did not start with qemu / sshfs") == true)
+    }
+
+    @Test func aFailedDeleteThatRemovesTheColimaFolderMakesNoNewOne() async throws {
+        let sb = try sandbox()
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && exit 1
+            [ "$1" = delete ] && { rm -rf "$HOME/.config/colima"; exit 1; }
+            exit 0
+            """)
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(!exists(sb, ".config/colima"))
+        #expect(notices(r).first?.hasPrefix("Colima could not delete the VM of profile 'work'") == true)
+    }
+
+    // MARK: A TERM while the VM stops or starts
+
+    /// Runs `vm-recreate qemu sshfs`, waits until the stub `colima` creates
+    /// `marker`, then sends TERM to the script.
+    private func termAt(
+        _ sb: ScriptSandbox, marker: String, extra: [String: String] = [:]
+    ) async throws -> (status: Int32, out: String) {
+        let script = try sb.copy("colima-ctl.sh")
+        return try await sb.bash(
+            [
+                "-c",
+                "/bin/bash \"$0\" vm-recreate qemu sshfs & pid=$!; "
+                    + "while [ ! -e \"\(marker)\" ]; do sleep 0.05; done; kill -TERM $pid; wait $pid", script,
+            ],
+            env: [
+                "COLIMABAR_PROFILE": "work", "COLIMABAR_APP": "1",
+                "STUB_DELETE_DIR": "\(sb.home)/.config/colima/work",
+            ].merging(extra) { $1 })
+    }
+
+    @Test func aTermDuringTheStartLeavesANoticeAndTheNewFile() async throws {
+        let sb = try sandbox()
+        let marker = sb.root + "/starting"
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && exit 1
+            [ "$1" = delete ] && rm -rf "$STUB_DELETE_DIR"
+            if [ "$1" = start ]; then
+              : > "\(marker)"
+              exec sleep 30
+            fi
+            exit 0
+            """)
+        let r = try await termAt(sb, marker: marker)
+        #expect(r.status == 143, "\(r.out)")
+        let text = notices((r.status, r.out))
+        #expect(
+            text.contains {
+                $0.hasPrefix("The VM type change of profile 'work' did not finish. colima.yaml has the new values")
+                    && $0.contains("colima.work.yaml.before-recreate")
+            })
+        #expect(try #require(yaml(sb)).contains("vmType: qemu\n"))
+        #expect(!exists(sb, "\(state)/colima.work.yaml.recreate"))
+        #expect(yaml(sb, "\(state)/colima.work.yaml.before-recreate") == config)
+        #expect(sb.leavesNoLockOrBusyMarker)
+    }
+
+    @Test func aTermDuringTheStopLeavesANoticeAndTheOldFile() async throws {
+        let sb = try sandbox()
+        let marker = sb.root + "/stopping"
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && exit 0
+            if [ "$1" = stop ]; then
+              : > "\(marker)"
+              exec sleep 30
+            fi
+            exit 0
+            """)
+        let r = try await termAt(sb, marker: marker)
+        #expect(r.status == 143, "\(r.out)")
+        #expect(
+            notices((r.status, r.out)).contains {
+                $0.hasPrefix("The VM type change of profile 'work' did not finish. colima.yaml has the old values")
+            })
+        #expect(yaml(sb) == config)
+        #expect(!exists(sb, "\(state)/colima.work.yaml.recreate"))
+        #expect(!sb.calls.contains { $0.hasPrefix("colima delete") })
     }
 
     // MARK: Lock and folders

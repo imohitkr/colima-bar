@@ -55,11 +55,23 @@ struct VMRecreateJournal: Codable, Equatable, Sendable {
         decoder.dateDecodingStrategy = .iso8601
         guard let j = try? decoder.decode(VMRecreateJournal.self, from: data),
             j.format == format, j.version == version, ProfileName.isValid(j.profile),
-            j.volumes.allSatisfy({ isPlainFileName($0.file) }),
+            j.volumes.allSatisfy({ isPlainFileName($0.file) && isVolumeName($0.name) }),
+            j.folder.isEmpty || isAbsolutePath(j.folder),
             j.imagesFile.map(isPlainFileName) ?? true,
             j.imagesSHA256.map({ $0.count == 64 && $0.allSatisfy(\.isHexDigit) }) ?? true
         else { return nil }
         return j
+    }
+
+    /// True for a name that Docker accepts for a volume.
+    static func isVolumeName(_ name: String) -> Bool {
+        guard let first = name.first, first.isASCII, first.isLetter || first.isNumber else { return false }
+        return name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || "_.-".contains($0)) }
+    }
+
+    /// True for a full path with no `..` part.
+    static func isAbsolutePath(_ path: String) -> Bool {
+        path.hasPrefix("/") && !path.split(separator: "/", omittingEmptySubsequences: false).contains("..")
     }
 
     /// True for a name with no path: the files of the backup folder only.

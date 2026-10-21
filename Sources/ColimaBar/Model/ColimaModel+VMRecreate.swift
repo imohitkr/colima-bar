@@ -11,17 +11,17 @@ extension ColimaModel {
     // MARK: - Rules
 
     /// The rule for a start: a normal run, no other action, no transfer, no
-    /// other VM type change, and a colima.yaml to change.
+    /// other VM type change, no unfinished one, and a colima.yaml to change.
     nonisolated static func mayRecreate(
-        isDebug: Bool, busy: Bool, transferring: Bool, recreating: Bool, hasConfig: Bool
+        isDebug: Bool, busy: Bool, transferring: Bool, recreating: Bool, hasConfig: Bool, hasPending: Bool = false
     ) -> Bool {
-        !isDebug && !busy && !transferring && !recreating && hasConfig
+        !isDebug && !busy && !transferring && !recreating && hasConfig && !hasPending
     }
 
     var canRecreate: Bool {
         Self.mayRecreate(
             isDebug: isDebug, busy: busy != nil || hasActionInFlight, transferring: volumeTransfer != nil,
-            recreating: recreate != nil, hasConfig: vmSettings != nil)
+            recreating: recreate != nil, hasConfig: vmSettings != nil, hasPending: pendingRecreate[profile] != nil)
     }
 
     /// Why a VM type change cannot start now, or nil. A hint uses it.
@@ -29,6 +29,9 @@ extension ColimaModel {
         if canRecreate { return nil }
         if isDebug { return Help.doctorDebug }
         if vmSettings == nil { return Help.recreateNoConfig }
+        if recreate == nil, busy == nil, !hasActionInFlight, volumeTransfer == nil, pendingRecreate[profile] != nil {
+            return Help.recreatePending
+        }
         return Help.recreateBusy
     }
 
@@ -57,8 +60,14 @@ extension ColimaModel {
         guard VMTypeRules.isValid(vmType: vmType, mountType: mountType) else { return }
         let inputs = recreateInputs(vmType: vmType, mountType: mountType)
         let plan = VMRecreatePlan.make(inputs)
-        let volumesToSave = backUp && plan.canBackUp ? plan.volumes : []
-        let imagesToSave = saveImages && plan.canBackUp ? plan.imageRefs : []
+        // The alert offers a backup only while a docker VM runs. If that changed, do not drop the choice.
+        if (backUp || saveImages) && (!plan.canBackUp || parent == nil) {
+            notify(
+                "ColimaBar cannot back up now, so nothing changed. Start the VM, or choose no backup, and try again.")
+            return
+        }
+        let volumesToSave = backUp ? plan.volumes : []
+        let imagesToSave = saveImages ? plan.imageRefs : []
         let running = isRunning(profile: p)
         let from = VMTypeRules.effective(vmType: inputs.current.vmType, mountType: inputs.current.mountType)
         holdAction(p)
@@ -75,6 +84,11 @@ extension ColimaModel {
         volumes: [VolumeRow], images: [String], parent: URL?, running: Bool, plan: VMRecreatePlan
     ) async {
         var folder: URL?
+        if recreate?.isCancelling == true {
+            notify("Stopped. Nothing changed.")
+            await endRecreate(p)
+            return
+        }
         if (!volumes.isEmpty || !images.isEmpty), let parent {
             switch Self.makeBackupFolder(parent: parent, profile: p, date: Date()) {
             case .success(let url): folder = url
@@ -105,6 +119,8 @@ extension ColimaModel {
     /// user chose the backup folder in the panel.
     func resumeRecreate(_ p: String, folder: URL) {
         guard !isDebug, p == profile, state == .running, let journal = pendingRecreate[p] else { return }
+        let read = (try? String(contentsOfFile: Paths.config(p), encoding: .utf8)).map(VMSettings.read)
+        guard VMRecreateJournal.recovery(journal, now: read, busy: false) == .restorePending else { return }
         if let reason = recreateBlockReason {
             notify(reason)
             return
@@ -117,7 +133,7 @@ extension ColimaModel {
         setRecreate(VMRecreateProgress(profile: p, step: .restoring))
         let plan = VMRecreatePlan.make(recreateInputs(vmType: journal.to.vmType, mountType: journal.to.mountType))
         Task {
-            let steps = recreateSteps(p, plan: plan, running: true)
+            let steps = recreateSteps(p, plan: plan, running: true, writesCopy: false)
             let outcome = await VMRecreateFlow.resume(journal, folder: folder, steps: steps)
             finishRecreate(outcome, journal: journal, restop: false)
             await endRecreate(p)
@@ -134,8 +150,17 @@ extension ColimaModel {
 
     // MARK: - Steps
 
-    private func recreateSteps(_ p: String, plan: VMRecreatePlan, running: Bool) -> VMRecreateFlow.Steps {
+    private func recreateSteps(
+        _ p: String, plan: VMRecreatePlan, running: Bool, writesCopy: Bool = true
+    ) -> VMRecreateFlow.Steps {
         let imageBytes = plan.imageBytes
+        /// The docker API of the profile of the change, not of the selected one.
+        func profileAPI() -> DockerAPI { profile == p ? api : DockerAPI(socketPath: Paths.socket(p)) }
+        /// A runner that starts after a Cancel must stop at once.
+        func armed<R>(_ runner: R, _ cancel: (R) -> Void) -> R {
+            if recreate?.isCancelling == true { cancel(runner) }
+            return runner
+        }
         func progress(_ update: @MainActor (inout VMRecreateProgress) -> Void) {
             guard var r = recreate else { return }
             update(&r)
@@ -149,7 +174,7 @@ extension ColimaModel {
                     folder: folder.lastPathComponent, notifies: false, fromRecreate: true)
             },
             saveImages: { [self] refs, folder in
-                let runner = ImageArchiveRunner(api: api)
+                let runner = armed(ImageArchiveRunner(api: profileAPI())) { $0.cancel() }
                 imageRunner = runner
                 progress { $0.total = imageBytes }
                 let result = await runner.save(
@@ -185,8 +210,10 @@ extension ColimaModel {
             },
             stopReason: { [self] in
                 if profile != p { return .profileChanged }
-                return state == .running ? nil : .vmStopped
+                // A VM that did not run before the change has nothing to wait for.
+                return !running || state == .running ? nil : .vmStopped
             },
+            isCancelled: { [self] in recreate?.isCancelling == true },
             restore: { [self] volume, folder in
                 let url = folder.appendingPathComponent(volume.file)
                 guard let scan = await scanBackup(file: url) else { return nil }
@@ -195,16 +222,16 @@ extension ColimaModel {
                     file: url, scan: scan, target: volume.name, isNew: true, confirmReplace: { _ in false },
                     notifies: false, fromRecreate: true)
             },
-            volumeExists: { [self] name in
-                switch await VolumeBackupRunner(api: api).lookup(name) {
+            volumeExists: { name in
+                switch await VolumeBackupRunner(api: profileAPI()).lookup(name) {
                 case .found: true
                 case .missing: false
                 case .failed: nil
                 }
             },
-            missingImages: { [self] refs in await ImageArchiveRunner(api: api).missing(refs) },
+            missingImages: { refs in await ImageArchiveRunner(api: profileAPI()).missing(refs) },
             loadImages: { [self] file, sha in
-                let runner = ImageArchiveRunner(api: api)
+                let runner = armed(ImageArchiveRunner(api: profileAPI())) { $0.cancel() }
                 imageRunner = runner
                 var st = stat()
                 let size = stat(file.path, &st) == 0 ? Double(st.st_size) : 0
@@ -218,7 +245,7 @@ extension ColimaModel {
                 imageRunner = nil
                 return failure
             },
-            saveJournal: { [self] journal in writeRecreateJournal(journal) },
+            saveJournal: { [self] journal in writeRecreateJournal(journal, writesCopy: writesCopy) },
             dropJournal: { [self] in dropRecreateJournal(p) },
             progress: { step in
                 progress {
@@ -256,16 +283,31 @@ extension ColimaModel {
 
     // MARK: - Journal
 
-    private func writeRecreateJournal(_ journal: VMRecreateJournal) {
-        guard !isDebug else { return }
+    /// Writes the journal to the cache folder, and a copy into the backup
+    /// folder if `writesCopy` and the folder exists. False if the cache
+    /// journal could not be written: then the VM must not change. The copy is
+    /// a hint for the user. A failed copy is not an error.
+    @discardableResult
+    func writeRecreateJournal(_ journal: VMRecreateJournal, writesCopy: Bool = true) -> Bool {
+        guard !isDebug else { return true }
         let data = journal.encoded()
-        Self.writePrivate(data, to: Paths.recreateJournal(journal.profile))
-        if !journal.folder.isEmpty { Self.writePrivate(data, to: journal.folder + "/recreate.json") }
+        guard Self.writePrivate(data, to: recreateJournalPath(journal.profile), makeParent: true) else { return false }
+        var isDir: ObjCBool = false
+        if writesCopy, !journal.folder.isEmpty,
+            FileManager.default.fileExists(atPath: journal.folder, isDirectory: &isDir), isDir.boolValue
+        {
+            _ = Self.writePrivate(data, to: journal.folder + "/recreate.json", makeParent: false)
+        }
+        return true
     }
 
+    func recreateJournalPath(_ p: String) -> String { "\(recreateCacheDir)/recreate.\(p).json" }
+
+    /// Deletes the journal in the cache folder. The `recreate.json` copy in the
+    /// backup folder stays as it is: it is the record of the backup.
     private func dropRecreateJournal(_ p: String) {
         guard !isDebug else { return }
-        try? FileManager.default.removeItem(atPath: Paths.recreateJournal(p))
+        try? FileManager.default.removeItem(atPath: recreateJournalPath(p))
         if pendingRecreate[p] != nil {
             var all = pendingRecreate
             all[p] = nil
@@ -273,36 +315,53 @@ extension ColimaModel {
         }
     }
 
-    /// Writes a file with the mode 0600 that replaces an older one.
-    private static func writePrivate(_ data: Data, to path: String) {
-        try? FileManager.default.createDirectory(
-            atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true,
-            attributes: [.posixPermissions: 0o700])
-        guard let writer = try? PrivateFileWriter(destination: path, replace: true) else { return }
+    /// Writes a file with the mode 0600 that replaces an older one. False on a failure.
+    private static func writePrivate(_ data: Data, to path: String, makeParent: Bool) -> Bool {
+        if makeParent {
+            try? FileManager.default.createDirectory(
+                atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
+        }
+        guard let writer = try? PrivateFileWriter(destination: path, replace: true) else { return false }
         do {
             try writer.write(data)
             try writer.commit()
+            return true
         } catch {
             writer.abort()
+            return false
         }
     }
 
     /// Reads the journals of the profiles that have a VM type change that
     /// did not finish. A profile with an action that runs now has none. A
-    /// debug run only reads: it deletes nothing.
+    /// debug run reads nothing.
     func loadRecreateJournals() {
-        let names = (try? FileManager.default.contentsOfDirectory(atPath: Paths.cacheDir)) ?? []
+        guard !isDebug else { return }
+        setPendingRecreate(
+            Self.readRecreateJournals(
+                in: recreateCacheDir,
+                config: { try? String(contentsOfFile: Paths.config($0), encoding: .utf8) },
+                isBusy: { [self] in busyMarker(of: $0) != nil || recreate?.profile == $0 }))
+    }
+
+    /// The journals in `dir` that need the user: `recreate.PROFILE.json` files
+    /// whose name matches their profile, and that have a recovery. `config`
+    /// gives the colima.yaml text of a profile.
+    nonisolated static func readRecreateJournals(
+        in dir: String, config: (String) -> String?, isBusy: (String) -> Bool
+    ) -> [String: VMRecreateJournal] {
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []
         var found: [String: VMRecreateJournal] = [:]
         for name in names where name.hasPrefix("recreate.") && name.hasSuffix(".json") {
-            let path = "\(Paths.cacheDir)/\(name)"
+            let path = "\(dir)/\(name)"
             guard let data = FileManager.default.contents(atPath: path), let j = VMRecreateJournal.load(data),
-                Paths.recreateJournal(j.profile) == path
+                "\(dir)/recreate.\(j.profile).json" == path
             else { continue }
-            let text = try? String(contentsOfFile: Paths.config(j.profile), encoding: .utf8)
-            let busy = busyMarker(of: j.profile) != nil || recreate?.profile == j.profile
-            if VMRecreateJournal.recovery(j, now: text.map(VMSettings.read), busy: busy) != nil { found[j.profile] = j }
+            let read = config(j.profile).map(VMSettings.read)
+            if VMRecreateJournal.recovery(j, now: read, busy: isBusy(j.profile)) != nil { found[j.profile] = j }
         }
-        setPendingRecreate(found)
+        return found
     }
 
     // MARK: - Folder and texts

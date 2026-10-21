@@ -233,7 +233,9 @@ import Testing
         #expect(!CtlAction.resources.warnsAfterUpgrade(running: false))
         #expect(CtlAction.vmConfig.warnsAfterUpgrade(running: true))
         #expect(!CtlAction.vmConfig.warnsAfterUpgrade(running: false))
-        for a in [CtlAction.repair, .diskShrink, .vmRecreate, .profileCreate] {
+        #expect(CtlAction.vmRecreate.warnsAfterUpgrade(running: true))
+        #expect(CtlAction.vmRecreate.warnsAfterUpgrade(running: false))
+        for a in [CtlAction.repair, .diskShrink, .profileCreate] {
             #expect(!a.warnsAfterUpgrade(running: true) && !a.warnsAfterUpgrade(running: false), "\(a.rawValue)")
         }
     }

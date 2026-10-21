@@ -56,7 +56,10 @@ enum VMRecreateAlert {
             backUp: volumes.state == .on && volumes.isEnabled, saveImages: images.state == .on && images.isEnabled)
         guard case .recreate(let backUp, let saveImages) = answer else { return nil }
         guard backUp || saveImages else { return Choice(backUp: false, saveImages: false, parent: nil) }
-        guard let parent = chooseFolder() else { return nil }
+        guard let parent = chooseFolder() else {
+            model.notify("Cancelled. Nothing changed.")
+            return nil
+        }
         let needed = plan.neededBytes(backUp: backUp, saveImages: saveImages)
         if let free = freeBytes(in: parent), free < needed {
             model.notify(

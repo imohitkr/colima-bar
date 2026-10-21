@@ -40,11 +40,16 @@ struct VMTypeSection: View {
                 Spacer()
                 Button("Change and Recreate…") { recreate() }
                     .disabled(!canRecreate)
-                    .hint(model.recreateBlockReason ?? Help.vmRecreate)
+                    .hint(form.isDirty ? Help.recreateDirty : model.recreateBlockReason ?? Help.vmRecreate)
             }
         }
         .onChange(of: form.vmType) {
-            if !VMTypeRules.isValid(vmType: form.vmType, mountType: form.mountType) {
+            if form.vmType == current.vmType {
+                // Back to the type of the file: back to its mount type, not to a blank one.
+                if !VMTypeRules.isValid(vmType: form.vmType, mountType: form.mountType) {
+                    form.mountType = current.mountType
+                }
+            } else if !VMTypeRules.isValid(vmType: form.vmType, mountType: form.mountType) {
                 form.mountType = VMTypeRules.defaultMountType(for: form.vmType)
             }
         }

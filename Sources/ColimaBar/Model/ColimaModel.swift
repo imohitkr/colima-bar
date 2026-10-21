@@ -110,6 +110,10 @@ final class ColimaModel {
     /// The VM type changes that did not finish, by profile. The notice of the
     /// System tab shows the one of the selected profile.
     private(set) var pendingRecreate: [String: VMRecreateJournal] = [:]
+    /// For tests: gets the notifications instead of `Notifier`.
+    @ObservationIgnored var notifySink: ((String) -> Void)?
+    /// The folder of the journals of a VM type change (`Paths.cacheDir`).
+    @ObservationIgnored let recreateCacheDir: String
     /// A Doctor run was asked for while another one ran (a profile switch).
     /// The running one starts once more when it ends.
     @ObservationIgnored var isDoctorRunQueued = false
@@ -505,6 +509,7 @@ final class ColimaModel {
     /// changes a route or a context, or writes a setting. The command never
     /// calls `start()`. Assigning `profile` here runs no `didSet`.
     /// `dockerAPI` is for tests: a fake daemon instead of the socket of the profile.
+    /// `recreateCacheDir` is for tests: the folder of the VM type change journals.
     /// `domainProxy`, `domainsEnabled` and `domainsStore` are for tests too: a
     /// fake proxy, a start value of the setting, and a store for it. A test
     /// process that passes none gets an inert proxy and an empty store, so a
@@ -512,8 +517,10 @@ final class ColimaModel {
     init(
         profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil,
         domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil, domainsStore: UserDefaults? = nil,
-        httpsEnabled: Bool? = nil, domainTLS: (any DomainTLSServicing)? = nil, domainSuffix: String? = nil
+        httpsEnabled: Bool? = nil, domainTLS: (any DomainTLSServicing)? = nil, domainSuffix: String? = nil,
+        recreateCacheDir: String = Paths.cacheDir
     ) {
+        self.recreateCacheDir = recreateCacheDir
         let inTest = TestProcess.isRunning
         self.domainProxy = domainProxy ?? (inTest ? InertDomainProxy() : DomainProxy())
         self.domainTLS = domainTLS ?? (inTest ? InertDomainTLS() : SystemDomainTLS())
@@ -1808,6 +1815,11 @@ final class ColimaModel {
     func run(_ action: CtlAction, args: [String], profile target: String? = nil) {
         // The old copy quits at once after the swap of an update.
         guard !updateRestarting else { return }
+        // The backups and the restore of a VM type change need the VM as it is.
+        if recreate != nil {
+            notify(Help.recreateBusy)
+            return
+        }
         if action == .diskShrink || action == .vmRecreate, volumeTransfer != nil {
             notify(
                 action == .diskShrink
@@ -1816,10 +1828,6 @@ final class ColimaModel {
             return
         }
         let p = target ?? profile
-        if action.isVMAction, recreate?.profile == p {
-            notify(Help.recreateBusy)
-            return
-        }
         let running = isRunning(profile: p)
         if action.showsDialog(running: running) { dismissPopover() }
         let label = markBusy(action, p, running: running)
@@ -1960,6 +1968,8 @@ final class ColimaModel {
     /// `ColimaModel+VMRecreate` stores its state through these.
     func setRecreate(_ progress: VMRecreateProgress?) { set(\.recreate, progress) }
     func setPendingRecreate(_ all: [String: VMRecreateJournal]) { set(\.pendingRecreate, all) }
+    /// For tests: a colima.yaml read without a file.
+    func setVMSettings(_ read: VMSettings.Read?) { set(\.vmSettings, read) }
     /// A VM type change holds the actions of its profile, so auto-stop and the
     /// weekly cleanup stay away while it runs.
     func holdAction(_ p: String) { actionsInFlight[p, default: 0] += 1 }
@@ -2155,6 +2165,10 @@ final class ColimaModel {
     /// The `colimabar` command has no notifications: it must not touch
     /// `Notifier`. It writes its messages to the terminal.
     func notify(_ msg: String) {
+        if let notifySink {
+            notifySink(msg)
+            return
+        }
         guard !AppDelegate.isCommandLine else { return }
         Notifier.shared.post(msg)
     }

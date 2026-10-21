@@ -147,12 +147,13 @@ enum CtlAction: String, CaseIterable, Sendable {
     }
 
     /// The script asks again after an upgrade of Colima or Lima, for a start
-    /// that the user begins in the menu. `repair` has its own dialog and a
+    /// that the user begins in the menu, and for a VM type change, which always
+    /// starts the VM. `repair` has its own dialog and a
     /// Doctor row, `diskShrink` deletes the data anyway and `profileCreate`
     /// has no record.
     func warnsAfterUpgrade(running: Bool) -> Bool {
         switch self {
-        case .start, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig: startsVM(running: running)
+        case .start, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .vmRecreate: startsVM(running: running)
         default: false
         }
     }

@@ -80,17 +80,18 @@ final class ImageArchiveRunner: @unchecked Sendable {
             writer.abort()
             return .failure(.cancel)
         }
+        // An error reply is JSON, not a tar: the status tells more than the sink.
+        if let status = handle?.status, !(200..<300).contains(status) {
+            writer.abort()
+            return .failure(.text("Docker cannot save the images (HTTP \(status))."))
+        }
         if let f = sink.failure {
             writer.abort()
             return .failure(f)
         }
-        guard let status = handle?.status else {
+        guard handle?.status != nil else {
             writer.abort()
             return .failure(.text("Docker did not answer."))
-        }
-        guard (200..<300).contains(status) else {
-            writer.abort()
-            return .failure(.text("Docker cannot save the images (HTTP \(status))."))
         }
         guard sink.isComplete else {
             writer.abort()

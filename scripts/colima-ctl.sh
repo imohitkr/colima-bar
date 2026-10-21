@@ -275,6 +275,10 @@ STAGED=""
 # the time limit of ColimaBar), cleanup puts the old file back.
 INSTALLED=""
 VM_BACKUP=""
+# The vm-recreate copy of colima.yaml with the new values, and the old file.
+# RECREATE_COPY is set from the first change until the script knows the end.
+RECREATE_COPY=""
+RECREATE_ORIG=""
 cleanup() {
   compose_show
   if [ -n "$INSTALLED" ]; then
@@ -285,13 +289,24 @@ cleanup() {
       notify "The VM settings of $NAMED did not finish. ColimaBar could not put the old colima.yaml back. A copy is in $VM_BACKUP."
     fi
   fi
-  if [ -n "$RECREATE_COPY" ] && [ ! -f "$CONFIG" ] && [ -d "$COLIMA_DIR" ]; then
-    if mkdir -p "$PROFILE_DIR" && cp -p "$RECREATE_COPY" "$CONFIG"; then
-      notify "The VM type change of $NAMED did not finish. ColimaBar put colima.yaml back with the new values. Start the VM to finish. A copy is in $RECREATE_COPY."
-    else
-      notify "The VM type change of $NAMED did not finish. A copy of colima.yaml is in $RECREATE_COPY."
-    fi
+  if [ -n "$RECREATE_COPY" ]; then
+    # The script ended (a signal or the time limit of ColimaBar) while
+    # recreate_vm ran. The state of the VM is not known: tell the user.
+    local copy="$RECREATE_COPY"
     RECREATE_COPY=""
+    if [ ! -f "$CONFIG" ]; then
+      if put_config "$copy"; then
+        notify "The VM type change of $NAMED did not finish. ColimaBar put colima.yaml back with the new values. Start the VM to finish. A copy is in $copy."
+      else
+        notify "The VM type change of $NAMED did not finish. A copy of colima.yaml is in $copy."
+      fi
+    elif cmp -s "$copy" "$CONFIG"; then
+      rm -f "$copy"
+      notify "The VM type change of $NAMED did not finish. colima.yaml has the new values, and the VM may be stopped. Start the VM to finish. The old colima.yaml is in $RECREATE_ORIG."
+    else
+      rm -f "$copy"
+      notify "The VM type change of $NAMED did not finish. colima.yaml has the old values, and the VM may be stopped. Check the VM. The old colima.yaml is in $RECREATE_ORIG."
+    fi
   fi
   if [ -e "$FOLDER_CHANGED" ]; then
     rm -f "$FOLDER_CHANGED"
@@ -427,11 +442,6 @@ RECREATE_STOP_FAILED=5
 RECREATE_DELETE_FAILED=6
 RECREATE_START_FAILED=7
 
-# The copy of colima.yaml with the new values while recreate_vm runs. If the
-# script ends then (a signal or the time limit of ColimaBar) and colima.yaml
-# is gone, cleanup puts the copy back.
-RECREATE_COPY=""
-
 # put_key KEY VALUE FILE -> sets a top-level key in FILE, or adds it at the
 # end if FILE has no such key, and checks it took.
 put_key() {
@@ -445,10 +455,25 @@ put_key() {
   grep -qE "^$1: $2\$" "$3" || { notify "Couldn't set $1 in colima.yaml."; exit 1; }
 }
 
-# section_has SECTION REGEX -> true if a line in the top-level SECTION of
-# colima.yaml matches REGEX (two-space indent), like set_k8s reads it.
-section_has() {
-  tr -d '\r' <"$CONFIG" | sed -n "/^$1:/,/^[a-z]/p" | grep -qE "$2"
+# section_value SECTION KEY -> the value of a key in the top-level SECTION of
+# colima.yaml (two-space indent). It reads an inline comment, quotes and
+# spaces like yaml_value.
+section_value() {
+  local v
+  v=$(tr -d '\r' <"$CONFIG" | sed -n "/^$1:/,/^[a-z]/p" | sed -n "/^  $2:/{p;q;}")
+  [ -n "$v" ] || return 0
+  v=${v#*"$2":}
+  v=${v%% \#*}
+  v=${v#"${v%%[![:space:]]*}"}
+  v=${v%"${v##*[![:space:]]}"}
+  case "$v" in \"*\"|\'*\') v=${v:1:${#v}-2} ;; esac
+  printf '%s\n' "$v"
+}
+
+# is_true VALUE -> true for the YAML forms of true.
+is_true() {
+  case "$1" in true|True|TRUE|yes|Yes|YES|on|On|ON) return 0 ;; esac
+  return 1
 }
 
 # data_disk_kept -> true if the Docker data is on its own Lima disk (Colima
@@ -459,11 +484,33 @@ data_disk_kept() {
   tr -d ' \t\r\n' <"$COLIMA_DIR/_store/$LIMA_INST.json" 2>/dev/null | grep -q '"disk_formatted":true'
 }
 
+# data_disk_qcow2 -> true if the kept data disk is a qcow2 file. A qcow2 file
+# starts with the bytes "QFI" and 0xfb. Only a raw disk works with vz. The test
+# reads 4 bytes and changes nothing.
+data_disk_qcow2() {
+  local disk="$LIMA_DIR/_disks/$LIMA_INST/datadisk"
+  [ -f "$disk" ] || return 1
+  [ "$(od -An -tx1 -N4 "$disk" 2>/dev/null | tr -d ' \n')" = 514649fb ]
+}
+
+# resolve_arch VALUE -> aarch64 or x86_64. An empty value and "host" mean the
+# arch of this Mac. Another value is kept as it is.
+resolve_arch() {
+  case "$1" in ""|host) set -- "$(uname -m)" ;; esac
+  case "$1" in arm64|aarch64) echo aarch64 ;; amd64|x86_64) echo x86_64 ;; *) echo "$1" ;; esac
+}
+
 # qemu_ok ARCH -> true if QEMU for ARCH is installed (brew install qemu).
 qemu_ok() {
   local sys=qemu-system-aarch64
-  case "$1" in ""|aarch64|arm64) ;; *) sys=qemu-system-x86_64 ;; esac
+  [ "$(resolve_arch "$1")" = aarch64 ] || sys=qemu-system-x86_64
   type -P qemu-img >/dev/null && type -P "$sys" >/dev/null
+}
+
+# put_config FILE -> puts FILE in place of colima.yaml. It does nothing if the
+# Colima folder is gone, so a failed run does not make a new one.
+put_config() {
+  [ -d "$COLIMA_DIR" ] && mkdir -p "$PROFILE_DIR" && cp -p "$1" "$CONFIG"
 }
 
 # recreate_vm COPY [RESTOP] -> stops the VM, deletes it without --data, puts
@@ -474,9 +521,12 @@ recreate_vm() {
   if colima status >/dev/null 2>&1; then
     colima stop || return "$RECREATE_STOP_FAILED"
   fi
-  colima delete --force || return "$RECREATE_DELETE_FAILED"
-  [ -d "$COLIMA_DIR" ] || return "$RECREATE_START_FAILED"
-  mkdir -p "$PROFILE_DIR" && cp -p "$1" "$CONFIG" || return "$RECREATE_START_FAILED"
+  # A profile with a colima.yaml and no Lima instance has nothing to delete,
+  # and `colima delete` would fail for good.
+  if [ -d "$LIMA_DIR/$LIMA_INST" ]; then
+    colima delete --force || return "$RECREATE_DELETE_FAILED"
+  fi
+  put_config "$1" || return "$RECREATE_START_FAILED"
   # shellcheck disable=SC2119 # no flags: colima start reads the copy
   start_vm || return "$RECREATE_START_FAILED"
   if [ -n "${2:-}" ]; then
@@ -1131,24 +1181,34 @@ $after" || exit 2
       notify "Can't change the VM type of $NAMED. Its colima.yaml does not exist."
       exit 1
     fi
-    arch=$(yaml_value arch)
-    case "$arch" in
-      ""|aarch64|arm64) ;;
-      *) [ "$vmtype" = qemu ] || { notify "An $arch VM of $NAMED needs the qemu VM type."; exit 1; } ;;
-    esac
+    # vz runs only a VM of the arch of this Mac. "host" and no arch mean that arch.
+    arch=$(resolve_arch "$(yaml_value arch)")
+    if [ "$vmtype" = vz ] && [ "$arch" != "$(resolve_arch host)" ]; then
+      notify "An $arch VM of $NAMED needs the qemu VM type."; exit 1
+    fi
     if [ "$vmtype" = qemu ]; then
       qemu_ok "$arch" || { notify "The qemu VM type needs QEMU. Install it with brew install qemu, then try again."; exit 1; }
-      if section_has network '^  address: true$'; then
+      if is_true "$(section_value network address)"; then
         notify "The VM of $NAMED has a reachable IP address. It needs the vz VM type."; exit 1
       fi
-      if section_has network '^  mode: bridged$'; then
+      if [ "$(section_value network mode)" = bridged ]; then
         notify "Bridged networking with qemu needs socket_vmnet. Change the VM type of $NAMED by hand."; exit 1
       fi
     fi
+    # Colima keeps the data disk. vz mounts only a raw disk, and a disk that
+    # an older qemu VM made can be qcow2. Then the new VM could not start.
+    if [ "$vmtype" = vz ] && data_disk_kept && data_disk_qcow2; then
+      notify "The Docker data disk of $NAMED is a qcow2 file. The vz VM type needs a raw disk, so ColimaBar changed nothing. Back up your data, then delete the VM with its data and create it again."
+      exit 1
+    fi
     # Colima uses vz if the file has no VM type, and the default mount type
     # of the VM type if it has no mount type (VMTypeRules.effective).
-    old_type=$(yaml_value vmType); old_type="${old_type:-vz}"
-    old_mount=$(yaml_value mountType)
+    # The VM keeps the types of its creation: the copy of colima.yaml that
+    # Colima made for the instance counts more than the file that the user edits.
+    live="$LIMA_DIR/$LIMA_INST/colima.yaml"
+    [ -f "$live" ] || live="$CONFIG"
+    old_type=$(yaml_value vmType "$live"); old_type="${old_type:-vz}"
+    old_mount=$(yaml_value mountType "$live")
     if [ -z "$old_mount" ]; then
       case "$old_type" in vz) old_mount=virtiofs ;; qemu) old_mount=sshfs ;; esac
     fi
@@ -1158,6 +1218,8 @@ $after" || exit 2
     fi
     lock_vm
     no_start_in_progress
+    # The change always ends with a new start of the VM.
+    upgrade_confirm || exit 2
     was_up=0
     restop=1
     after="Colima starts the VM once to create it, then stops it again."
@@ -1170,7 +1232,7 @@ $after" || exit 2
       data="Colima keeps the Docker data disk. Images, containers and volumes stay."
     else
       data="This VM has no separate Docker data disk. All containers, images, volumes and build cache are lost for good."
-      if section_has kubernetes '^  enabled: true$'; then
+      if is_true "$(section_value kubernetes enabled)"; then
         data="$data The Kubernetes cluster and its data are also deleted."
       fi
     fi
@@ -1196,26 +1258,28 @@ $after" || exit 2
     # ColimaBar can quit during the run. A write to its closed pipe must not
     # end the script between the delete and the start.
     trap '' PIPE
+    RECREATE_ORIG="$orig"
     RECREATE_COPY="$copy"
     with_busy "Changing VM type" recreate_vm "$copy" "$restop"
     rc=$?
-    RECREATE_COPY=""
     case "$rc" in
-      0) rm -f "$copy" ;;
+      0) RECREATE_COPY=""; rm -f "$copy" ;;
       "$RESTOP_FAILED")
-        rm -f "$copy"
+        RECREATE_COPY=""; rm -f "$copy"
         notify "The VM of $NAMED now uses $vmtype / $mounttype, but the stop failed - $SEE_LOG"
         exit 1 ;;
       "$RECREATE_STOP_FAILED")
-        rm -f "$copy"
+        RECREATE_COPY=""; rm -f "$copy"
         notify "ColimaBar could not stop the VM of $NAMED, so nothing changed - $SEE_LOG"
         exit 1 ;;
       "$RECREATE_DELETE_FAILED")
-        [ -f "$CONFIG" ] || { mkdir -p "$PROFILE_DIR" && cp -p "$orig" "$CONFIG"; }
+        RECREATE_COPY=""
+        [ -f "$CONFIG" ] || put_config "$orig" || echo "couldn't put colima.yaml back" >&2
         notify "Colima could not delete the VM of $NAMED - $SEE_LOG. The old colima.yaml is in $orig."
         exit 1 ;;
       *)
-        [ -f "$CONFIG" ] || { mkdir -p "$PROFILE_DIR" && cp -p "$copy" "$CONFIG"; }
+        RECREATE_COPY=""
+        [ -f "$CONFIG" ] || put_config "$copy" || echo "couldn't put colima.yaml back" >&2
         notify "The VM of $NAMED did not start with $vmtype / $mounttype - $SEE_LOG. Start it again, or change the VM type back. The old colima.yaml is in $orig."
         exit 1 ;;
     esac

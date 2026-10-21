@@ -16,7 +16,15 @@ import Testing
         var recreate = Shell.Result(status: 0, out: "")
         var types: (vmType: String, mountType: String)? = ("vz", "virtiofs")
         var ready = true
+        /// The answers of `stopReason` after the recreate (the restore).
         var stopReasons: [VolumeTransferStop?] = []
+        /// The answers of `stopReason` before the recreate.
+        var preStops: [VolumeTransferStop?] = []
+        /// The user clicks Cancel after the first call that starts with this text.
+        var cancelAfter: String?
+        var journalWorks = true
+        /// The user clicked Cancel before the flow started.
+        var cancelled = false
         var existing: Set<String> = []
         var dockerSilent = false
         var restore: VolumeRestoreFlow.Outcome? = .done
@@ -42,7 +50,15 @@ import Testing
                     return ready
                 },
                 readTypes: { [self] in types },
-                stopReason: { [self] in stopReasons.isEmpty ? nil : stopReasons.removeFirst() },
+                stopReason: { [self] in
+                    if changedVM { return stopReasons.isEmpty ? nil : stopReasons.removeFirst() }
+                    return preStops.isEmpty ? nil : preStops.removeFirst()
+                },
+                isCancelled: { [self] in
+                    if cancelled { return true }
+                    guard let cancelAfter else { return false }
+                    return calls.contains { $0.hasPrefix(cancelAfter) }
+                },
                 restore: { [self] v, _ in
                     calls.append("restore \(v.name)")
                     return restore
@@ -57,8 +73,10 @@ import Testing
                     return load
                 },
                 saveJournal: { [self] j in
-                    saved.append(j)
                     calls.append("journal \(j.phase.rawValue)")
+                    guard journalWorks else { return false }
+                    saved.append(j)
+                    return true
                 },
                 dropJournal: { [self] in calls.append("dropJournal") },
                 progress: { [self] step in calls.append("progress \(step)") })
@@ -208,6 +226,103 @@ import Testing
         #expect(outcome == .nothingChanged("Backup failed, so nothing changed: a: No space."))
     }
 
+    // MARK: Cancel, profile switch and the journal before the recreate
+
+    @Test(arguments: [
+        "journal backup", "backUp", "saveImages",
+    ])
+    func aCancelInAnyGapStopsBeforeTheRecreate(after: String) async {
+        let f = Fake()
+        f.cancelAfter = after
+        let outcome = await run(f, backUp: rows("a", "b"), images: ["x:1"])
+        #expect(outcome == .cancelledBeforeChange)
+        #expect(!f.changedVM)
+        #expect(f.calls.last == "dropJournal")
+        if after == "journal backup" { #expect(!f.calls.contains { $0.hasPrefix("backUp") }) }
+        if after == "backUp" { #expect(!f.calls.contains { $0.hasPrefix("saveImages") }) }
+    }
+
+    @Test func aCancelBeforeTheLastStepWithNoImagesStopsBeforeTheRecreate() async {
+        let f = Fake()
+        f.cancelAfter = "backUp"
+        #expect(await run(f, backUp: rows("a")) == .cancelledBeforeChange)
+        #expect(!f.changedVM)
+    }
+
+    @Test func aCancelBeforeTheFlowStartsWritesNoJournal() async {
+        let f = Fake()
+        f.cancelled = true
+        #expect(await run(f, backUp: rows("a")) == .cancelledBeforeChange)
+        #expect(f.saved.isEmpty && !f.changedVM)
+        #expect(!f.calls.contains { $0.hasPrefix("backUp") })
+    }
+
+    @Test func aCancelWithNoBackupStopsBeforeTheRecreate() async {
+        let f = Fake()
+        f.cancelled = true
+        #expect(await run(f, folder: nil) == .cancelledBeforeChange)
+        #expect(!f.changedVM)
+    }
+
+    @Test func aProfileSwitchBeforeTheRecreateStopsAndNamesTheReason() async {
+        for position in 0..<3 {
+            let f = Fake()
+            f.preStops = Array(repeating: nil, count: position) + [.profileChanged]
+            let outcome = await run(f, backUp: rows("a"), images: ["x:1"])
+            #expect(!f.changedVM, "position \(position)")
+            guard case .nothingChanged(let text) = outcome else {
+                Issue.record("not nothingChanged at \(position)")
+                continue
+            }
+            #expect(text.hasPrefix("ColimaBar stopped because you chose another profile. Nothing changed."))
+        }
+    }
+
+    @Test func aJournalThatCannotBeWrittenAtTheStartStopsBeforeTheBackup() async {
+        let f = Fake()
+        f.journalWorks = false
+        let outcome = await run(f, backUp: rows("a"))
+        #expect(!f.changedVM)
+        #expect(!f.calls.contains { $0.hasPrefix("backUp") })
+        guard case .nothingChanged(let text) = outcome else {
+            Issue.record("\(outcome)")
+            return
+        }
+        #expect(text.contains("could not write its journal"))
+    }
+
+    @Test func aJournalThatCannotBeWrittenBeforeTheRecreateKeepsTheVMAsItIs() async {
+        let f = Fake()
+        // The first write works. The write for the phase `recreate` fails.
+        var writes = 0
+        var steps = f.steps()
+        let inner = steps.saveJournal
+        steps.saveJournal = { j in
+            writes += 1
+            return writes == 1 ? inner(j) : false
+        }
+        let outcome = await VMRecreateFlow.run(
+            journal, folder: folder, backUp: rows("a"), saveImages: [], restop: false, steps: steps)
+        #expect(!f.changedVM)
+        guard case .nothingChanged(let text) = outcome else {
+            Issue.record("\(outcome)")
+            return
+        }
+        #expect(text.contains("could not write its journal"))
+        #expect(f.calls.last == "dropJournal")
+    }
+
+    @Test func aRunWithNoBackupAlsoNeedsAJournalBeforeTheRecreate() async {
+        let f = Fake()
+        f.journalWorks = false
+        let outcome = await run(f, folder: nil)
+        #expect(!f.changedVM)
+        guard case .nothingChanged = outcome else {
+            Issue.record("\(outcome)")
+            return
+        }
+    }
+
     // MARK: The script
 
     @Test func aCancelInTheScriptDialogChangesNothingAndDropsTheJournal() async {
@@ -224,7 +339,10 @@ import Testing
         f.recreate = Shell.Result(status: 1, out: "")
         f.types = ("vz", "virtiofs")
         let outcome = await run(f, backUp: rows("a", "b"))
-        #expect(outcome == .nothingChanged("Nothing changed. The backups are in ColimaBar-work-1."))
+        #expect(
+            outcome
+                == .nothingChanged(
+                    "The VM type did not change. The VM may be stopped. The backups are in ColimaBar-work-1."))
         #expect(f.calls.last == "dropJournal")
     }
 
@@ -266,6 +384,54 @@ import Testing
     }
 
     // MARK: After the recreate
+
+    @Test func aCancelAfterTheWaitStopsBeforeTheFirstRestore() async {
+        let f = Fake()
+        f.cancelAfter = "waitReady"
+        let outcome = await run(f, backUp: rows("a", "b"))
+        guard case .restorePending(let text) = outcome else {
+            Issue.record("\(outcome)")
+            return
+        }
+        #expect(text.hasPrefix("ColimaBar stopped the restore."))
+        #expect(!f.calls.contains { $0.hasPrefix("restore ") })
+        #expect(f.calls.last != "dropJournal")
+    }
+
+    @Test func aCancelBetweenTwoVolumesStopsTheRestore() async {
+        let f = Fake()
+        f.cancelAfter = "restore a"
+        let outcome = await run(f, backUp: rows("a", "b"))
+        guard case .restorePending = outcome else {
+            Issue.record("\(outcome)")
+            return
+        }
+        #expect(f.calls.contains("restore a") && !f.calls.contains("restore b"))
+        #expect(f.calls.last != "dropJournal")
+    }
+
+    @Test func aCancelBeforeTheImageLoadSkipsTheLoad() async {
+        let f = Fake()
+        f.missingImages = ["x:1"]
+        f.cancelAfter = "missingImages"
+        let outcome = await run(f, backUp: rows("a"), images: ["x:1"])
+        guard case .restorePending = outcome else {
+            Issue.record("\(outcome)")
+            return
+        }
+        #expect(!f.calls.contains { $0.hasPrefix("loadImages") })
+    }
+
+    @Test func aCancelBeforeTheCheckOfTheImagesSkipsThem() async {
+        let f = Fake()
+        f.cancelAfter = "restore b"
+        let outcome = await run(f, backUp: rows("a", "b"), images: ["x:1"])
+        guard case .restorePending = outcome else {
+            Issue.record("\(outcome)")
+            return
+        }
+        #expect(!f.calls.contains("missingImages"))
+    }
 
     @Test func aGateThatFailsKeepsTheJournalForARestore() async {
         let f = Fake()

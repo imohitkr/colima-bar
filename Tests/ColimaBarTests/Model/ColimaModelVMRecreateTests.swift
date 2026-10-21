@@ -64,6 +64,178 @@ import Testing
         #expect(model.recreate?.volume == "")
     }
 
+    // MARK: Start rules
+
+    private func journal(
+        _ profile: String, phase: VMRecreateJournal.Phase = .restore, folder: String = ""
+    ) -> VMRecreateJournal {
+        VMRecreateJournal(
+            profile: profile, from: .init(vmType: "vz", mountType: "virtiofs"),
+            to: .init(vmType: "qemu", mountType: "sshfs"), folder: folder, created: Date(), phase: phase)
+    }
+
+    private func readyModel(_ profile: String, dir: String, notes: Notes = Notes()) -> ColimaModel {
+        let model = ColimaModel(profile: profile, recreateCacheDir: dir)
+        model.setVMSettings(VMSettings.Read())
+        model.notifySink = { notes.texts.append($0) }
+        return model
+    }
+
+    /// The notifications of a model.
+    final class Notes {
+        var texts: [String] = []
+    }
+
+    @Test func anUnfinishedChangeBlocksANewOne() throws {
+        let dir = try TempFolder()
+        let p = "recreate-pending-test"
+        let notes = Notes()
+        let model = readyModel(p, dir: dir.path, notes: notes)
+        #expect(model.canRecreate)
+        model.setPendingRecreate([p: journal(p)])
+        #expect(!model.canRecreate)
+        #expect(model.recreateBlockReason == Help.recreatePending)
+        model.startRecreate(vmType: "qemu", mountType: "sshfs", backUp: false, saveImages: false, parent: nil)
+        #expect(model.recreate == nil)
+        #expect(notes.texts == [Help.recreatePending])
+        #expect(model.pendingRecreate[p] != nil)
+        #expect(!FileManager.default.fileExists(atPath: model.recreateJournalPath(p)))
+    }
+
+    @Test func theRuleRefusesAPendingChange() {
+        #expect(
+            !ColimaModel.mayRecreate(
+                isDebug: false, busy: false, transferring: false, recreating: false, hasConfig: true,
+                hasPending: true))
+    }
+
+    @Test func aBackupChoiceThatTheVMCannotKeepIsRefusedNotDropped() throws {
+        let dir = try TempFolder()
+        let p = "recreate-downgrade-test"
+        let notes = Notes()
+        let model = readyModel(p, dir: dir.path, notes: notes)
+        // The VM is stopped: no backup is possible, and the choice must not turn into "no backup".
+        for (backUp, images) in [(true, false), (false, true), (true, true)] {
+            model.startRecreate(
+                vmType: "qemu", mountType: "sshfs", backUp: backUp, saveImages: images,
+                parent: URL(fileURLWithPath: dir.path))
+            #expect(model.recreate == nil)
+            #expect(!model.hasActionInFlight)
+        }
+        #expect(notes.texts.count == 3 && notes.texts.allSatisfy { $0.hasPrefix("ColimaBar cannot back up now") })
+    }
+
+    @Test func everyActionIsRefusedWhileAChangeRuns() {
+        let p = "recreate-block-test"
+        let model = ColimaModel(profile: p)
+        var told: [String] = []
+        model.notifySink = { told.append($0) }
+        model.setRecreate(VMRecreateProgress(profile: p, step: .backingUp))
+        for action in [CtlAction.restart, .stop, .start, .vmRecreate, .repair] {
+            model.run(action, profile: p)
+            model.run(action, profile: "another-profile")
+        }
+        #expect(model.busy == nil)
+        #expect(!model.hasActionInFlight)
+        #expect(told.count == 10 && told.allSatisfy { $0 == Help.recreateBusy })
+    }
+
+    // MARK: Journal files
+
+    @Test func aJournalIsWrittenToTheCacheFolderWithTheMode0600() throws {
+        let dir = try TempFolder()
+        let p = "recreate-write-test"
+        let model = ColimaModel(profile: p, recreateCacheDir: dir.path + "/cache")
+        #expect(model.writeRecreateJournal(journal(p, phase: .backup)))
+        let path = model.recreateJournalPath(p)
+        var st = stat()
+        stat(path, &st)
+        #expect(st.st_mode & 0o777 == 0o600)
+        #expect(VMRecreateJournal.load(try Data(contentsOf: URL(fileURLWithPath: path)))?.phase == .backup)
+    }
+
+    @Test func aJournalThatCannotBeWrittenGivesFalse() throws {
+        let dir = try TempFolder()
+        // A regular file where the cache folder should be.
+        try "x".write(toFile: dir.path + "/file", atomically: true, encoding: .utf8)
+        let model = ColimaModel(profile: "recreate-fail-test", recreateCacheDir: dir.path + "/file/cache")
+        #expect(!model.writeRecreateJournal(journal("recreate-fail-test")))
+    }
+
+    @Test func theCopyInTheBackupFolderNeedsTheFolderAndMakesNoNewOne() throws {
+        let dir = try TempFolder()
+        let p = "recreate-copy-test"
+        let model = ColimaModel(profile: p, recreateCacheDir: dir.path)
+        let gone = dir.path + "/stale/ColimaBar-1"
+        #expect(model.writeRecreateJournal(journal(p, folder: gone)))
+        #expect(!FileManager.default.fileExists(atPath: dir.path + "/stale"))
+        let there = dir.path + "/ColimaBar-2"
+        try FileManager.default.createDirectory(atPath: there, withIntermediateDirectories: false)
+        #expect(model.writeRecreateJournal(journal(p, folder: there)))
+        #expect(FileManager.default.fileExists(atPath: there + "/recreate.json"))
+        try FileManager.default.removeItem(atPath: there + "/recreate.json")
+        // A resume does not write the copy again.
+        #expect(model.writeRecreateJournal(journal(p, folder: there), writesCopy: false))
+        #expect(!FileManager.default.fileExists(atPath: there + "/recreate.json"))
+    }
+
+    @Test func aDebugRunWritesNoJournalAndReadsNone() throws {
+        let dir = try TempFolder()
+        let p = "recreate-debug-test"
+        try journal(p).encoded().write(to: URL(fileURLWithPath: dir.path + "/recreate.\(p).json"))
+        let model = ColimaModel(profile: p, readOnly: true, recreateCacheDir: dir.path)
+        model.loadRecreateJournals()
+        #expect(model.pendingRecreate.isEmpty)
+        #expect(model.writeRecreateJournal(journal(p)))
+        #expect(
+            try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["recreate.\(p).json"])
+    }
+
+    @Test func aNormalRunReadsTheJournalsOfTheInjectedFolderOnly() throws {
+        let dir = try TempFolder()
+        let p = "recreate-load-test"
+        try journal(p).encoded().write(to: URL(fileURLWithPath: dir.path + "/recreate.\(p).json"))
+        let model = ColimaModel(profile: p, recreateCacheDir: dir.path)
+        model.loadRecreateJournals()
+        #expect(model.pendingRecreate[p]?.profile == p)
+        model.dismissRecreate(p)
+        #expect(model.pendingRecreate.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: dir.path + "/recreate.\(p).json"))
+    }
+
+    @Test func aJournalOfABusyProfileIsLeftOut() throws {
+        let dir = try TempFolder()
+        try journal("work").encoded().write(to: URL(fileURLWithPath: dir.path + "/recreate.work.json"))
+        try journal("play").encoded().write(to: URL(fileURLWithPath: dir.path + "/recreate.play.json"))
+        let found = ColimaModel.readRecreateJournals(in: dir.path, config: { _ in nil }, isBusy: { $0 == "work" })
+        #expect(Set(found.keys) == ["play"])
+    }
+
+    @Test func aJournalWhoseNameDoesNotMatchItsProfileIsIgnored() throws {
+        let dir = try TempFolder()
+        try journal("work").encoded().write(to: URL(fileURLWithPath: dir.path + "/recreate.other.json"))
+        try Data("not json".utf8).write(to: URL(fileURLWithPath: dir.path + "/recreate.bad.json"))
+        let found = ColimaModel.readRecreateJournals(in: dir.path, config: { _ in nil }, isBusy: { _ in false })
+        #expect(found.isEmpty)
+    }
+
+    @Test func theRecoveryReadsTheConfigOfTheProfile() throws {
+        let dir = try TempFolder()
+        try journal("work", phase: .recreate).encoded().write(
+            to: URL(fileURLWithPath: dir.path + "/recreate.work.json"))
+        // The file has the new types: the VM changed. The file is gone: the notice says so.
+        for (text, recovery) in [
+            ("vmType: qemu\nmountType: sshfs\n", VMRecreateJournal.Recovery.restorePending),
+            ("vmType: vz\nmountType: virtiofs\n", .nothingChanged),
+        ] {
+            let found = ColimaModel.readRecreateJournals(in: dir.path, config: { _ in text }, isBusy: { _ in false })
+            let j = try #require(found["work"])
+            #expect(VMRecreateJournal.recovery(j, now: VMSettings.read(text), busy: false) == recovery)
+        }
+        let missing = ColimaModel.readRecreateJournals(in: dir.path, config: { _ in nil }, isBusy: { _ in false })
+        #expect(missing["work"] != nil)
+    }
+
     // MARK: Folder
 
     @Test func theBackupFolderHasTheProfileAndTheTimeAndTheMode0700() throws {

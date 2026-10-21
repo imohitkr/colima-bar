@@ -102,6 +102,8 @@ extension ColimaModel {
             return nil
         }
         let runner = VolumeBackupRunner(api: api)
+        // A Cancel of a VM type change that came before this step must stop it at once.
+        if fromRecreate, recreate?.isCancelling == true { runner.cancel() }
         volumeRunner = runner
         volumeProfile = profile
         setVolumeTransfer(VolumeTransfer(kind: .backup, volume: rows[0].name, total: rows[0].size))
@@ -184,6 +186,8 @@ extension ColimaModel {
     private func beginRestore(_ target: String, notifies: Bool, fromRecreate: Bool) -> RestoreJob? {
         guard mayStartTransfer(fromRecreate: fromRecreate, tell: notifies ? nil : { _ in }) else { return nil }
         let runner = VolumeBackupRunner(api: api)
+        // A Cancel of a VM type change that came before this step must stop it at once.
+        if fromRecreate, recreate?.isCancelling == true { runner.cancel() }
         volumeRunner = runner
         volumeProfile = profile
         var checking = VolumeTransfer(kind: .restore, volume: target)

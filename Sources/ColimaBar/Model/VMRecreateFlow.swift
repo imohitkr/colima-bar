@@ -18,8 +18,10 @@ enum VMRecreateFlow {
         var recreate: @MainActor (_ vmType: String, _ mountType: String) async -> Shell.Result
         var waitReady: @MainActor () async -> Bool
         var readTypes: @MainActor () -> (vmType: String, mountType: String)?
-        /// Why the flow must stop before a restore step, or nil if it may go on.
+        /// Why the flow must stop before a step, or nil if it may go on.
         var stopReason: @MainActor () -> VolumeTransferStop?
+        /// True after the user clicked Cancel. The flow checks it before every step.
+        var isCancelled: @MainActor () -> Bool
         /// Restores one volume from its file in the folder. Nil if it could not start.
         var restore: @MainActor (VMRecreateJournal.Volume, URL) async -> VolumeRestoreFlow.Outcome?
         /// True if the volume exists now. Nil if Docker does not answer.
@@ -27,7 +29,8 @@ enum VMRecreateFlow {
         /// The saved references that Docker does not have now. Nil if Docker does not answer.
         var missingImages: @MainActor ([String]) async -> [String]?
         var loadImages: @MainActor (_ file: URL, _ sha256: String) async -> VolumeBackupRunner.Failure?
-        var saveJournal: @MainActor (VMRecreateJournal) -> Void
+        /// Writes the journal. False if the journal in the cache folder could not be written.
+        var saveJournal: @MainActor (VMRecreateJournal) -> Bool
         var dropJournal: @MainActor () -> Void
         var progress: @MainActor (VMRecreateProgress.Step) -> Void
     }
@@ -54,7 +57,6 @@ enum VMRecreateFlow {
     ) async -> Outcome {
         var j = journal
         let named = folder?.lastPathComponent ?? ""
-        if folder != nil { steps.saveJournal(j) }
         /// The files that the backup wrote so far stay in the folder.
         func soFar(_ text: String) -> String {
             named.isEmpty || (j.volumes.isEmpty && j.imagesFile == nil) ? "" : " \(text) \(named)."
@@ -64,6 +66,30 @@ enum VMRecreateFlow {
             return .nothingChanged(
                 "Backup failed, so nothing changed: \(ColimaModel.sentence(reason))"
                     + soFar("The backups so far are in"))
+        }
+        /// The checks before each step that comes before the change.
+        func interrupted() -> Outcome? {
+            if steps.isCancelled() {
+                steps.dropJournal()
+                return .cancelledBeforeChange
+            }
+            if let why = steps.stopReason() {
+                steps.dropJournal()
+                return .nothingChanged(
+                    "ColimaBar stopped because \(why.because). Nothing changed." + soFar("The backups so far are in"))
+            }
+            return nil
+        }
+        func journalFailed() -> Outcome {
+            steps.dropJournal()
+            return .nothingChanged(
+                "ColimaBar could not write its journal in ~/.cache/colima-bar, so nothing changed."
+                    + soFar("The backups so far are in"))
+        }
+        if let stop = interrupted() { return stop }
+        if folder != nil {
+            guard steps.saveJournal(j) else { return journalFailed() }
+            if let stop = interrupted() { return stop }
         }
         if let folder, !backUp.isEmpty {
             steps.progress(.backingUp)
@@ -82,6 +108,7 @@ enum VMRecreateFlow {
                 return stopBefore(reason)
             }
         }
+        if let stop = interrupted() { return stop }
         if let folder, !saveImages.isEmpty {
             steps.progress(.savingImages)
             switch await steps.saveImages(saveImages, folder) {
@@ -96,8 +123,10 @@ enum VMRecreateFlow {
                 return stopBefore(f.reason)
             }
         }
+        if let stop = interrupted() { return stop }
         j.phase = .recreate
-        steps.saveJournal(j)
+        // The VM must not change if the journal is not on disk.
+        guard steps.saveJournal(j) else { return journalFailed() }
         steps.progress(.recreating)
         let result = await steps.recreate(j.to.vmType, j.to.mountType)
         let hasBackup = !j.volumes.isEmpty || j.imagesFile != nil
@@ -110,7 +139,8 @@ enum VMRecreateFlow {
             if let now, now != (j.to.vmType, j.to.mountType) {
                 // colima.yaml has other values: the script changed nothing, or restored the old file.
                 steps.dropJournal()
-                return .nothingChanged("Nothing changed." + soFar("The backups are in"))
+                return .nothingChanged(
+                    "The VM type did not change. The VM may be stopped." + soFar("The backups are in"))
             }
             guard hasBackup else {
                 steps.dropJournal()
@@ -119,7 +149,7 @@ enum VMRecreateFlow {
             }
             if now != nil {
                 j.phase = .restore
-                steps.saveJournal(j)
+                _ = steps.saveJournal(j)
             }
             return .restorePending(
                 "The VM of profile \(j.profile) did not start with \(j.to.vmType) / \(j.to.mountType). The backups are in \(named). Start the VM, then click Restore Backups."
@@ -130,7 +160,7 @@ enum VMRecreateFlow {
             return .finished(restored: 0, kept: 0, failed: [], imagesLoaded: false)
         }
         j.phase = .restore
-        steps.saveJournal(j)
+        _ = steps.saveJournal(j)
         guard hasBackup, let folder else {
             steps.dropJournal()
             return .finished(restored: 0, kept: 0, failed: [], imagesLoaded: false)
@@ -149,7 +179,7 @@ enum VMRecreateFlow {
     static func resume(_ journal: VMRecreateJournal, folder: URL, steps: Steps) async -> Outcome {
         var j = journal
         j.phase = .restore
-        steps.saveJournal(j)
+        _ = steps.saveJournal(j)
         return await restoreMissing(j, folder: folder, steps: steps)
     }
 
@@ -165,6 +195,7 @@ enum VMRecreateFlow {
         var kept = 0
         var failed: [String] = []
         for volume in j.volumes {
+            if steps.isCancelled() { return stopped(nil) }
             if let why = steps.stopReason() { return stopped(why.because) }
             steps.progress(.restoring)
             guard let exists = await steps.volumeExists(volume.name) else {
@@ -184,9 +215,11 @@ enum VMRecreateFlow {
         }
         var loaded = false
         if let file = j.imagesFile, let sha = j.imagesSHA256, !j.images.isEmpty {
+            if steps.isCancelled() { return stopped(nil) }
             if let why = steps.stopReason() { return stopped(why.because) }
             if let missing = await steps.missingImages(j.images) {
                 if !missing.isEmpty {
+                    if steps.isCancelled() { return stopped(nil) }
                     steps.progress(.loadingImages)
                     if let f = await steps.loadImages(folder.appendingPathComponent(file), sha) {
                         if f.cancelled { return stopped(steps.stopReason()?.because) }
