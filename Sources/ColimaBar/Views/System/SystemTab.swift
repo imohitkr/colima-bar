@@ -12,7 +12,11 @@ struct SystemTab: View {
             VMSettingsSection(model: model, form: form, ui: ui, running: true)
 
             Divider()
-            SectionHeader(title: "Disk usage")
+            SectionHeader(title: "Disk usage") {
+                Button("Clean Up…") { ui.showCleanup = true }
+                    .buttonStyle(.borderless).font(.caption)
+                    .hint(Help.cleanupOpen)
+            }
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
                 GridRow {
                     Text("Type")
@@ -40,6 +44,12 @@ struct SystemTab: View {
                 Button("Full cleanup") { model.run(.prune, "all") }.hint(Help.pruneAll)
             }
             .controlSize(.small)
+            Toggle("Clean up dangling images and build cache weekly", isOn: $model.scheduledPrune)
+                .toggleStyle(.checkbox)
+                .hint(Help.scheduledPrune)
+            if model.scheduledPrune {
+                Text(prunedCaption).font(.caption2).foregroundStyle(.secondary).padding(.leading, 22)
+            }
 
             Divider()
             SectionHeader(title: "Auto-start & auto-stop")
@@ -212,6 +222,12 @@ struct SystemTab: View {
     private var doctorSummary: String {
         guard let r = model.currentDoctorReport else { return "Checks the Docker setup. Not run yet." }
         return "\(r.summary) · \(r.date.formatted(date: .omitted, time: .shortened))"
+    }
+
+    /// The date of the last weekly cleanup of the selected profile.
+    private var prunedCaption: String {
+        guard let last = model.pruneLastRun[model.profile] else { return "Not run yet." }
+        return "Last run: \(last.formatted(date: .abbreviated, time: .shortened))."
     }
 
     private func dfHelp(_ type: String) -> String {

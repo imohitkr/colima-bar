@@ -12,7 +12,7 @@ import Testing
             "toldIconHidden", "apiVersion", "checkUpdates", "notifiedVersion", "didOfferLoginItem",
             "didMigrateLoginItem", "revealOnLaunch", "keepRemovedLogs",
             "goodStartVersions", "installedVersion", "recoveryPath", "askBeforeLinks", "linkHandoff", "hotKey",
-            "debugShellImage",
+            "debugShellImage", "scheduledPrune", "scheduledPruneLastRun",
         ]
         #expect(Set(Defaults.Key.allCases.map(\.rawValue)) == expected)
     }

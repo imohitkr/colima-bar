@@ -188,6 +188,33 @@ enum Help {
     static let pruneVolumes = "Delete all volumes that no container uses. Their data is lost permanently."
     static let pruneAll = "Remove stopped containers, unused networks, unused images and build cache. Volumes stay."
 
+    // System: cleanup
+    static let cleanupOpen =
+        "Show the largest images, volumes, containers, build cache and logs. Remove items one by one, and return free space to the Mac."
+    static let cleanupDone = "Close the cleanup page and go back to the System tab."
+    static let cleanupRefresh = "Read the disk use, the log sizes and the size of the disk image again."
+    static let cleanupDiskImage =
+        "The space that the VM disk uses on your Mac. When you remove items, the space is free in the VM. The disk image gets smaller only after Return Free Space."
+    static let cleanupTrim =
+        "Tell the VM to trim its file systems (fstrim). Then macOS can take back the free blocks of the disk image. Containers continue to run. It needs a running VM and no other action."
+    static let cleanupDebug = "A debug run changes nothing."
+    static let cleanupImageRemove = "Remove this image. Docker pulls it again when you need it. ColimaBar asks first."
+    static let cleanupImageInUse = "A container uses this image. Remove the container first."
+    static let cleanupImageTags = "This image has more than one tag. Remove its tags in the Images tab."
+    static let cleanupVolumeRemove = "Delete this volume. Its data is lost permanently. ColimaBar asks first."
+    static let cleanupContainerRemove =
+        "Remove this stopped container and the files that changed in it. ColimaBar asks first."
+    static let cleanupCache =
+        "BuildKit cache from docker build. Remove Unused keeps the cache that a running build uses. The next builds take longer."
+    static let pruneCache =
+        "Remove the build cache that no build uses. The next builds take longer."
+    static let cleanupLogs =
+        "The json log file of each container in the VM. Docker keeps it until you remove the container."
+    static let cleanupLogEmpty =
+        "Empty the log file of this container. docker logs then shows only new lines. ColimaBar asks first."
+    static let scheduledPrune =
+        "Once a week, remove dangling images and unused build cache of the selected profile. It runs only while the VM runs, and no action or docker traffic runs. It never starts the VM and never asks."
+
     // Profiles
     static let profile =
         "The Colima profile that this dashboard shows. Each profile is a separate VM with its own containers, images and settings. Click to switch, to start or stop a profile, or to create or delete a profile."

@@ -48,6 +48,11 @@ enum Defaults {
         /// The image of the debug shell (`DebugShell.image`). Set it with
         /// `defaults write`. It is not in the settings file.
         case debugShellImage
+        /// Run a weekly cleanup of dangling images and build cache. Off by default.
+        case scheduledPrune
+        /// The last weekly cleanup of each profile, as profile to seconds
+        /// since 1970 (`PruneSchedule`). It is machine state, not a setting.
+        case scheduledPruneLastRun
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

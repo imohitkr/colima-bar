@@ -103,9 +103,26 @@ import Testing
     @Test func diskActionsAreUrgent() {
         let disk: Set<CtlAction> = [
             .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,
-            .composePull, .composeDown,
+            .composePull, .composeDown, .autoPrune,
         ]
         for a in CtlAction.allCases { #expect(a.changesDisk == disk.contains(a), "\(a.rawValue)") }
+    }
+
+    @Test func cleanupActionsAreNoVMActions() {
+        for a in [CtlAction.logTruncate, .diskTrim, .autoPrune] {
+            #expect(!a.isVMAction, "\(a.rawValue)")
+            #expect(a.busyLabel(running: true) == nil, "\(a.rawValue)")
+            #expect(!a.checksExpectedState, "\(a.rawValue)")
+        }
+    }
+
+    @Test func onlyEmptyingALogAsks() {
+        #expect(CtlAction.logTruncate.showsDialog(running: true))
+        #expect(CtlAction.logTruncate.showsDialog(running: false))
+        for a in [CtlAction.diskTrim, .autoPrune] {
+            #expect(!a.showsDialog(running: true), "\(a.rawValue)")
+            #expect(!a.showsDialog(running: false), "\(a.rawValue)")
+        }
     }
 
     @Test func vmActionsShowABusyLabel() {

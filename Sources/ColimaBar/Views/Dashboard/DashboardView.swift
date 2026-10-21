@@ -16,6 +16,8 @@ struct DashboardView: View {
                 DoctorView(model: model, ui: ui)
             } else if ui.showVMConfig {
                 VMConfigView(model: model, ui: ui)
+            } else if ui.showCleanup {
+                CleanupView(model: model, ui: ui)
             } else if let id = ui.inspectID, model.state == .running {
                 InspectView(model: model, ui: ui, id: id)
             } else if model.state == .running {

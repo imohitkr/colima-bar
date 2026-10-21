@@ -107,6 +107,20 @@ If the notification says that the stop failed, the new disk exists and the VM ru
 
 The containers, images and volumes are gone after the delete. You cannot get them back.
 
+## The disk image does not get smaller
+
+When you remove images, volumes or containers, the space is free in the VM. The disk image on your Mac keeps its size. To give the space back, open the cleanup page and click **Return Free Space**. See [Clean up disk space](usage.md#clean-up-disk-space).
+
+If the notification says that the VM trimmed space but the disk image has the same size, the VM type or macOS does not pass the trim to the file. To get a smaller disk image, use **Shrink…**. It makes a new, empty disk. See [Shrink the disk](usage.md#shrink-the-disk).
+
+## ColimaBar could not read the log files in the VM
+
+The cleanup page shows this text when the list of container logs fails. ColimaBar runs `sudo -n` in the VM through `colima ssh`. The text can have a short cause in brackets. Check these:
+
+1. Check that the VM runs: `colima status --profile PROFILE`.
+2. Check that `colima ssh --profile PROFILE -- sudo -n true` works. If it says that a password is required, `sudo` in the VM needs a password. The Colima VM does not need one by default.
+3. Click **Refresh**. The page does not check again within 60 seconds on its own.
+
 ## A volume restore fails
 
 Read the notification. It gives the reason. ColimaBar changes nothing before it has checked the whole file. See [Back up and restore volumes](usage.md#back-up-and-restore-volumes).

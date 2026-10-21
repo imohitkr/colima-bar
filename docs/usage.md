@@ -136,7 +136,7 @@ If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-res
 - Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is not `vz`, the Rosetta switch is disabled, unless Rosetta is on. A missing `vmType` counts as `vz`.
 - **More VM settings…**: DNS, the port forwarder, the IP address, mounts, inotify and Docker registries. See [VM settings](#vm-settings).
 - To change these settings while the VM is stopped, use the [stopped screen](#open-the-dashboard).
-- **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons.
+- **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons. **Clean Up…** opens the cleanup page. See [Clean up disk space](#clean-up-disk-space). **Clean up dangling images and build cache weekly** runs the safe cleanup once a week.
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md). **Stop sooner on battery or in Low Power Mode** shortens the idle time. See [On battery and in Low Power Mode](auto-stop.md#on-battery-and-in-low-power-mode).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
 - **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
@@ -242,6 +242,22 @@ Repair removes only these regular files (never links) whose owner process is gon
 
 Repair never touches disks, `cidata.iso`, `*.yaml` files, logs or sockets. Your containers, images and volumes stay. Running containers stop. Repair refuses to run if the profile has no `colima.yaml`, while a `colima start` or `colima restart` of the profile runs, or while another action of the profile runs. ColimaBar writes each removed file to `~/.cache/colima-bar/ctl.log`.
 
+### Clean up disk space
+
+On the System tab, click **Clean Up…** in the **Disk usage** section. The page replaces the tabs. Click **Done** to go back. The page has these parts:
+
+- **Disk image on the Mac**: the space that the disk image of the VM uses on your Mac, and its maximum size. See **Return Free Space** below.
+- **Images**, **Unused volumes**, **Stopped containers** and **Build cache**: the largest items of each kind, with their sizes. Each section shows at most 10 rows (5 for the build cache), the largest first. A line below the rows gives the number and the size of the rest. Use the Images and Volumes tabs to see all items.
+- **Container logs**: the size of the json log file of each container in the VM.
+
+Click **Remove…** on a row to remove the item. ColimaBar asks first. An image that a container uses, and an image with more than one tag, have no button. Remove the container first, or remove the tags in the Images tab. A build cache entry has no button. Click **Remove Unused…** in the section header instead. It keeps the cache that a running build uses. The headers of the image and volume sections also have **Remove Unused…** and **Remove All…**. The image and volume buttons do the same as **Unused images** and **Unused volumes** on the System tab. **Remove Unused…** for the build cache has no button there.
+
+**Empty…** empties the log file of one container. `docker logs` then shows only new lines. The page lists only the active file of the json-file log driver. The rotated files (`-json.log.1`) and other log drivers are not in the list.
+
+**Return Free Space** runs `fstrim` in the VM. Removing items frees space in the VM, but the disk image on your Mac keeps its size. After the trim, macOS can take back the free blocks. The VM and the containers continue to run. When the run ends, a notification gives the size of the disk image before and after. The result depends on the VM type and on macOS. If the image stays the same size, see [The disk image does not get smaller](troubleshooting.md#the-disk-image-does-not-get-smaller).
+
+The weekly cleanup is off by default. To turn it on, select **Clean up dangling images and build cache weekly** on the System tab. Then ColimaBar removes the dangling images and the unused build cache of the selected profile once a week. It runs only while the VM runs, no other action of the profile runs and no docker traffic is live. A build or a pull is live traffic, so the cleanup waits for it to end. It never starts the VM and never asks. The first run comes soon after you turn it on. The System tab shows the date of the last run. If a run fails, ColimaBar sends one notification and tries again after 6 hours. If the VM is busy, it tries again after 1 hour. A good run counts for a week. A debug run never runs it.
+
 ### Shrink the disk
 
 > [!WARNING]
@@ -266,7 +282,7 @@ If the VM was stopped, Colima must start it once to create the new disk. Thus Co
 
 Use these buttons to copy your ColimaBar settings to a different Mac.
 
-**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item and the keyboard shortcut. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup and the keyboard shortcut. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 
@@ -404,6 +420,8 @@ ColimaBar sends few notifications. It sends one in these cases:
 - The icon hides for the first time. This occurs only when [Hide the icon](#hide-the-icon) is on.
 - ColimaBar refuses a link, or a link is not valid. If notifications are off, an alert window shows the text. See [A link does nothing](troubleshooting.md#a-link-does-nothing).
 - After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).
+- **Return Free Space** ends. The notification gives the size of the disk image before and after. See [Clean up disk space](#clean-up-disk-space).
+- The weekly cleanup fails.
 - A volume backup or restore ends or fails. The notification has the volume name and the file name, never the path. See [Back up and restore volumes](#back-up-and-restore-volumes).
 - A docker compose command fails, or ColimaBar stops it after 15 minutes. The notification gives the exit code, not the output. See [Compose projects](#compose-projects).
 - A published port answers in the VM but not on the Mac, or the VM cannot resolve host names while the Mac can. The notification has a **Restart** button. See [When the network changes](#when-the-network-changes).

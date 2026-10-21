@@ -215,6 +215,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
             // COLIMABAR_DOCTOR=1: show the Doctor page. It runs the checks.
             if ProcessInfo.processInfo.environment["COLIMABAR_DOCTOR"] == "1" { ui.showDoctor = true }
+            // COLIMABAR_CLEANUP=1: show the Cleanup page (from the System tab).
+            if ProcessInfo.processInfo.environment["COLIMABAR_CLEANUP"] == "1" {
+                ui.tab = .system
+                ui.showCleanup = true
+            }
+            // COLIMABAR_CLEANUP_FIXTURE=PATH: show the rows of a JSON file
+            // instead of the live data. For screenshots. A debug run only.
+            if let path = ProcessInfo.processInfo.environment["COLIMABAR_CLEANUP_FIXTURE"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    guard let data = FileManager.default.contents(atPath: path) else { return }
+                    self?.model.loadCleanupFixture(data)
+                }
+            }
             // COLIMABAR_VMCONFIG=1: show the "More VM settings" page.
             if ProcessInfo.processInfo.environment["COLIMABAR_VMCONFIG"] == "1" { ui.showVMConfig = true }
             // COLIMABAR_RUNNING_ONLY=1: turn the filter on in memory only.

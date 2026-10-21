@@ -17,6 +17,7 @@ import Testing
         .checkUpdates: .bool(true),
         .profile: .string("work"),
         .launchAtLogin: .bool(true),
+        .scheduledPrune: .bool(false),
         .hotKey: .string("control+option+command+C"),
     ]
 
@@ -50,6 +51,23 @@ import Testing
         #expect(root["app"] as? String == "0.5.0")
         let settings = try #require(root["settings"] as? [String: Any])
         #expect(Set(settings.keys) == Set(T.Setting.allCases.map(\.rawValue)))
+    }
+
+    @Test func scheduledPruneIsASetting() throws {
+        var current = sample
+        current[.scheduledPrune] = .bool(false)
+        let encoded = try T.encode(current, appVersion: "1")
+        let settings = try #require(try object(encoded)["settings"] as? [String: Any])
+        #expect(settings["scheduledPrune"] as? Bool == false)
+        let plan = try T.plan(file(#"{"scheduledPrune": true}"#), current: current, profiles: [])
+        #expect(plan.changes.map(\.setting) == [.scheduledPrune])
+        #expect(plan.changes.first?.to == .bool(true))
+        #expect(T.Setting.scheduledPrune.title == "Weekly cleanup")
+    }
+
+    /// The date of the last weekly cleanup is machine state, not a setting.
+    @Test func theLastWeeklyCleanupIsNeverExported() {
+        #expect(!T.Setting.allCases.map(\.rawValue).contains("scheduledPruneLastRun"))
     }
 
     @Test func exportIsStable() throws {

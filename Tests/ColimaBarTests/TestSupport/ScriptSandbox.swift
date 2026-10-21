@@ -15,6 +15,12 @@ import Foundation
 ///
 /// Stub exit codes: `STUB_OSASCRIPT_EXIT` (default 0: the user clicked OK)
 /// and `STUB_COLIMA_STATUS` for `colima status` (default 1: stopped).
+/// `STUB_COLIMA_SSH_OUT` is the text that `colima ssh` prints (for example the
+/// output of fstrim) and `STUB_COLIMA_SSH_EXIT` its exit status (default 0).
+/// `STUB_DOCKER_EXIT` is the exit status of the stub `docker` (default 0).
+/// `STUB_DOCKER_PROBE` is a file: the stub `docker` logs "docker saw marker"
+/// when it exists. `STUB_OSASCRIPT_STOPS_VM=1` makes `colima status` fail
+/// after the first dialog, like a VM that stops while the dialog is open.
 /// If `STUB_DELETE_DIR` is set, `colima delete` removes that folder, like
 /// the real `colima delete` removes the profile folder. The stub `pgrep`
 /// finds no process and logs nothing, so a real `colima start` on the Mac
@@ -68,6 +74,7 @@ final class ScriptSandbox {
             printf 'osascript %s\\n' "$*" >> "\(log)"
             [ -n "${STUB_OSASCRIPT_OUT:-}" ] && printf '%s\\n' "$STUB_OSASCRIPT_OUT"
             [ -n "${STUB_OSASCRIPT_ERR:-}" ] && printf '%s\\n' "$STUB_OSASCRIPT_ERR" >&2
+            [ -n "${STUB_OSASCRIPT_STOPS_VM:-}" ] && : > "\(root)/vm-stopped"
             exit "${STUB_OSASCRIPT_EXIT:-0}"
             """)
         // The release notes button opens a page. The stub only logs the URL.
@@ -76,11 +83,19 @@ final class ScriptSandbox {
             "colima",
             """
             printf 'colima %s\\n' "$*" >> "\(log)"
-            [ "$1" = status ] && exit "${STUB_COLIMA_STATUS:-1}"
+            [ "$1" = status ] && { [ -e "\(root)/vm-stopped" ] && exit 1; exit "${STUB_COLIMA_STATUS:-1}"; }
+            [ "$1" = ssh ] && { [ -n "${STUB_COLIMA_SSH_OUT:-}" ] && printf '%s\\n' "$STUB_COLIMA_SSH_OUT"; exit "${STUB_COLIMA_SSH_EXIT:-0}"; }
             [ "$1" = delete ] && [ -n "${STUB_DELETE_DIR:-}" ] && rm -rf "$STUB_DELETE_DIR"
             exit 0
             """)
-        try stub("docker", "printf 'docker %s\\n' \"$*\" >> \"\(log)\"\nexit 0")
+        // STUB_DOCKER_PROBE is a file path. The stub logs "docker saw marker" when it exists.
+        try stub(
+            "docker",
+            """
+            printf 'docker %s\\n' "$*" >> "\(log)"
+            [ -n "${STUB_DOCKER_PROBE:-}" ] && [ -e "$STUB_DOCKER_PROBE" ] && printf 'docker saw marker\\n' >> "\(log)"
+            exit "${STUB_DOCKER_EXIT:-0}"
+            """)
         // colima-ctl.sh k8s on switches the kubectl context.
         try stub("kubectl", "printf 'kubectl %s\\n' \"$*\" >> \"\(log)\"\nexit 0")
         // colima-ctl.sh looks for a `colima start` in progress.

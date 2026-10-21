@@ -15,6 +15,7 @@ extension ColimaModel {
             .checkUpdates: .bool(Updater.shared.enabled),
             .profile: .string(profile),
             .launchAtLogin: .bool(LoginItem.isEnabled),
+            .scheduledPrune: .bool(scheduledPrune),
             // Read from Defaults, not from HotKey: the command never touches HotKey.
             .hotKey: .string(Defaults.string(.hotKey).flatMap { KeyCombo(spec: $0)?.spec } ?? ""),
         ]
@@ -37,6 +38,7 @@ extension ColimaModel {
         case (.notifyOnCrash, .bool(let v)): notifyOnCrash = v
         case (.keepRemovedLogs, .bool(let v)): keepRemovedLogs = v
         case (.checkUpdates, .bool(let v)): Updater.shared.enabled = v
+        case (.scheduledPrune, .bool(let v)): scheduledPrune = v
         case (.profile, .string(let name)):
             // The profile can be deleted while the confirmation is open.
             guard profileNames.contains(name) else { return "Profile: \(name) does not exist on this Mac." }

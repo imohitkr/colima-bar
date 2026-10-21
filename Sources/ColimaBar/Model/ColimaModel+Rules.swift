@@ -59,6 +59,15 @@ extension ColimaModel {
     /// The Images, Volumes and System tabs show data from `/system/df`.
     nonisolated static func showsDiskUsage(_ tab: DashboardTab) -> Bool { tab != .containers }
 
+    /// True while a dashboard shows a page with `/system/df` data: a disk tab
+    /// or the Cleanup page. A debug fixture replaces the live data.
+    nonisolated static func wantsDF(
+        visible: Bool, tab: DashboardTab, cleanupOnScreen: Bool, running: Bool, hasDockerSocket: Bool,
+        fixtureLoaded: Bool
+    ) -> Bool {
+        visible && (showsDiskUsage(tab) || cleanupOnScreen) && running && hasDockerSocket && !fixtureLoaded
+    }
+
     nonisolated static func derivedLists(_ containers: [Container])
         -> (running: [Container], stopped: [Container], unhealthy: Int)
     {

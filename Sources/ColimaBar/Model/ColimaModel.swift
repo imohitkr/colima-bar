@@ -40,6 +40,31 @@ final class ColimaModel {
     private(set) var df: [DFRow] = []
     private(set) var images: [ImageRow] = []
     private(set) var volumes: [VolumeRow] = []
+    /// The rows of the Cleanup page, from the same /system/df call as `df`.
+    private(set) var cleanup = CleanupReport.empty
+    /// The size of the json log file of each container, by full ID, from the
+    /// last check. Nil before the first check.
+    private(set) var logSizes: [String: Int64]?
+    /// The log rows, from `cleanup` and `logSizes`. Updated when either changes.
+    private(set) var logItems = CleanupReport.Section()
+    private(set) var logSizesChecking = false
+    /// Why the last log check gave no sizes, or nil.
+    private(set) var logSizesError: String?
+    /// The disk image of the selected profile on the Mac. Nil when unknown.
+    private(set) var diskImage: DiskImageSize?
+    /// A Return Free Space run that ColimaBar started runs now.
+    private(set) var isTrimming = false
+    /// The last weekly cleanup of each profile (`Defaults.Key.scheduledPruneLastRun`).
+    private(set) var pruneLastRun: [String: Date] = PruneSchedule.decode(Defaults.dictionary(.scheduledPruneLastRun))
+    /// Weekly cleanup of dangling images and build cache. Off by default.
+    var scheduledPrune = Defaults.bool(.scheduledPrune) ?? false {
+        didSet {
+            guard scheduledPrune != oldValue else { return }
+            Defaults.set(scheduledPrune, .scheduledPrune)
+            // A new start of the setting begins with no wait.
+            if !scheduledPrune { pruneRetryAt = [:] }
+        }
+    }
     private(set) var profiles: [ProfileRow] = []
     /// VM actions that run for profiles other than the selected one, by
     /// profile: the busy label, for example "Starting". The profile menu
@@ -250,6 +275,21 @@ final class ColimaModel {
     @ObservationIgnored private var containerRefresh: Task<Void, Never>?
     @ObservationIgnored private var reloadPending = false  // an event since the last refresh changed containers
     @ObservationIgnored private var dfGate = DFGate()
+    /// The Cleanup page is on screen. It makes `wantsDF` true like a disk tab.
+    @ObservationIgnored var cleanupOnScreen = false {
+        didSet { if cleanupOnScreen, !oldValue { requestDF() } }
+    }
+    /// When the last log check ended, so the page does not ask again within 60 s.
+    @ObservationIgnored var logSizesCheckedAt: Date?
+    /// The time before which no weekly cleanup of a profile starts again, in
+    /// this launch (see `PruneSchedule.retryAt`).
+    @ObservationIgnored var pruneRetryAt: [String: Date] = [:]
+    /// The probe of the log sizes. A test replaces it.
+    @ObservationIgnored var logProbe: @Sendable (String) async -> CleanupProbe.LogCheck = {
+        await CleanupProbe.logSizes(profile: $0)
+    }
+    /// A debug run loaded COLIMABAR_CLEANUP_FIXTURE: no df or log call replaces it.
+    @ObservationIgnored var cleanupFixtureLoaded = false
     @ObservationIgnored private var dfToken = 0  // bumps when dfGate resets; older df tasks then stop
     @ObservationIgnored private var diskDirty = false  // an event changed images, volumes or disk use
     @ObservationIgnored private var lastColima = Date.distantPast
@@ -529,6 +569,7 @@ final class ColimaModel {
         }
         checkIdle()
         checkOtherProfilesIdle()
+        checkScheduledPrune()
         publishAppStatus()
     }
 
@@ -536,6 +577,9 @@ final class ColimaModel {
     /// containerd): then no docker socket answers, so ColimaBar doesn't ping
     /// it, stream its events or list its containers.
     var hasDockerSocket: Bool { Self.hasDockerSocket(runtime: vm.runtime) }
+
+    /// True while an action of the selected profile runs.
+    var hasActionInFlight: Bool { (actionsInFlight[profile] ?? 0) > 0 }
 
     /// The selected profile's busy marker, or the label of an action this app
     /// just launched whose script hasn't written its marker yet.
@@ -705,7 +749,7 @@ final class ColimaModel {
         address && ipAddress.isEmpty && !unavailable
     }
 
-    private func clearVMData(because: VolumeTransferStop) {
+    func clearVMData(because: VolumeTransferStop) {
         stopVolumeTransferForVMChange(because)
         events?.cancel()
         events = nil
@@ -716,6 +760,12 @@ final class ColimaModel {
         set(\.images, [])
         set(\.volumes, [])
         set(\.df, [])
+        set(\.cleanup, .empty)
+        set(\.logSizes, nil)
+        set(\.logItems, .init())
+        set(\.logSizesError, nil)
+        set(\.logSizesChecking, false)
+        logSizesCheckedAt = nil
         set(\.cpuHistory, [])
         set(\.memHistory, [])
     }
@@ -739,6 +789,7 @@ final class ColimaModel {
     private func retargetSocket() {
         generation += 1
         clearVMData(because: .profileChanged)
+        set(\.diskImage, nil)
         for h in statStreams.values { h.cancel() }
         statStreams = [:]
         latest = [:]
@@ -790,7 +841,9 @@ final class ColimaModel {
 
     /// True while a dashboard shows a tab with `/system/df` data.
     private var wantsDF: Bool {
-        visibleCount > 0 && Self.showsDiskUsage(dashboardTab) && state == .running && hasDockerSocket
+        Self.wantsDF(
+            visible: visibleCount > 0, tab: dashboardTab, cleanupOnScreen: cleanupOnScreen, running: state == .running,
+            hasDockerSocket: hasDockerSocket, fixtureLoaded: cleanupFixtureLoaded)
     }
 
     /// Asks for fresh `/system/df` data. dockerd walks every volume and
@@ -841,6 +894,13 @@ final class ColimaModel {
         guard let r = await api.get("/system/df", timeout: 30), r.ok, gen == generation,
             let d = try? JSONDecoder().decode(APIDF.self, from: r.body)
         else { return }
+        applyDF(d)
+    }
+
+    /// Publishes the disk use rows, the image and volume rows and the Cleanup
+    /// rows of one `/system/df` answer. Internal, so a test and the debug
+    /// fixture can call it.
+    func applyDF(_ d: APIDF) {
         let imgs = d.Images ?? []
         let ctrs = d.Containers ?? []
         let vols = d.Volumes ?? []
@@ -892,6 +952,13 @@ final class ColimaModel {
                     project: $0.Labels?["com.docker.compose.project"],
                     isAnonymous: $0.Labels?["com.docker.volume.anonymous"] != nil)
             }.sorted { ($0.links, $0.size) > ($1.links, $1.size) })
+        set(\.cleanup, CleanupReport.make(from: d))
+        updateLogItems()
+    }
+
+    /// Builds the log rows from the report and the last log sizes.
+    func updateLogItems() {
+        set(\.logItems, logSizes.map { cleanup.logItems($0) } ?? .init())
     }
 
     func refreshRouting() async {
@@ -1083,6 +1150,29 @@ final class ColimaModel {
             }
             isApplyingContexts = false
         }
+    }
+
+    /// Runs the weekly cleanup of the selected profile when it is due and the
+    /// VM is idle. It never starts a VM: the script exits with 2 if the VM is down.
+    func checkScheduledPrune() {
+        if claimScheduledPrune(now: Date()) { runScheduledPrune(profile) }
+    }
+
+    /// True when a weekly cleanup of the selected profile starts now. It then
+    /// holds the profile back for one hour, until the run sets the real wait.
+    func claimScheduledPrune(now: Date) -> Bool {
+        guard
+            PruneSchedule.mayRun(
+                enabled: scheduledPrune, isDebug: isDebug, updateRestarting: updateRestarting,
+                running: state == .running, hasDockerSocket: hasDockerSocket, busyMarker: busy,
+                actionsInFlight: actionsInFlight[profile] ?? 0, waking: wakes[profile] != nil,
+                transferring: volumeTransfer != nil, proxyTransfers: selectedTransfers(), trimming: isTrimming)
+        else { return false }
+        guard PruneSchedule.isDue(lastRun: pruneLastRun[profile], retryAt: pruneRetryAt[profile], now: now) else {
+            return false
+        }
+        pruneRetryAt[profile] = now.addingTimeInterval(PruneSchedule.retryAfter)
+        return true
     }
 
     /// Stops the VM once it has had no running containers for the chosen time.
@@ -1545,6 +1635,11 @@ final class ColimaModel {
     /// the busy marker and notifications), then refreshes. `profile` is the
     /// profile to act on; nil means the selected profile.
     func run(_ action: CtlAction, _ args: String..., profile target: String? = nil) {
+        run(action, args: args, profile: target)
+    }
+
+    /// Like `run(_:_:profile:)` with the arguments in an array.
+    func run(_ action: CtlAction, args: [String], profile target: String? = nil) {
         // The old copy quits at once after the swap of an update.
         guard !updateRestarting else { return }
         if action == .diskShrink, volumeTransfer != nil {
@@ -1573,6 +1668,15 @@ final class ColimaModel {
     func execute(
         _ action: CtlAction, _ args: [String], profile p: String, label: String?, expectRunning: Bool? = nil
     ) async -> Bool {
+        await executeResult(action, args, profile: p, label: label, expectRunning: expectRunning).ok
+    }
+
+    /// Like `execute`, and returns the result of the script, so a caller can
+    /// read its exit status and its output.
+    @discardableResult
+    func executeResult(
+        _ action: CtlAction, _ args: [String], profile p: String, label: String?, expectRunning: Bool? = nil
+    ) async -> Shell.Result {
         actionsInFlight[p, default: 0] += 1
         defer { actionsInFlight[p, default: 1] -= 1 }
         // A start of a profile is good when the script exits with 0 and prints
@@ -1626,7 +1730,7 @@ final class ColimaModel {
             checkDockerContext()
             forgetNetworkHealth(p)
         }
-        return r.ok
+        return r
     }
 
     /// The messages of the `COLIMABAR_NOTIFY:<message>` lines in the output
@@ -1661,6 +1765,24 @@ final class ColimaModel {
     /// `ColimaModel+Diagnostics` sets the flag through this function.
     func setSavingDiagnostics(_ on: Bool) { set(\.isSavingDiagnostics, on) }
     func setVolumeTransfer(_ transfer: VolumeTransfer?) { set(\.volumeTransfer, transfer) }
+
+    /// `ColimaModel+Cleanup` stores its state through these.
+    func setLogSizes(_ sizes: [String: Int64]?, error: String?) {
+        set(\.logSizes, sizes)
+        set(\.logSizesError, error)
+        updateLogItems()
+    }
+    func setState(_ s: VMState) { set(\.state, s) }
+    func setLogSizesChecking(_ on: Bool) { set(\.logSizesChecking, on) }
+    func setDiskImage(_ size: DiskImageSize?) { set(\.diskImage, size) }
+    func setTrimming(_ on: Bool) { set(\.isTrimming, on) }
+    /// Saves the time of a weekly cleanup of a profile.
+    func savePruneRun(_ p: String, at date: Date) {
+        var runs = pruneLastRun
+        runs[p] = date
+        Defaults.set(PruneSchedule.encode(runs), .scheduledPruneLastRun)
+        set(\.pruneLastRun, runs)
+    }
 
     // MARK: - Profiles
 

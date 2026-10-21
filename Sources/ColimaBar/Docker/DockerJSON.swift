@@ -111,6 +111,10 @@ struct APIDF: Decodable {
         let Containers: Int
     }
     struct Ctr: Decodable {
+        let Id: String?
+        let Names: [String]?
+        let Image: String?
+        let Labels: [String: String]?
         let SizeRw: Int64?
         let State: String
     }
@@ -124,6 +128,10 @@ struct APIDF: Decodable {
         let UsageData: Usage?
     }
     struct Cache: Decodable {
+        let ID: String?
+        let `Type`: String?
+        let Description: String?
+        let LastUsedAt: String?
         let Size: Int64
         let InUse: Bool
         let Shared: Bool

@@ -26,10 +26,11 @@
 - **Auto-stop**: ColimaBar can stop the VM when it is idle.
 - **Network health**: ColimaBar finds published ports that stopped answering on the Mac, and a VM that cannot resolve names after a VPN change. It offers a restart.
 - **Doctor**: one click checks the docker setup (context, routes, shell, plugins, VM, disk, published ports and DNS) and fixes common problems. **Repair** gets a Broken profile running again.
+- **Cleanup**: see the largest images, unused volumes, stopped containers, build cache and container logs, remove them one by one, and return free space to the Mac.
 - **Links**: start, stop or restart the VM, or open the dashboard, from Raycast, Alfred, Shortcuts or a script with `colimabar://` links. ColimaBar asks first.
 - **Shortcut**: press a keyboard shortcut that you choose to open or close the dashboard from any app. It needs no extra permission.
 - **Command line**: run `colimabar status`, `start`, `stop` or `doctor` in Terminal. Add `--json` for scripts.
-- **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, when a Doctor fix ends, when a volume backup or restore ends, when a published port or the DNS of the VM breaks, when ColimaBar refuses a link, after an auto-start that follows a Colima or Lima upgrade, one for each new version and one after an in-app update, and one the first time the icon hides.
+- **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, when a Doctor fix ends, when a volume backup or restore ends, when Return Free Space ends, when a weekly cleanup fails, when a published port or the DNS of the VM breaks, when ColimaBar refuses a link, after an auto-start that follows a Colima or Lima upgrade, one for each new version and one after an in-app update, and one the first time the icon hides.
 
 > [!NOTE]
 > ColimaBar is an independent community project. It is not part of [Colima](https://github.com/abiosoft/colima), and the Colima maintainers do not support it. Report ColimaBar problems in the [ColimaBar issue tracker](https://github.com/imohitkr/colima-bar/issues).
