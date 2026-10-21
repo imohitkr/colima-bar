@@ -388,6 +388,8 @@ final class ColimaModel {
     @ObservationIgnored var httpsProviderTask: Task<TLSIdentityProvider?, Never>?
     /// The names of the certificate that the fallback mode serves.
     @ObservationIgnored var multiSANServed: [String] = []
+    /// The generation of the certificate of the fallback mode. Each listener of that mode makes the next one.
+    @ObservationIgnored var multiSANEpoch = 0
     /// The queue of the certificate minting, apart from the queue of the proxy.
     @ObservationIgnored let tlsMintQueue = DispatchQueue(label: "colimabar.domains.mint")
     /// The runner of the volume transfer that runs now.

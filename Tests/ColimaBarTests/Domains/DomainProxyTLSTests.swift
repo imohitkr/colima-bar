@@ -41,7 +41,7 @@ import Testing
             let proxy = DomainProxy(addresses: ["127.0.0.1"])
             self.proxy = proxy
             cache = LeafCache(
-                ca: ca, provider: provider, suffixes: suffixes, resolves: { proxy.routes.hasRoute(for: $0) })
+                ca: ca, provider: provider, suffixes: suffixes, resolves: { proxy.routes.routeHost(for: $0) })
             let server = DomainTLSServer(cache: cache, mode: mode, names: names)
             let queue = DispatchQueue(label: "test.mint")
             port = Int(
@@ -283,7 +283,7 @@ import Testing
     @Test func aHandshakeThatNeverEndsIsClosedAtTheHeadTimeout() async throws {
         let ca = try LocalCA.create(permitted: ["localhost"])
         let cache = LeafCache(
-            ca: ca, provider: PrivateIdentityProvider(), suffixes: ["localhost"], resolves: { _ in false })
+            ca: ca, provider: PrivateIdentityProvider(), suffixes: ["localhost"], resolves: { _ in nil })
         var limits = DomainProxy.Limits()
         limits.headTimeout = 0.3
         let proxy = DomainProxy(addresses: ["127.0.0.1"], limits: limits)

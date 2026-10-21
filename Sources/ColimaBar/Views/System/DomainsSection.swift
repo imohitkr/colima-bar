@@ -48,6 +48,12 @@ struct DomainsSection: View {
                 .hint(Help.domainsTrustAgain)
                 .padding(.leading, 44)
         }
+        if model.domainStatus.https.phase == .off, model.domainStatus.https.offersCleanUp {
+            Button("Delete Certificate…") { model.cleanUpLeftoverCA() }
+                .hint(Help.domainsDeleteCA)
+                .disabled(model.isDebug)
+                .padding(.leading, 44)
+        }
         if model.caExists {
             Button("Show Certificate") { model.showCACertificate() }
                 .hint(Help.domainsShowCA)

@@ -136,4 +136,31 @@ import Testing
         #expect(FileKeychainIdentityProvider.pid(ofFile: "tls-x.keychain-db") == nil)
         #expect(FileKeychainIdentityProvider.pid(ofFile: "other-1.keychain-db") == nil)
     }
+
+    @Test func theSelfTestLeavesNothingInTheKeychain() throws {
+        let temp = try TempFolder()
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        let provider = try #require(FileKeychainIdentityProvider(cacheDir: temp.path))
+        defer { provider.removeAll() }
+        #expect(TLSIdentityProviders.selfTest(provider, ca: ca))
+        #expect(provider.itemCount == 0)
+    }
+
+    @Test func aFailedCertificateAddLeavesNoKeyInTheKeychain() throws {
+        let temp = try TempFolder()
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        let provider = try #require(FileKeychainIdentityProvider(cacheDir: temp.path))
+        defer { provider.removeAll() }
+        let leaf = try ca.mintLeaf(names: ["a.localhost"])
+        // The certificate is in the keychain already, so adding it again fails after the key went in.
+        var keychain: SecKeychain?
+        #expect(SecKeychainOpen(provider.path, &keychain) == errSecSuccess)
+        let added = SecItemAdd(
+            [kSecClass: kSecClassCertificate, kSecValueRef: leaf.certificate, kSecUseKeychain: try #require(keychain)]
+                as CFDictionary, nil)
+        #expect(added == errSecSuccess)
+        #expect(provider.itemCount == 1)
+        #expect(throws: (any Error).self) { try provider.identity(certificate: leaf.certificate, key: leaf.key) }
+        #expect(provider.itemCount == 0)
+    }
 }

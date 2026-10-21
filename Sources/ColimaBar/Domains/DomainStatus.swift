@@ -28,6 +28,8 @@ struct DomainStatus: Equatable, Sendable {
         var port: UInt16?
         /// The text for `.failed`, a note after a cancel or a removal, or why `.untrusted` has no listener.
         var problem: String?
+        /// A removal of the CA did not end. A button offers the clean-up (`.off` only).
+        var offersCleanUp = false
 
         /// True when the HTTPS listener has a port that links can use.
         var listening: Bool { (phase == .running || phase == .untrusted) && port != nil }

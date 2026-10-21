@@ -18,6 +18,7 @@ enum LocalCAStore {
     /// symlink, the owner is not this user, or the key or the certificate
     /// has a mode other than 0600.
     static func load(dir: String = dir) -> LocalCA? {
+        settleLeftover(dir)
         guard isPrivateFolder(dir), isPrivateFile("\(dir)/\(keyName)", mode: 0o600),
             isPrivateFile("\(dir)/\(derName)", mode: 0o600),
             let der = FileManager.default.contents(atPath: "\(dir)/\(derName)"),
@@ -29,6 +30,20 @@ enum LocalCAStore {
     /// The folder where `save` builds the next set of files.
     private static func stagingPath(_ dir: String) -> String { dir + ".new" }
 
+    /// Where `replace` parks the old folder while the new one moves in.
+    private static func oldPath(_ dir: String) -> String { dir + ".old" }
+
+    /// Handles a `dir.old` that a crash left. If `dir` is gone, the crash came
+    /// between the two renames: the old folder comes back. Else it goes.
+    private static func settleLeftover(_ dir: String) {
+        if TestProcess.isRunning, dir == Paths.domainsDir { return }
+        let old = oldPath(dir)
+        var info = stat()
+        guard lstat(old, &info) == 0 else { return }
+        if lstat(dir, &info) != 0, rename(old, dir) == 0 { return }
+        try? FileManager.default.removeItem(atPath: old)
+    }
+
     /// Writes the three files into a staging folder next to `dir`, then
     /// swaps the folders with one rename. A crash leaves the old set or the
     /// new set, never a certificate with the key of another CA.
@@ -37,6 +52,7 @@ enum LocalCAStore {
         if TestProcess.isRunning, dir == Paths.domainsDir { throw POSIXError(.EPERM) }
         let fm = FileManager.default
         let staging = stagingPath(dir)
+        settleLeftover(dir)
         try fm.createDirectory(
             atPath: (dir as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try? fm.removeItem(atPath: staging)
@@ -59,15 +75,28 @@ enum LocalCAStore {
     }
 
     /// Puts the staging folder in place of `dir`. A folder or a file that is
-    /// there goes away, and a symlink is never followed.
+    /// there goes away, and a symlink is never followed. If the swap is not
+    /// possible, two renames do it: `dir` goes to `dir.old`, then the staging
+    /// folder comes in. If the second rename fails, the first one is undone,
+    /// so one copy of the files always exists.
     private static func replace(_ dir: String, with staging: String) throws {
+        let fm = FileManager.default
         var info = stat()
         if lstat(dir, &info) == 0 {
             if (info.st_mode & S_IFMT) == S_IFDIR, renamex_np(staging, dir, UInt32(RENAME_SWAP)) == 0 {
-                try? FileManager.default.removeItem(atPath: staging)
+                try? fm.removeItem(atPath: staging)
                 return
             }
-            try FileManager.default.removeItem(atPath: dir)
+            let old = oldPath(dir)
+            try? fm.removeItem(atPath: old)
+            guard rename(dir, old) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            guard rename(staging, dir) == 0 else {
+                let failure = POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                _ = rename(old, dir)
+                throw failure
+            }
+            try? fm.removeItem(atPath: old)
+            return
         }
         guard rename(staging, dir) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
@@ -78,6 +107,7 @@ enum LocalCAStore {
         unlink("\(dir)/\(keyName)")
         try? FileManager.default.removeItem(atPath: dir)
         try? FileManager.default.removeItem(atPath: stagingPath(dir))
+        try? FileManager.default.removeItem(atPath: oldPath(dir))
     }
 
     private static func write(_ data: Data, to path: String, mode: mode_t) throws {

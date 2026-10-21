@@ -554,10 +554,10 @@ What the CA can and cannot sign:
 
 - It signs certificates for websites under `.localhost`, and for nothing else. Its certificate lists `localhost` as the only name that it may sign, and it excludes all IP addresses.
 - You trust it for websites only (the SSL policy of macOS). It cannot sign code, mail or anything else.
-- ColimaBar makes a short certificate (30 days) for a name when a browser asks for it, but only for the name of a running container (and its subdomains). Any other name gets the certificate of `localhost`, so the browser shows a warning. These certificates stay in memory.
+- ColimaBar makes a short certificate (30 days) for each name of a container when a browser asks for it. The certificate covers the name and its subdomains, so a subdomain never makes a new certificate. It covers a name of the current profile that has a container, or had one while the VM ran. So the page for a stopped VM (503) opens without a warning. Any other name gets the certificate of `localhost`, so the browser shows a warning. These certificates stay in memory.
 - The key of the CA is a file in `~/Library/Application Support/ColimaBar/domains`. Only your user can read it, and Time Machine skips it. The key is never in a keychain. Only the certificate of the CA is in your login keychain. Any process of your user can read the key file. A stolen key can sign only names under `.localhost`.
 
-To turn HTTPS off, clear the switch. You can do this when **Open containers at .localhost names** is off too. ColimaBar deletes the key file first. Then macOS asks for your password one more time, to remove the certificate and its trust setting. If you cancel that dialog, macOS keeps the certificate and its trust setting. They have no effect, because the key is gone. Delete the certificate "ColimaBar Local CA" in Keychain Access. Turn HTTPS on again to make a new CA. If you turn off **Open containers at .localhost names**, HTTPS stops, but the CA stays.
+To turn HTTPS off, clear the switch. You can do this when **Open containers at .localhost names** is off too. ColimaBar deletes the key file first. Then macOS asks for your password one more time, to remove the certificate and its trust setting. If you cancel that dialog, macOS keeps the certificate and its trust setting. They have no effect, because the key is gone. Delete the certificate "ColimaBar Local CA" in Keychain Access. If you quit ColimaBar while that dialog shows, the next launch says so and shows **Delete Certificate…**. Click it to remove the certificate. ColimaBar never does it by itself. Turn HTTPS on again to make a new CA. If you turn off **Open containers at .localhost names**, HTTPS stops, but the CA stays.
 
 HTTPS listens on port 443, or on port 8443 when 443 is busy or a container publishes it, running or stopped. The rules are the same as for port 80 and 8080, including the line that asks you to restart a container whose port 443 the HTTPS listener held when the container started. The caption under the switch shows the port. If macOS does not trust the CA, the caption says so and **Trust Again…** asks for the password again.
 
@@ -567,7 +567,7 @@ Tools that use their own trust store need the certificate file. Click **Show Cer
 - Python and `curl` builds that do not use macOS: `SSL_CERT_FILE=/path/to/ca.pem`
 - Python `requests`: `REQUESTS_CA_BUNDLE=/path/to/ca.pem`
 
-Homebrew `curl` and Java keep their own stores, so they need the file too. Firefox can use the certificates of macOS from version 120. Older versions need the setting `security.enterprise_roots.enabled`, or the import of `ca.pem`.
+Homebrew `curl` and Java keep their own stores, so they need the file too. Recent Firefox versions can use the certificates of macOS. If yours cannot, use the setting `security.enterprise_roots.enabled`, or the import of `ca.pem`.
 
 The proxy offers HTTP/1.1 only over HTTPS. The checks of the TLS setup run when HTTPS turns on. If the certificate for each name fails the check, ColimaBar serves one certificate for all names. The setting is not in the settings file, because turning it on needs your password.
 

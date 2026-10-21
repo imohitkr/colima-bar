@@ -70,6 +70,9 @@ final class FileKeychainIdentityProvider: TLSIdentityProvider, @unchecked Sendab
         ]
         var status = SecItemAdd(keyItem as CFDictionary, nil)
         guard status == errSecSuccess else { throw NSError(domain: NSOSStatusErrorDomain, code: Int(status)) }
+        // A failure from here on must not leave the key (or the certificate) in the keychain.
+        var done = false
+        defer { if !done { discard(certificate: certificate, key: key) } }
         let certItem: [CFString: Any] = [
             kSecClass: kSecClassCertificate, kSecValueRef: certificate, kSecUseKeychain: kc,
         ]
@@ -80,6 +83,7 @@ final class FileKeychainIdentityProvider: TLSIdentityProvider, @unchecked Sendab
         guard status == errSecSuccess, let identity else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
         }
+        done = true
         return identity
     }
 

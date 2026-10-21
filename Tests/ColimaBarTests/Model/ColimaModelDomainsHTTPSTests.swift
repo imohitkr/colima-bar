@@ -17,7 +17,8 @@ import Testing
 
     private func rig(
         https: Bool = false, ca: Bool = false, domains: Bool = true, gap: TimeInterval = 0,
-        failureRetry: TimeInterval = 0.05, pending: Bool = false, permitted: [String] = ["localhost"],
+        failureRetry: TimeInterval = 0.05, pending: Bool = false, removing: Bool = false,
+        permitted: [String] = ["localhost"],
         trustRecheck: TimeInterval = 60, multiSANRenew: TimeInterval = 3600
     ) throws -> Rig {
         let proxy = FakeDomainProxy()
@@ -25,6 +26,7 @@ import Testing
         if ca { tls.ca = try LocalCA.create(permitted: permitted) }
         let store = TestProcess.emptyStore()
         if pending { store.set(true, forKey: Defaults.Key.domainsHTTPSPending.rawValue) }
+        if removing { store.set(true, forKey: Defaults.Key.domainsHTTPSRemoving.rawValue) }
         let model = ColimaModel(
             profile: "https-life-\(UUID().uuidString.prefix(6))", domainProxy: proxy, domainsEnabled: domains,
             domainsStore: store, httpsEnabled: https, domainTLS: tls)
@@ -462,6 +464,24 @@ import Testing
         #expect(r.proxy.httpsStarts.last == [8443])
     }
 
+    @Test func aConflictRebindDropsThePortAtOnce() async throws {
+        let r = try rig()
+        await turnOn(r)
+        let seen = Box<[DomainStatus.HTTPS]>([])
+        let model = r.model
+        r.proxy.onStartHTTPS { _ in
+            let now = await MainActor.run { model.domainStatus.https }
+            seen.mutate { $0.append(now) }
+        }
+        r.model.updateDomainRoutes(try containers(web("a", host: 443)))
+        // The status changes in the same turn, before the listener starts again.
+        #expect(r.model.domainStatus.https.phase == .settingUp && r.model.domainStatus.https.port == nil)
+        #expect(r.model.domainURL("web.shop") == nil)
+        #expect(
+            await waitUntil { r.model.domainStatus.https.port == 8443 && r.model.domainStatus.https.phase == .running })
+        #expect(seen.value.allSatisfy { $0.phase == .settingUp && $0.port == nil })
+    }
+
     @Test func aListenerOnTheFallbackPortGoesBackTo443() async throws {
         let r = try rig()
         r.proxy.busyHTTPSPorts = [443]
@@ -502,6 +522,59 @@ import Testing
         r.model.rebuildDomainRoutes()
         try await Task.sleep(for: .milliseconds(150))
         #expect(r.proxy.httpsStarts.count == before + 1)
+    }
+
+    @Test func aStoppedVMKeepsTheNamesForTheCertificatesAndStartsNothing() async throws {
+        let r = try rig()
+        r.tls.queueSelfTests([false, true])
+        await turnOn(r)
+        r.model.updateDomainRoutes(try containers(web("shop", host: 5000)))
+        #expect(await waitUntil { r.model.multiSANServed.contains("shop.localhost") })
+        #expect(await running(r))
+        let starts = r.proxy.httpsStarts.count
+        r.model.setState(.stopped)
+        r.model.updateDomainRoutes([], authoritative: false)
+        r.model.rebuildDomainRoutes()
+        let table = r.proxy.routes
+        #expect(!table.vmRunning && table.routes.isEmpty)
+        #expect(table.routeHost(for: "app.shop.localhost") == "shop.localhost")
+        #expect(table.routeHost(for: "other.localhost") == nil)
+        try await Task.sleep(for: .milliseconds(150))
+        #expect(r.proxy.httpsStarts.count == starts)
+        #expect(r.model.multiSANServed.contains("shop.localhost"))
+    }
+
+    @Test func theNamesOfAStoppedVMGoWhenHTTPSOrTheMasterSwitchTurnsOff() async throws {
+        let r = try rig()
+        await turnOn(r)
+        r.model.updateDomainRoutes(try containers(web("shop", host: 5000)))
+        r.model.setState(.stopped)
+        r.model.updateDomainRoutes([], authoritative: false)
+        r.model.rebuildDomainRoutes()
+        #expect(r.proxy.routes.rememberedNames == ["shop"])
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        #expect(r.proxy.routes.rememberedNames.isEmpty)
+        let master = try rig()
+        await turnOn(master)
+        master.model.updateDomainRoutes(try containers(web("shop", host: 5000)))
+        master.model.setState(.stopped)
+        master.model.updateDomainRoutes([], authoritative: false)
+        master.model.rebuildDomainRoutes()
+        master.model.domainsEnabled = false
+        #expect(master.proxy.routes.rememberedNames.isEmpty)
+    }
+
+    @Test func aNewStartReplacesTheCacheAndDeletesTheLeavesOfTheOldOne() async throws {
+        let r = try rig()
+        await turnOn(r)
+        let provider = try #require(r.tls.providers.first)
+        let old = try #require(r.model.leafCache)
+        _ = old.identity(forSNI: "colimabar-selftest.localhost")
+        #expect(provider.discardCount == 0)
+        await r.model.startHTTPS()
+        #expect(r.model.leafCache !== old)
+        #expect(provider.discardCount == 1)
     }
 
     @Test func thePerNameModeNeverRestartsForARouteChange() async throws {
@@ -621,9 +694,107 @@ import Testing
         r.tls.trusted = false
         r.model.startHTTPSAtLaunch()
         #expect(await waitUntil { !r.model.httpsInstallPending })
-        #expect(Array(r.tls.events.suffix(2)) == ["uninstall", "removeFiles"])
+        // No dialog: a certificate without trust settings goes by a plain delete.
+        #expect(Array(r.tls.events.suffix(2)) == ["deleteCertificate", "removeFiles"])
+        #expect(!r.tls.events.contains("uninstall"))
         #expect(r.tls.ca == nil && !r.model.httpsEnabled)
         #expect(r.proxy.httpsStarts.isEmpty && r.dialogs.value == 0)
+    }
+
+    @Test func aLaunchAfterAnInterruptedInstallKeepsACAWithTrustSettingsAndNeverUninstalls() async throws {
+        let r = try rig(https: false, ca: true, pending: true)
+        r.tls.trusted = false
+        r.tls.hasSettings = true
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        #expect(r.model.httpsEnabled && !r.model.httpsInstallPending)
+        #expect(r.tls.ca != nil)
+        #expect(!r.tls.events.contains("uninstall") && !r.tls.events.contains("deleteCertificate"))
+        #expect(r.dialogs.value == 0)
+    }
+
+    @Test func theMasterSwitchDuringTheInstallDialogNeverDeletesTheCAThatInstalls() async throws {
+        let r = try rig()
+        r.tls.trusted = false
+        r.tls.hasSettings = false
+        r.tls.onInstall { Thread.sleep(forTimeInterval: 0.3) }
+        r.model.setHTTPS(true)
+        #expect(await waitUntil { r.tls.events.contains("install") })
+        #expect(r.model.httpsInstallPending)
+        r.model.domainsEnabled = false
+        r.model.domainsEnabled = true
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { r.model.httpsEnabled })
+        #expect(!r.model.httpsInstallPending)
+        #expect(!r.tls.events.contains("removeFiles") && !r.tls.events.contains("deleteCertificate"))
+        #expect(!r.tls.events.contains("uninstall"))
+        #expect(r.tls.ca != nil)
+    }
+
+    @Test func theLaunchCleanUpRunsOnceAndBlocksTheSwitchesWhileItRuns() async throws {
+        let r = try rig(https: false, ca: true, pending: true)
+        r.tls.hasSettings = false
+        r.model.startHTTPSAtLaunch()
+        r.model.startHTTPSAtLaunch()
+        r.model.setHTTPS(true)
+        #expect(await waitUntil { !r.model.httpsInstallPending })
+        #expect(r.tls.events.filter { $0 == "deleteCertificate" }.count == 1)
+        #expect(!r.model.httpsEnabled && r.tls.events.filter { $0 == "prepare" }.isEmpty)
+    }
+
+    // MARK: Removal marker
+
+    @Test func theRemovalMarkerStandsWhileTheRemovalDialogShows() async throws {
+        let r = try rig()
+        await turnOn(r)
+        let during = Counter()
+        let key = Defaults.Key.domainsHTTPSRemoving.rawValue
+        nonisolated(unsafe) let store = r.store
+        r.tls.onUninstall { if store.bool(forKey: key) { during.add() } }
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        #expect(during.value == 1)
+        #expect(!r.model.httpsRemovalPending)
+    }
+
+    @Test func aQuitDuringTheRemovalDialogKeepsTheMarker() async throws {
+        let r = try rig()
+        await turnOn(r)
+        r.tls.onUninstall { Thread.sleep(forTimeInterval: 0.2) }
+        r.model.setHTTPS(false)
+        #expect(await waitUntil { r.tls.events.contains("uninstall") })
+        r.model.stopHTTPSForQuit()
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(r.model.httpsRemovalPending)
+    }
+
+    @Test func aLaunchWithTheRemovalMarkerOffersACleanUpAndRunsNothing() async throws {
+        let r = try rig(https: false, removing: true)
+        r.model.startHTTPSAtLaunch()
+        try await Task.sleep(for: .milliseconds(60))
+        let https = r.model.domainStatus.https
+        #expect(https.phase == .off && https.offersCleanUp)
+        #expect(https.caption?.contains("Delete the certificate \"ColimaBar Local CA\"") == true)
+        #expect(r.tls.events.isEmpty && r.dialogs.value == 0)
+        #expect(r.model.httpsRemovalPending)
+    }
+
+    @Test func theCleanUpButtonRemovesTheLabelledCertificatesAndClearsTheMarker() async throws {
+        let r = try rig(https: false, removing: true)
+        r.model.startHTTPSAtLaunch()
+        try await Task.sleep(for: .milliseconds(60))
+        r.model.cleanUpLeftoverCA()
+        #expect(await removed(r))
+        #expect(r.tls.events == ["uninstallLeftovers"])
+        #expect(!r.model.httpsRemovalPending && !r.model.domainStatus.https.offersCleanUp)
+        #expect(r.model.domainStatus.https.caption == "ColimaBar removed the certificate authority.")
+        #expect(r.dialogs.value == 1)
+    }
+
+    @Test func theCleanUpDoesNothingWithoutTheOffer() throws {
+        let r = try rig()
+        r.model.cleanUpLeftoverCA()
+        #expect(r.tls.events.isEmpty)
     }
 
     @Test func aLaunchAfterAnInterruptedInstallWithoutFilesClearsTheMarker() async throws {
@@ -771,6 +942,24 @@ import Testing
         let count = r.proxy.httpsStarts.count
         try await Task.sleep(for: .milliseconds(300))
         #expect(r.proxy.httpsStarts.count == count && r.proxy.httpsPort == nil)
+    }
+
+    @Test func aRenewalStartsTheNewListenerBeforeTheOldCertificateGoes() async throws {
+        let r = try rig(multiSANRenew: 0.1)
+        r.tls.queueSelfTests([false, true])
+        await turnOn(r)
+        #expect(r.model.tlsMode == .multiSAN)
+        let provider = try #require(r.tls.providers.first)
+        let cache = try #require(r.model.leafCache)
+        // The old listener serves this certificate.
+        _ = cache.multiSANIdentity(names: ["a.localhost"], epoch: r.model.multiSANEpoch)
+        let epoch = r.model.multiSANEpoch
+        let atStart = Box<[Int]>([])
+        r.proxy.onStartHTTPS { _ in atStart.mutate { $0.append(provider.discardCount) } }
+        #expect(await waitUntil { r.model.multiSANEpoch > epoch && provider.discardCount >= 1 })
+        // At the first start of the renewal the old certificate was still there.
+        #expect(atStart.value.first == 0)
+        #expect(r.model.domainStatus.https.phase == .running)
     }
 
     @Test func aStopWhileTheFallbackCertificateChangesWins() async throws {

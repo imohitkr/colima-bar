@@ -44,7 +44,10 @@ enum TrustStore {
         return isCancel(status) ? .cancelled : .failed(status)
     }
 
-    private static func deleteCertificate(_ ca: LocalCA) {
+    /// Deletes the certificate of the CA from the keychains of this user. It
+    /// changes no trust setting and shows no dialog. It is for a CA that has none.
+    static func deleteCertificate(_ ca: LocalCA) {
+        guard !TestProcess.isRunning else { return }
         SecItemDelete([kSecClass: kSecClassCertificate, kSecValueRef: ca.certificate] as CFDictionary)
     }
 
@@ -95,6 +98,13 @@ enum TrustStore {
             else { return nil }
             return unsafeDowncast(ref, to: SecCertificate.self)
         }
+    }
+
+    /// True when the user trust settings hold an entry for the CA. It reads only: no dialog.
+    static func hasSettings(_ ca: LocalCA) -> Bool {
+        guard !TestProcess.isRunning else { return false }
+        var settings: CFArray?
+        return SecTrustSettingsCopyTrustSettings(ca.certificate, .user, &settings) == errSecSuccess && settings != nil
     }
 
     /// True when the user trust settings list the CA and the system accepts

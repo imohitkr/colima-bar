@@ -1,6 +1,7 @@
 import Foundation
 import Network
 import Security
+import os
 
 /// The TLS side of the HTTPS listener: the options with the challenge block
 /// that picks a certificate by SNI, and the self-test.
@@ -16,11 +17,15 @@ final class DomainTLSServer: @unchecked Sendable {
     let mode: Mode
     /// The names of the one certificate in `multiSAN` mode.
     let names: [String]
+    /// The generation of the one certificate in `multiSAN` mode.
+    let epoch: Int
+    private let log = Logger(category: "domains")
 
-    init(cache: LeafCache, mode: Mode, names: [String] = []) {
+    init(cache: LeafCache, mode: Mode, names: [String] = [], epoch: Int = 0) {
         self.cache = cache
         self.mode = mode
         self.names = names
+        self.epoch = epoch
     }
 
     /// The TLS options of the HTTPS listener: TLS 1.2 or later, ALPN
@@ -40,8 +45,10 @@ final class DomainTLSServer: @unchecked Sendable {
                     complete(cache.identity(forSNI: sni))
                 }, mintQueue)
         case .multiSAN:
-            if let identity = cache.multiSANIdentity(names: names) {
+            if let identity = cache.multiSANIdentity(names: names, epoch: epoch) {
                 sec_protocol_options_set_local_identity(security, identity)
+            } else {
+                log.error("the certificate for all names could not be made, so the listener has none")
             }
         }
         sec_protocol_options_set_min_tls_protocol_version(security, .TLSv12)

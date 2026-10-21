@@ -40,9 +40,12 @@ enum TLSIdentityProviders {
     /// checks that the identity has its private key and that the key signs
     /// data which the public key of the certificate verifies.
     static func selfTest(_ provider: TLSIdentityProvider, ca: LocalCA) -> Bool {
-        guard let leaf = try? ca.mintLeaf(names: ["\(DomainName.selfTestLabel).\(DomainName.localhost)"]),
-            let identity = try? provider.identity(certificate: leaf.certificate, key: leaf.key)
-        else { return false }
+        guard let leaf = try? ca.mintLeaf(names: ["\(DomainName.selfTestLabel).\(DomainName.localhost)"]) else {
+            return false
+        }
+        // The test leaf must not stay in the keychain, also if the test fails.
+        defer { provider.discard(certificate: leaf.certificate, key: leaf.key) }
+        guard let identity = try? provider.identity(certificate: leaf.certificate, key: leaf.key) else { return false }
         var privateKey: SecKey?
         guard SecIdentityCopyPrivateKey(identity, &privateKey) == errSecSuccess, let privateKey,
             let publicKey = SecCertificateCopyKey(leaf.certificate)

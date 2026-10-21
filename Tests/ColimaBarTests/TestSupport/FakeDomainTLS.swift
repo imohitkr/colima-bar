@@ -23,6 +23,8 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
         var uninstall = TrustStore.Outcome.done
         var leftovers = TrustStore.Outcome.done
         var trusted = true
+        /// nil: the trust settings follow `trusted`.
+        var hasSettings: Bool?
         var providerWorks = true
     }
 
@@ -51,6 +53,11 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
     var trusted: Bool {
         get { lock.withLock { settings.trusted } }
         set { lock.withLock { settings.trusted = newValue } }
+    }
+    /// Whether the trust settings hold an entry for the CA. Follows `trusted` until a test sets it.
+    var hasSettings: Bool {
+        get { lock.withLock { settings.hasSettings ?? settings.trusted } }
+        set { lock.withLock { settings.hasSettings = newValue } }
     }
     var providerWorks: Bool {
         get { lock.withLock { settings.providerWorks } }
@@ -99,6 +106,9 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
     }
 
     func isTrusted(_ ca: LocalCA) -> Bool { trusted }
+    func hasTrustSettings(_ ca: LocalCA) -> Bool { hasSettings }
+
+    func deleteCertificate(_ ca: LocalCA) { record("deleteCertificate") }
 
     func makeProvider(ca: LocalCA) -> TLSIdentityProvider? {
         record("makeProvider")

@@ -18,6 +18,10 @@ protocol DomainTLSServicing: AnyObject, Sendable {
     /// Removes the trust and the certificates labelled like the CA, when its files are gone. It blocks while a dialog shows.
     func uninstallLeftovers() -> TrustStore.Outcome
     func isTrusted(_ ca: LocalCA) -> Bool
+    /// True when the trust settings of the user hold an entry for the CA. It reads only.
+    func hasTrustSettings(_ ca: LocalCA) -> Bool
+    /// Deletes the certificate of the CA from the keychain. It changes no trust setting and shows no dialog.
+    func deleteCertificate(_ ca: LocalCA)
     func makeProvider(ca: LocalCA) -> TLSIdentityProvider?
     /// Deletes the temporary keychains of processes that are gone.
     func cleanStale()
@@ -51,6 +55,8 @@ final class SystemDomainTLS: DomainTLSServicing, @unchecked Sendable {
     func install(_ ca: LocalCA) -> TrustStore.Outcome { TrustStore.install(ca) }
     func uninstall(_ ca: LocalCA) -> TrustStore.Outcome { TrustStore.remove(ca) }
     func isTrusted(_ ca: LocalCA) -> Bool { TrustStore.isTrusted(ca) }
+    func hasTrustSettings(_ ca: LocalCA) -> Bool { TrustStore.hasSettings(ca) }
+    func deleteCertificate(_ ca: LocalCA) { TrustStore.deleteCertificate(ca) }
     func makeProvider(ca: LocalCA) -> TLSIdentityProvider? { TLSIdentityProviders.make(ca: ca) }
     func cleanStale() { TLSIdentityProviders.cleanStale() }
     func selfTest(port: UInt16, ca: LocalCA, suffixes: [String]) async -> Bool {
@@ -70,6 +76,8 @@ final class InertDomainTLS: DomainTLSServicing, @unchecked Sendable {
     func uninstall(_ ca: LocalCA) -> TrustStore.Outcome { .failed(errSecNotAvailable) }
     func uninstallLeftovers() -> TrustStore.Outcome { .failed(errSecNotAvailable) }
     func isTrusted(_ ca: LocalCA) -> Bool { false }
+    func hasTrustSettings(_ ca: LocalCA) -> Bool { false }
+    func deleteCertificate(_ ca: LocalCA) {}
     func makeProvider(ca: LocalCA) -> TLSIdentityProvider? { nil }
     func cleanStale() {}
     func selfTest(port: UInt16, ca: LocalCA, suffixes: [String]) async -> Bool { false }

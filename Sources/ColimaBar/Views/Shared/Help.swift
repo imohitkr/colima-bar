@@ -407,6 +407,8 @@ enum Help {
         "Serve the names over HTTPS too. ColimaBar makes a certificate authority that works only for .localhost names, and only for websites. macOS asks for your password to trust it. Turn this off to remove it."
     static let domainsTrustAgain =
         "Add the certificate authority to your login keychain and trust it again. macOS asks for your password."
+    static let domainsDeleteCA =
+        "Remove the old certificate authority from your login keychain. A removal did not finish. macOS asks for your password."
     static let domainsShowCA =
         "Show the certificate file in Finder. Node.js, Python and other tools with their own trust store need it. For Node.js, set NODE_EXTRA_CA_CERTS to its path."
 

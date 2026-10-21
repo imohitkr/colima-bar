@@ -48,6 +48,18 @@ extension ColimaModel {
         }
     }
 
+    /// True while a CA removal runs or ran when the app ended. The next launch offers a clean-up.
+    var httpsRemovalPending: Bool { domainsStore.bool(forKey: Defaults.Key.domainsHTTPSRemoving.rawValue) }
+
+    private func setHTTPSRemovalPending(_ on: Bool) {
+        guard !isDebug else { return }
+        if on {
+            domainsStore.set(true, forKey: Defaults.Key.domainsHTTPSRemoving.rawValue)
+        } else {
+            domainsStore.removeObject(forKey: Defaults.Key.domainsHTTPSRemoving.rawValue)
+        }
+    }
+
     /// Makes or loads the CA, trusts it (one dialog) and starts the listener.
     private func enableHTTPS() {
         dismissPopover()
@@ -112,20 +124,44 @@ extension ColimaModel {
         let ca = tlsCA ?? domainTLS.loadCA()
         tlsCA = nil
         setHTTPSEnabled(false)
+        domainTLS.removeCAFiles()
+        // The routes forget the names that the certificates served.
+        rebuildDomainRoutes()
+        removeCertificate(of: ca)
+    }
+
+    /// The text of a removal that macOS did not finish.
+    nonisolated static let leftoverCAText =
+        "macOS still lists the certificate authority and its trust setting. They have no effect, because ColimaBar deleted the key. Delete the certificate \"ColimaBar Local CA\" in Keychain Access."
+
+    /// "Delete Certificate…": a removal that the quit of the app interrupted
+    /// leaves the marker. The user clicks, then macOS removes the trust and
+    /// the certificates with the label of the CA (one dialog for each).
+    func cleanUpLeftoverCA() {
+        guard !isDebug, !httpsEnabled, httpsSetupTask == nil, domainStatus.https.offersCleanUp else { return }
+        dismissPopover()
+        removeCertificate(of: nil)
+    }
+
+    /// Asks macOS to remove the trust and the certificate of `ca`, or the
+    /// certificates with the label of the CA when `ca` is nil. The marker
+    /// stays from before the dialog until its outcome. It runs inside
+    /// `httpsSetupTask`.
+    private func removeCertificate(of ca: LocalCA?) {
+        setHTTPSRemovalPending(true)
         setHTTPSStatus(.init(phase: .removing))
         let services = domainTLS
-        services.removeCAFiles()
         httpsSetupTask = Task {
             defer { httpsSetupTask = nil }
             let outcome = await Self.blocking { ca.map { services.uninstall($0) } ?? services.uninstallLeftovers() }
             guard !Task.isCancelled else { return }
+            setHTTPSRemovalPending(false)
             let note: String
             switch outcome {
             case .done:
                 note = "ColimaBar removed the certificate authority."
             case .cancelled:
-                note =
-                    "macOS still lists the certificate authority and its trust setting. They have no effect, because ColimaBar deleted the key. Delete the certificate \"ColimaBar Local CA\" in Keychain Access."
+                note = Self.leftoverCAText
             case .failed(let status):
                 note =
                     "macOS could not remove the certificate authority (error \(status)). It has no effect, because ColimaBar deleted the key. Delete the certificate \"ColimaBar Local CA\" in Keychain Access."
@@ -215,20 +251,38 @@ extension ColimaModel {
 
     // MARK: - Listener
 
-    /// Cleans up an install that the app did not finish, then starts the
-    /// listener for a launch with the setting on. It shows no dialog.
+    /// The launch calls it once. It cleans up an install that the app did not
+    /// finish, offers the clean-up of a removal that the app did not finish,
+    /// and starts the listener for a launch with the setting on. It shows no
+    /// dialog. The clean-up runs inside `httpsSetupTask`, so a switch cannot
+    /// start a second one.
     func startHTTPSAtLaunch() {
-        guard !isDebug else { return }
+        guard !isDebug, httpsSetupTask == nil else { return }
+        if httpsRemovalPending, !httpsEnabled {
+            setHTTPSStatus(.init(phase: .off, problem: Self.leftoverCAText, offersCleanUp: true))
+        }
+        let recovery: Task<Void, Never>? = httpsInstallPending ? Task { await recoverPendingInstall() } : nil
+        httpsSetupTask = recovery
         Task {
-            await recoverPendingInstall()
-            guard domainsEnabled, httpsEnabled, httpsSetupTask == nil else { return }
-            await runHTTPS(retryFirst: true)
+            if let recovery {
+                await recovery.value
+                httpsSetupTask = nil
+            }
+            await resumeHTTPS()
         }
     }
 
-    /// The app ended while the password dialog showed. If macOS trusts the
-    /// saved CA, the install finished: keep it and turn HTTPS on. Else delete
-    /// the files and the certificate (an untrusted certificate needs no dialog).
+    /// A change of the master switch calls it: start the listener if the settings ask for it.
+    func resumeHTTPS() async {
+        guard domainsEnabled, httpsEnabled, httpsSetupTask == nil else { return }
+        await runHTTPS(retryFirst: true)
+    }
+
+    /// The app ended while the password dialog showed. If macOS holds trust
+    /// settings for the saved CA, the install finished: keep it and turn
+    /// HTTPS on. Else delete the files and the certificate. Neither path
+    /// calls `uninstall`: a launch shows no dialog, and a certificate
+    /// without trust settings needs none.
     private func recoverPendingInstall() async {
         guard httpsInstallPending else { return }
         guard !httpsEnabled else { return setHTTPSInstallPending(false) }
@@ -238,11 +292,12 @@ extension ColimaModel {
                 services.removeCAFiles()
                 return false
             }
-            if services.isTrusted(ca) { return true }
-            _ = services.uninstall(ca)
+            if services.hasTrustSettings(ca) { return true }
+            services.deleteCertificate(ca)
             services.removeCAFiles()
             return false
         }
+        guard !Task.isCancelled else { return }
         if keep { setHTTPSEnabled(true) }
         setHTTPSInstallPending(false)
     }
@@ -295,7 +350,10 @@ extension ColimaModel {
         let proxy = domainProxy
         let cache = LeafCache(
             ca: ca, provider: provider, suffixes: suffixes,
-            resolves: { proxy.routes.hasRoute(for: $0) })
+            resolves: { proxy.routes.routeHost(for: $0) })
+        // The old cache may still serve until the new listener runs. Its keys go when this start ends.
+        let previous = leafCache
+        defer { previous?.discardAll() }
         leafCache = cache
         tlsMode = .perSNI
         guard var port = await listenHTTPS(cache: cache, mode: .perSNI, token: token, retryFirst: retryFirst) else {
@@ -307,6 +365,7 @@ extension ColimaModel {
             tlsMode = .multiSAN
             guard let again = await listenHTTPS(cache: cache, mode: .multiSAN, token: token, retryFirst: false)
             else { return }
+            cache.dropMultiSAN(except: multiSANEpoch)
             port = again
             guard await domainTLS.selfTest(port: port, ca: ca, suffixes: suffixes) else {
                 guard token == httpsStartToken else { return }
@@ -358,7 +417,8 @@ extension ColimaModel {
         }
         let names = mode == .multiSAN ? multiSANNames() : []
         multiSANServed = names
-        let server = DomainTLSServer(cache: cache, mode: mode, names: names)
+        if mode == .multiSAN { multiSANEpoch += 1 }
+        let server = DomainTLSServer(cache: cache, mode: mode, names: names, epoch: multiSANEpoch)
         let queue = tlsMintQueue
         let proxy = domainProxy
         let options: @Sendable () -> NWProtocolTLS.Options = { server.options(mintQueue: queue) }
@@ -390,7 +450,7 @@ extension ColimaModel {
         for suffix in activeDomainSuffixes {
             names.append(suffix)
             names.append("*.\(suffix)")
-            for relative in domainRoutes.routes.keys {
+            for relative in domainRoutes.rememberedNames {
                 let host = DomainLink.host(relative: relative, suffix: suffix)
                 names += [host, "*.\(host)"]
             }
@@ -424,7 +484,7 @@ extension ColimaModel {
             guard !Task.isCancelled, token == httpsStartToken, httpsEnabled, domainsEnabled,
                 domainStatus.https.listening, let cache = leafCache, let ca = tlsCA
             else { return }
-            cache.dropMultiSAN()
+            // A new epoch makes a new certificate. The old one goes after the new listener runs.
             await relistenMultiSAN(cache: cache, ca: ca, token: token)
             guard !Task.isCancelled, token == httpsStartToken else { return }
             scheduleMultiSANRenewal(token: token)
@@ -443,6 +503,7 @@ extension ColimaModel {
             domainProxy.stopHTTPS()
             return setHTTPSFailed("HTTPS could not start. The HTTPS self-test failed.")
         }
+        cache.dropMultiSAN(except: multiSANEpoch)
         var https = domainStatus.https
         guard https.listening else { return }
         https.port = port
@@ -537,10 +598,12 @@ extension ColimaModel {
 
     /// A container publishes the port of HTTPS now. Move to another port, at most once in 30 s.
     func rebindHTTPS() {
-        guard !isDebug, domainsEnabled, httpsEnabled, domainStatus.https.listening, httpsRebindGapPassed() else {
-            return
-        }
+        guard !isDebug, domainsEnabled, httpsEnabled, httpsSetupTask == nil, domainStatus.https.listening,
+            httpsRebindGapPassed()
+        else { return }
         httpsRebindAt = Date()
+        // The listener holds a port that a container publishes: the links must not name it while the new one binds.
+        setHTTPSStatus(.init(phase: .settingUp))
         Task { await startHTTPS() }
     }
 

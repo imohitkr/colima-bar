@@ -175,4 +175,58 @@ import Testing
         #expect(LocalCAStore.dir == Paths.domainsDir)
         #expect(Paths.domainsDir.hasSuffix("/Library/Application Support/ColimaBar/domains"))
     }
+
+    @Test func aFileInPlaceOfTheFolderIsReplacedWithoutLosingTheNewFiles() throws {
+        let temp = try TempFolder()
+        let dir = temp.path + "/domains"
+        try "not a folder".write(toFile: dir, atomically: true, encoding: .utf8)
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        try LocalCAStore.save(ca, dir: dir)
+        #expect(LocalCAStore.load(dir: dir)?.keyID == ca.keyID)
+        #expect(!FileManager.default.fileExists(atPath: dir + ".old"))
+        #expect(!FileManager.default.fileExists(atPath: dir + ".new"))
+    }
+
+    @Test func aLinkInPlaceOfTheFolderIsReplacedAndNeverFollowed() throws {
+        let temp = try TempFolder()
+        let dir = temp.path + "/domains"
+        let target = temp.path + "/target"
+        try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: dir, withDestinationPath: target)
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        try LocalCAStore.save(ca, dir: dir)
+        #expect(LocalCAStore.load(dir: dir)?.keyID == ca.keyID)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: target).isEmpty)
+    }
+
+    @Test func aLoadAfterACrashBetweenTheTwoRenamesBringsTheOldFilesBack() throws {
+        let temp = try TempFolder()
+        let (ca, dir) = try saved(temp)
+        // The crash left the old folder as `.old` and no folder at the path.
+        try FileManager.default.moveItem(atPath: dir, toPath: dir + ".old")
+        #expect(LocalCAStore.load(dir: dir)?.keyID == ca.keyID)
+        #expect(!FileManager.default.fileExists(atPath: dir + ".old"))
+    }
+
+    @Test func anOldFolderNextToAFolderIsDeletedAtLoadAndAtSave() throws {
+        let temp = try TempFolder()
+        let (ca, dir) = try saved(temp)
+        try FileManager.default.createDirectory(atPath: dir + ".old", withIntermediateDirectories: true)
+        #expect(LocalCAStore.load(dir: dir)?.keyID == ca.keyID)
+        #expect(!FileManager.default.fileExists(atPath: dir + ".old"))
+        try FileManager.default.createDirectory(atPath: dir + ".old", withIntermediateDirectories: true)
+        let next = try LocalCA.create(permitted: ["localhost"])
+        try LocalCAStore.save(next, dir: dir)
+        #expect(!FileManager.default.fileExists(atPath: dir + ".old"))
+        #expect(LocalCAStore.load(dir: dir)?.keyID == next.keyID)
+    }
+
+    @Test func removeDeletesTheOldFolderToo() throws {
+        let temp = try TempFolder()
+        let (_, dir) = try saved(temp)
+        try FileManager.default.createDirectory(atPath: dir + ".old", withIntermediateDirectories: true)
+        LocalCAStore.remove(dir: dir)
+        #expect(!FileManager.default.fileExists(atPath: dir))
+        #expect(!FileManager.default.fileExists(atPath: dir + ".old"))
+    }
 }

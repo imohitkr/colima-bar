@@ -9,13 +9,15 @@ import os
 /// about 5 ms, and Network.framework runs the challenge block several times
 /// for each connection, so the cache is required.
 ///
-/// The cache mints only for a name that the route table resolves (a route
-/// name or a subdomain of one) and for the self-test name of each suffix.
-/// Every other name, a missing SNI value and an invalid name get the leaf of
-/// `localhost`, which is never minted again. A page can make a browser ask
-/// for many names, so the cache holds at most `capacity` leaves. The least
-/// recently used one goes first, and the provider deletes its key and
-/// certificate.
+/// The cache mints for each route, not for each requested name. A name that
+/// the route table resolves (a route name or a subdomain of one) gets the
+/// leaf of its route, with the names `route` and `*.route`. The self-test
+/// name of each suffix gets its own leaf. Every other name, a missing SNI
+/// value and an invalid name get the leaf of `localhost`, which is never
+/// minted again. So the number of leaves follows the number of routes,
+/// whatever a page makes a browser ask for. As a backstop, the cache holds
+/// at most `capacity` leaves. The least recently used one goes first, and
+/// the provider deletes its key and certificate.
 ///
 /// `lock` guards the table. `mintLock` makes the minters wait for each
 /// other, so one name never gets two leaves. `@unchecked Sendable` for that.
@@ -36,7 +38,7 @@ final class LeafCache: @unchecked Sendable {
 
     private let provider: TLSIdentityProvider
     private let capacity: Int
-    private let resolves: @Sendable (String) -> Bool
+    private let resolves: @Sendable (String) -> String?
     private let now: @Sendable () -> Date
     /// Guards `table` and `setup`.
     private let lock = NSLock()
@@ -55,7 +57,7 @@ final class LeafCache: @unchecked Sendable {
 
     init(
         ca: LocalCA, provider: TLSIdentityProvider, suffixes: [String], capacity: Int = 256,
-        resolves: @escaping @Sendable (String) -> Bool, now: @escaping @Sendable () -> Date = Date.init
+        resolves: @escaping @Sendable (String) -> String?, now: @escaping @Sendable () -> Date = Date.init
     ) {
         self.provider = provider
         self.capacity = capacity
@@ -67,28 +69,36 @@ final class LeafCache: @unchecked Sendable {
     /// The number of leaves that this cache has minted, also the ones it dropped.
     var mintedCount: Int { lock.withLock { table.minted } }
 
-    /// The name that a client with this SNI value gets: the normalized SNI
-    /// value if it is the self-test name or a name that `resolves` accepts,
-    /// else `localhost`.
-    static func mintName(sni: String?, suffixes: [String], resolves: (String) -> Bool) -> String {
+    /// The name of the leaf that a client with this SNI value gets: the
+    /// self-test name, the route name that `resolves` returns for the SNI
+    /// value, or `localhost`.
+    static func mintName(sni: String?, suffixes: [String], resolves: (String) -> String?) -> String {
         guard let sni, let host = DomainName.normalizedHost(sni),
-            let relative = DomainName.relative(host, suffixes: suffixes), !relative.isEmpty,
-            relative == DomainName.selfTestLabel || resolves(host)
+            let relative = DomainName.relative(host, suffixes: suffixes), !relative.isEmpty
         else { return DomainName.localhost }
-        return host
+        if relative == DomainName.selfTestLabel { return host }
+        return resolves(host) ?? DomainName.localhost
+    }
+
+    /// The names in the leaf of `name`: the route and its subdomains. The
+    /// leaf of `localhost` has no wildcard.
+    private static func leafNames(_ name: String) -> [String] {
+        name == DomainName.localhost ? [name] : [name, "*.\(name)"]
     }
 
     /// The identity for an SNI value.
     func identity(forSNI sni: String?) -> sec_identity_t? {
         let suffixes = lock.withLock { setup.suffixes }
-        return identity(named: Self.mintName(sni: sni, suffixes: suffixes, resolves: resolves), names: nil)
+        let name = Self.mintName(sni: sni, suffixes: suffixes, resolves: resolves)
+        return identity(named: name, names: Self.leafNames(name))
     }
 
     /// One identity for all of `names`. It is for the fallback mode, which
-    /// serves one certificate to each client.
-    func multiSANIdentity(names: [String]) -> sec_identity_t? {
+    /// serves one certificate to each client. A new `epoch` makes a new
+    /// certificate for the same names, and `dropMultiSAN(except:)` ends the old ones.
+    func multiSANIdentity(names: [String], epoch: Int = 0) -> sec_identity_t? {
         let sorted = Array(Set(names)).sorted()
-        return identity(named: Self.multiPrefix + sorted.joined(separator: ","), names: sorted)
+        return identity(named: Self.multiPrefix(epoch) + sorted.joined(separator: ","), names: sorted)
     }
 
     /// Drops every leaf and signs the next ones with `ca`.
@@ -103,18 +113,34 @@ final class LeafCache: @unchecked Sendable {
         }
     }
 
-    /// Drops the certificate of the fallback mode, so that the next one is new.
-    func dropMultiSAN() {
+    /// Drops the certificates of the fallback mode, except the ones of `epoch`.
+    /// Call it after the listener of that epoch runs, so that the old
+    /// listener never serves a certificate without its key.
+    func dropMultiSAN(except epoch: Int? = nil) {
         mintLock.withLock {
+            let keep = epoch.map { Self.multiPrefix($0) }
             let dropped = lock.withLock { () -> [Entry] in
-                let keys = table.entries.keys.filter { $0.hasPrefix(Self.multiPrefix) }
+                let keys = table.entries.keys.filter { key in
+                    key.hasPrefix("multi:") && !(keep.map { key.hasPrefix($0) } ?? false)
+                }
                 return keys.compactMap { table.entries.removeValue(forKey: $0) }
             }
             discard(dropped)
         }
     }
 
-    private static let multiPrefix = "multi:"
+    /// Drops every leaf and deletes their keys. The next request makes new ones.
+    func discardAll() {
+        mintLock.withLock {
+            let dropped = lock.withLock { () -> [Entry] in
+                defer { table.entries = [:] }
+                return Array(table.entries.values)
+            }
+            discard(dropped)
+        }
+    }
+
+    private static func multiPrefix(_ epoch: Int) -> String { "multi:\(epoch):" }
 
     private func discard(_ entries: [Entry]) {
         for entry in entries { provider.discard(certificate: entry.certificate, key: entry.key) }
@@ -134,9 +160,13 @@ final class LeafCache: @unchecked Sendable {
     private func mint(_ key: String, _ names: [String], _ current: Date) -> sec_identity_t? {
         let ca = lock.withLock { setup.ca }
         guard let leaf = try? ca.mintLeaf(names: names, now: current),
-            let id = try? provider.identity(certificate: leaf.certificate, key: leaf.key),
-            let secIdentity = sec_identity_create(id)
+            let id = try? provider.identity(certificate: leaf.certificate, key: leaf.key)
         else {
+            log.error("a leaf could not be made")
+            return nil
+        }
+        guard let secIdentity = sec_identity_create(id) else {
+            provider.discard(certificate: leaf.certificate, key: leaf.key)
             log.error("a leaf could not be made")
             return nil
         }

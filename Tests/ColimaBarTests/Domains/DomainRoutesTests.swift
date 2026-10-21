@@ -355,4 +355,56 @@ import Testing
         #expect(t.routes.isEmpty)
         #expect(t.notes["a"] == [.nameEmpty])
     }
+
+    // MARK: Remembered names
+
+    @Test func theNamesStayWhileTheVMStopsForTheSameProfileAndSuffixes() {
+        let list = [standalone("a", name: "shop")]
+        let running = DomainRoutes.build(list, suffixes: ["localhost"], profile: "p", vmRunning: true)
+        #expect(running.rememberedNames == ["shop"])
+        let stopped = DomainRoutes.build(
+            [], suffixes: ["localhost"], profile: "p", vmRunning: false, previous: running)
+        #expect(stopped.rememberedNames == ["shop"] && stopped.routes.isEmpty)
+        // They survive a second rebuild of the stopped VM.
+        let again = DomainRoutes.build([], suffixes: ["localhost"], profile: "p", vmRunning: false, previous: stopped)
+        #expect(again.rememberedNames == ["shop"])
+        #expect(stopped.routeHost(for: "shop.localhost") == "shop.localhost")
+        #expect(stopped.routeHost(for: "x.shop.localhost") == "shop.localhost")
+        #expect(stopped.routeHost(for: "other.localhost") == nil)
+        #expect(stopped.hasRoute(for: "api.shop.localhost"))
+    }
+
+    @Test func theNamesGoWhenTheProfileTheSuffixesOrTheSwitchChange() {
+        let running = DomainRoutes.build(
+            [standalone("a", name: "shop")], suffixes: ["localhost"], profile: "p", vmRunning: true)
+        let otherProfile = DomainRoutes.build(
+            [], suffixes: ["localhost"], profile: "q", vmRunning: false, previous: running)
+        #expect(otherProfile.rememberedNames.isEmpty)
+        let otherSuffixes = DomainRoutes.build(
+            [], suffixes: ["localhost", "colima.internal"], profile: "p", vmRunning: false, previous: running)
+        #expect(otherSuffixes.rememberedNames.isEmpty)
+        let off = DomainRoutes.build(
+            [], suffixes: ["localhost"], profile: "p", vmRunning: false, previous: running, remember: false)
+        #expect(off.rememberedNames.isEmpty && off.routeHost(for: "shop.localhost") == nil)
+        #expect(DomainRoutes.empty.rememberedNames.isEmpty)
+    }
+
+    @Test func aRunningVMUsesItsRoutesAndNotTheMemory() {
+        let running = DomainRoutes.build(
+            [standalone("a", name: "shop")], suffixes: ["localhost"], profile: "p", vmRunning: true)
+        let gone = DomainRoutes.build(
+            [], suffixes: ["localhost"], profile: "p", vmRunning: true, previous: running)
+        #expect(gone.rememberedNames.isEmpty && gone.routeHost(for: "shop.localhost") == nil)
+        #expect(running.routeHost(for: "SHOP.localhost.") == "shop.localhost")
+        #expect(running.routeHost(for: "localhost") == nil)
+    }
+
+    @Test func theRememberedNamesHaveACap() {
+        let list = (0..<300).map {
+            standalone("c\($0)", name: "n\($0)", ports: [P(containerPort: 80, hostPort: 20000 + $0)])
+        }
+        let running = DomainRoutes.build(list, suffixes: ["localhost"], profile: "p", vmRunning: true)
+        #expect(running.routes.count == 300)
+        #expect(running.rememberedNames.count == DomainRoutes.rememberedCap)
+    }
 }

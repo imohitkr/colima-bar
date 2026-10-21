@@ -9,7 +9,7 @@ import Testing
 
     private func rig(
         capacity: Int = 256, suffixes: [String] = ["localhost"], provider: TLSIdentityProvider? = nil,
-        resolves: @escaping @Sendable (String) -> Bool = { _ in true }
+        resolves: @escaping @Sendable (String) -> String? = { $0 }
     ) throws -> (cache: LeafCache, clock: TestClock, ca: LocalCA) {
         let clock = TestClock()
         let ca = try LocalCA.create(permitted: suffixes, now: clock.now)
@@ -52,7 +52,7 @@ import Testing
             ("[::1]", "localhost"),
         ]
         for (sni, expected) in table {
-            let name = LeafCache.mintName(sni: sni, suffixes: suffixes) { !$0.contains("unrouted") }
+            let name = LeafCache.mintName(sni: sni, suffixes: suffixes) { $0.contains("unrouted") ? nil : $0 }
             #expect(name == expected, "\(sni ?? "nil")")
         }
     }
@@ -100,7 +100,7 @@ import Testing
     }
 
     @Test func aNameWithoutARouteGetsTheLocalhostLeafAndIsNeverMinted() throws {
-        let (cache, _, _) = try rig(resolves: { $0 == "web.localhost" })
+        let (cache, _, _) = try rig(resolves: { $0 == "web.localhost" ? $0 : nil })
         #expect(name(cache.identity(forSNI: "random.localhost")) == "localhost")
         #expect(cache.mintedCount == 1)  // the localhost leaf
         for i in 0..<500 { #expect(name(cache.identity(forSNI: "flood-\(i).localhost")) == "localhost") }
@@ -114,7 +114,7 @@ import Testing
 
     @Test func theSelfTestNameIsMintedForEachSuffix() throws {
         let suffixes = ["localhost", "colima.internal"]
-        let (cache, _, _) = try rig(suffixes: suffixes, resolves: { _ in false })
+        let (cache, _, _) = try rig(suffixes: suffixes, resolves: { _ in nil })
         #expect(name(cache.identity(forSNI: "colimabar-selftest.localhost")) == "colimabar-selftest.localhost")
         #expect(
             name(cache.identity(forSNI: "colimabar-selftest.colima.internal"))
@@ -122,14 +122,36 @@ import Testing
         #expect(cache.mintedCount == 2)
     }
 
-    @Test func aFloodOfRouteSubdomainsStaysInsideTheCapacity() throws {
+    @Test func everySubdomainOfARouteSharesTheLeafOfTheRoute() throws {
+        let (cache, _, _) = try rig(resolves: { $0.hasSuffix("web.localhost") ? "web.localhost" : nil })
+        for i in 0..<300 { #expect(name(cache.identity(forSNI: "n\(i).web.localhost")) == "web.localhost") }
+        #expect(name(cache.identity(forSNI: "web.localhost")) == "web.localhost")
+        #expect(cache.mintedCount == 1)
+        // Another route has its own leaf, and a name outside the routes gets the fixed one.
+        #expect(name(cache.identity(forSNI: "other.localhost")) == "localhost")
+        #expect(cache.mintedCount == 2)
+    }
+
+    @Test func theLeafOfARouteNamesTheRouteAndItsSubdomains() throws {
+        let (cache, _, _) = try rig(resolves: { $0.hasSuffix("web.localhost") ? "web.localhost" : nil })
+        let identity = try #require(cache.identity(forSNI: "x.web.localhost"))
+        let ref = try #require(sec_identity_copy_ref(identity)?.takeRetainedValue())
+        var cert: SecCertificate?
+        #expect(SecIdentityCopyCertificate(ref, &cert) == errSecSuccess)
+        let der = [UInt8](SecCertificateCopyData(try #require(cert)) as Data)
+        let text = String(decoding: der, as: UTF8.self)
+        #expect(text.contains("*.web.localhost"))
+        #expect(!text.contains("x.web.localhost"))
+    }
+
+    @Test func theNumberOfLeavesStaysInsideTheCapacity() throws {
         let provider = FakeDomainTLS.RecordingProvider()
-        let (cache, _, _) = try rig(capacity: 8, provider: provider, resolves: { $0.hasSuffix("web.localhost") })
-        for i in 0..<40 { _ = cache.identity(forSNI: "n\(i).web.localhost") }
+        let (cache, _, _) = try rig(capacity: 8, provider: provider, resolves: { $0 })
+        for i in 0..<40 { _ = cache.identity(forSNI: "n\(i).localhost") }
         #expect(cache.mintedCount == 40)
         #expect(provider.discardCount == 32)
         // A name that was dropped gets a new leaf at its next request.
-        #expect(name(cache.identity(forSNI: "n0.web.localhost")) == "n0.web.localhost")
+        #expect(name(cache.identity(forSNI: "n0.localhost")) == "n0.localhost")
         #expect(cache.mintedCount == 41)
     }
 
@@ -162,7 +184,7 @@ import Testing
         _ = cache.multiSANIdentity(names: ["a.localhost"])
         #expect(cache.mintedCount == 1)
         _ = cache.identity(forSNI: "b.localhost")
-        cache.dropMultiSAN()
+        cache.dropMultiSAN(except: nil)
         _ = cache.multiSANIdentity(names: ["a.localhost"])
         #expect(cache.mintedCount == 3)
         _ = cache.identity(forSNI: "b.localhost")
@@ -187,6 +209,34 @@ import Testing
         cache.reset(ca: next, suffixes: ["localhost"])
         _ = cache.identity(forSNI: "a.localhost")
         #expect(cache.mintedCount == 2)
+    }
+
+    @Test func aNewEpochMakesANewCertificateAndTheOldOnesGoAfterwards() throws {
+        let provider = FakeDomainTLS.RecordingProvider()
+        let (cache, _, _) = try rig(provider: provider)
+        _ = cache.multiSANIdentity(names: ["a.localhost"], epoch: 1)
+        _ = cache.multiSANIdentity(names: ["a.localhost", "b.localhost"], epoch: 1)
+        _ = cache.identity(forSNI: "route.localhost")
+        // The new certificate exists before the old ones are dropped.
+        _ = cache.multiSANIdentity(names: ["a.localhost"], epoch: 2)
+        #expect(cache.mintedCount == 4)
+        #expect(provider.discardCount == 0)
+        cache.dropMultiSAN(except: 2)
+        #expect(provider.discardCount == 2)
+        _ = cache.multiSANIdentity(names: ["a.localhost"], epoch: 2)
+        _ = cache.identity(forSNI: "route.localhost")
+        #expect(cache.mintedCount == 4)  // both stay
+    }
+
+    @Test func discardAllDeletesEveryLeaf() throws {
+        let provider = FakeDomainTLS.RecordingProvider()
+        let (cache, _, _) = try rig(provider: provider)
+        _ = cache.identity(forSNI: "a.localhost")
+        _ = cache.multiSANIdentity(names: ["a.localhost"], epoch: 1)
+        cache.discardAll()
+        #expect(provider.discardCount == 2)
+        _ = cache.identity(forSNI: "a.localhost")
+        #expect(cache.mintedCount == 3)
     }
 
     @Test func manyThreadsGetOneLeafForOneName() async throws {

@@ -97,7 +97,7 @@ extension ColimaModel {
             domainsActive
             ? DomainRoutes.build(
                 domainCandidates, suffixes: activeDomainSuffixes, profile: profile, vmRunning: state == .running,
-                otherPublished: domainPublished)
+                otherPublished: domainPublished, previous: domainRoutes, remember: httpsEnabled)
             : .empty
         setDomainRoutes(table)
         guard !isDebug else { return }
@@ -162,7 +162,7 @@ extension ColimaModel {
         if domainsEnabled {
             rebuildDomainRoutes()
             startDomainProxy()
-            startHTTPSAtLaunch()
+            Task { await resumeHTTPS() }
         } else {
             // The master switch off stops HTTPS but keeps the certificate authority.
             tearDownHTTPS()
