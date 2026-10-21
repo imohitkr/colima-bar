@@ -44,18 +44,57 @@ enum TrustStore {
         return isCancel(status) ? .cancelled : .failed(status)
     }
 
-    /// Removes the trust setting (one dialog) and the certificate. The
-    /// certificate goes even if the user cancels the dialog.
+    private static func deleteCertificate(_ ca: LocalCA) {
+        SecItemDelete([kSecClass: kSecClassCertificate, kSecValueRef: ca.certificate] as CFDictionary)
+    }
+
+    /// Removes the trust setting (one dialog) and then the certificate. If the
+    /// user cancels or the removal fails, the certificate stays in the login
+    /// keychain, so the user can still see it and delete it there.
     static func remove(_ ca: LocalCA) -> Outcome {
         guard !TestProcess.isRunning else { return .failed(errSecNotAvailable) }
-        let status = SecTrustSettingsRemoveTrustSettings(ca.certificate, .user)
-        deleteCertificate(ca)
-        if status == errSecSuccess || status == errSecItemNotFound { return .done }
+        return remove(certificate: ca.certificate)
+    }
+
+    private static func remove(certificate: SecCertificate) -> Outcome {
+        let status = SecTrustSettingsRemoveTrustSettings(certificate, .user)
+        if status == errSecSuccess || status == errSecItemNotFound {
+            SecItemDelete([kSecClass: kSecClassCertificate, kSecValueRef: certificate] as CFDictionary)
+            return .done
+        }
         return isCancel(status) ? .cancelled : .failed(status)
     }
 
-    private static func deleteCertificate(_ ca: LocalCA) {
-        SecItemDelete([kSecClass: kSecClassCertificate, kSecValueRef: ca.certificate] as CFDictionary)
+    /// Removes every certificate that is labelled like the CA of ColimaBar.
+    /// It is for a CA whose files are gone. One dialog for each certificate.
+    /// The first outcome that is not `.done` is the result.
+    static func removeLabelled() -> Outcome {
+        guard !TestProcess.isRunning else { return .failed(errSecNotAvailable) }
+        var result = Outcome.done
+        for certificate in labelledCertificates() {
+            let outcome = remove(certificate: certificate)
+            if result == .done { result = outcome }
+        }
+        return result
+    }
+
+    /// The certificates of the keychains of this user with the label of the CA of ColimaBar.
+    private static func labelledCertificates() -> [SecCertificate] {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassCertificate, kSecMatchLimit: kSecMatchLimitAll, kSecReturnRef: true,
+            kSecReturnAttributes: true,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+            let items = result as? [[String: Any]]
+        else { return [] }
+        return items.compactMap { item in
+            guard let label = item[kSecAttrLabel as String] as? String,
+                label.hasPrefix(LocalCA.commonNamePrefix), let ref = item[kSecValueRef as String] as AnyObject?,
+                CFGetTypeID(ref) == SecCertificateGetTypeID()
+            else { return nil }
+            return unsafeDowncast(ref, to: SecCertificate.self)
+        }
     }
 
     /// True when the user trust settings list the CA and the system accepts

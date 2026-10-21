@@ -19,6 +19,7 @@ final class PrivateIdentityProvider: TLSIdentityProvider, @unchecked Sendable {
         return identity
     }
 
+    func discard(certificate: SecCertificate, key: SecKey) {}
     func unlockIfNeeded() {}
     func removeAll() {}
 }

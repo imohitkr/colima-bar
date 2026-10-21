@@ -53,8 +53,13 @@ import Testing
             https(.untrusted, port: 443).caption
                 == "macOS does not trust the certificate authority. Browsers show a warning.")
         #expect(
-            https(.failed, problem: "Ports 443 and 8443 are busy.").caption
-                == "HTTPS could not start. Ports 443 and 8443 are busy.")
+            https(.untrusted, problem: "The certificate authority does not cover the current names.").caption
+                == "The certificate authority does not cover the current names.")
+        // A failure shows its own text, and the text says the whole thing.
+        #expect(https(.failed, problem: "Ports 443 and 8443 are busy.").caption == "Ports 443 and 8443 are busy.")
+        #expect(
+            https(.failed, problem: "The HTTPS listener stopped. ColimaBar tries again soon.").caption
+                == "The HTTPS listener stopped. ColimaBar tries again soon.")
         #expect(https(.failed).caption == "HTTPS could not start.")
     }
 
@@ -63,6 +68,8 @@ import Testing
         for phase in [DomainStatus.HTTPS.Phase.off, .settingUp, .failed, .removing] {
             #expect(!https(phase, port: 443).listening)
         }
+        // `.untrusted` without a port (a CA that does not cover the names) listens on nothing.
+        #expect(!https(.untrusted).listening && !https(.running).listening)
         #expect(!https(.running, port: 443).usesFallback)
         #expect(https(.running, port: 8443).usesFallback)
         #expect(!https(.off).usesFallback)

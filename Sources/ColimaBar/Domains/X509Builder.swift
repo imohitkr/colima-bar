@@ -29,7 +29,7 @@ enum X509Builder {
 
     // OIDs
     private static let ecdsaSHA256 = DER.seq(DER.oid("1.2.840.10045.4.3.2"))
-    private static let oidBasicConstraints = "2.5.29.19"
+    static let oidBasicConstraints = "2.5.29.19"
     private static let oidKeyUsage = "2.5.29.15"
     private static let oidNameConstraints = "2.5.29.30"
     private static let oidExtKeyUsage = "2.5.29.37"

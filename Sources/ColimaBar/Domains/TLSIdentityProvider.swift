@@ -9,6 +9,8 @@ protocol TLSIdentityProvider: AnyObject, Sendable {
     /// For the log and the diagnostics: "file keychain" or "private API".
     var name: String { get }
     func identity(certificate: SecCertificate, key: SecKey) throws -> SecIdentity
+    /// Deletes the key and the certificate of a leaf that the cache dropped.
+    func discard(certificate: SecCertificate, key: SecKey)
     /// Called after a wake.
     func unlockIfNeeded()
     /// Called at quit and when HTTPS turns off.

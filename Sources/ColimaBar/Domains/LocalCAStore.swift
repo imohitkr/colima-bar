@@ -4,7 +4,8 @@ import Foundation
 /// The files of the local certificate authority, in one private folder:
 /// `ca.der` (0600), `ca.pem` (0644, for `NODE_EXTRA_CA_CERTS`) and
 /// `ca-key.raw` (0600, the 97 bytes `04 || X || Y || D`). The folder is 0700
-/// and not in Time Machine backups.
+/// and not in Time Machine backups. `save` builds a new set in `domains.new`
+/// and swaps it in.
 enum LocalCAStore {
     static var dir: String { Paths.domainsDir }
     static let derName = "ca.der"
@@ -25,23 +26,50 @@ enum LocalCAStore {
         return try? LocalCA.restore(certificateDER: [UInt8](der), keyX963: [UInt8](key))
     }
 
-    /// Writes the three files. A file of an earlier CA is replaced.
+    /// The folder where `save` builds the next set of files.
+    private static func stagingPath(_ dir: String) -> String { dir + ".new" }
+
+    /// Writes the three files into a staging folder next to `dir`, then
+    /// swaps the folders with one rename. A crash leaves the old set or the
+    /// new set, never a certificate with the key of another CA.
     static func save(_ ca: LocalCA, dir: String = dir) throws {
         // A test process never writes the folder of the user.
         if TestProcess.isRunning, dir == Paths.domainsDir { throw POSIXError(.EPERM) }
         let fm = FileManager.default
-        var info = stat()
-        if lstat(dir, &info) == 0, (info.st_mode & S_IFMT) != S_IFDIR { try fm.removeItem(atPath: dir) }
+        let staging = stagingPath(dir)
         try fm.createDirectory(
-            atPath: dir, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        guard chmod(dir, 0o700) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        try write(Data(try ca.keyX963()), to: "\(dir)/\(keyName)", mode: 0o600)
-        try write(Data(ca.der), to: "\(dir)/\(derName)", mode: 0o600)
-        try write(Data(X509Builder.pem(ca.der).utf8), to: "\(dir)/\(pemName)", mode: 0o644)
-        var url = URL(fileURLWithPath: dir)
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        try? url.setResourceValues(values)
+            atPath: (dir as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? fm.removeItem(atPath: staging)
+        try fm.createDirectory(
+            atPath: staging, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        guard chmod(staging, 0o700) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        do {
+            try write(Data(try ca.keyX963()), to: "\(staging)/\(keyName)", mode: 0o600)
+            try write(Data(ca.der), to: "\(staging)/\(derName)", mode: 0o600)
+            try write(Data(X509Builder.pem(ca.der).utf8), to: "\(staging)/\(pemName)", mode: 0o644)
+            var url = URL(fileURLWithPath: staging)
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try? url.setResourceValues(values)
+            try replace(dir, with: staging)
+        } catch {
+            try? fm.removeItem(atPath: staging)
+            throw error
+        }
+    }
+
+    /// Puts the staging folder in place of `dir`. A folder or a file that is
+    /// there goes away, and a symlink is never followed.
+    private static func replace(_ dir: String, with staging: String) throws {
+        var info = stat()
+        if lstat(dir, &info) == 0 {
+            if (info.st_mode & S_IFMT) == S_IFDIR, renamex_np(staging, dir, UInt32(RENAME_SWAP)) == 0 {
+                try? FileManager.default.removeItem(atPath: staging)
+                return
+            }
+            try FileManager.default.removeItem(atPath: dir)
+        }
+        guard rename(staging, dir) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
 
     /// Deletes the key first, so that the CA can never sign again, then the folder.
@@ -49,6 +77,7 @@ enum LocalCAStore {
         if TestProcess.isRunning, dir == Paths.domainsDir { return }
         unlink("\(dir)/\(keyName)")
         try? FileManager.default.removeItem(atPath: dir)
+        try? FileManager.default.removeItem(atPath: stagingPath(dir))
     }
 
     private static func write(_ data: Data, to path: String, mode: mode_t) throws {

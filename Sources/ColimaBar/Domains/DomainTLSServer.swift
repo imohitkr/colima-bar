@@ -49,13 +49,26 @@ final class DomainTLSServer: @unchecked Sendable {
         return options
     }
 
-    /// The host name of the self-test.
-    static let selfTestHost = "\(DomainName.selfTestLabel).\(DomainName.localhost)"
+    /// The host name of the self-test under `suffix`.
+    static func selfTestHost(suffix: String = DomainName.localhost) -> String {
+        "\(DomainName.selfTestLabel).\(suffix)"
+    }
 
-    /// Connects to 127.0.0.1:`port` with the SNI value of the self-test and
-    /// the CA as the only anchor, and sends a HEAD. True when the chain and
-    /// the name pass and the proxy answers (404, or 503 if the VM is stopped).
-    static func selfTest(port: UInt16, ca: LocalCA, timeout: TimeInterval = 5) async -> Bool {
+    /// The self-test for one name under each of `suffixes`. True when all pass.
+    static func selfTest(
+        port: UInt16, ca: LocalCA, suffixes: [String] = [DomainName.localhost], timeout: TimeInterval = 5
+    ) async -> Bool {
+        for suffix in suffixes
+        where await !selfTest(port: port, ca: ca, host: selfTestHost(suffix: suffix), timeout: timeout) {
+            return false
+        }
+        return true
+    }
+
+    /// Connects to 127.0.0.1:`port` with `host` as the SNI value and the CA
+    /// as the only anchor, and sends a HEAD. True when the chain and the name
+    /// pass and the proxy answers (404, or 503 if the VM is stopped).
+    static func selfTest(port: UInt16, ca: LocalCA, host selfTestHost: String, timeout: TimeInterval) async -> Bool {
         guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return false }
         let queue = DispatchQueue(label: "colimabar.domains.selftest")
         let options = NWProtocolTLS.Options()

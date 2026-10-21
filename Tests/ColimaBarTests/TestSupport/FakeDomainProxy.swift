@@ -20,6 +20,7 @@ final class FakeDomainProxy: DomainProxying, @unchecked Sendable {
     private var httpsBusy: Set<UInt16> = []
     private var httpsCalls: [[UInt16]] = []
     private var httpsStopCount = 0
+    private var httpsHook: (@Sendable ([UInt16]) async -> Void)?
 
     var routes: DomainRoutes {
         get { lock.withLock { table } }
@@ -49,8 +50,13 @@ final class FakeDomainProxy: DomainProxying, @unchecked Sendable {
     var httpsStarts: [[UInt16]] { lock.withLock { httpsCalls } }
     var httpsStops: Int { lock.withLock { httpsStopCount } }
 
+    /// Runs at the start of each `startHTTPS` call, before it picks a port.
+    func onStartHTTPS(_ body: (@Sendable ([UInt16]) async -> Void)?) { lock.withLock { httpsHook = body } }
+
     func startHTTPS(candidates: [UInt16], tls: @escaping @Sendable () -> NWProtocolTLS.Options) async -> UInt16? {
-        lock.withLock {
+        let run = lock.withLock { httpsHook }
+        await run?(candidates)
+        return lock.withLock {
             httpsCalls.append(candidates)
             httpsBound = nil
             return candidates.first(where: { !httpsBusy.contains($0) }).map { pick in

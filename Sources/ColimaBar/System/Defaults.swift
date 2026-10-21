@@ -64,6 +64,8 @@ enum Defaults {
         /// HTTPS for container domains. The local CA exists while it is on.
         /// Not in the settings file: it shows a trust dialog.
         case domainsHTTPS
+        /// A CA install is in progress: set before the password dialog, cleared after it.
+        case domainsHTTPSPending
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

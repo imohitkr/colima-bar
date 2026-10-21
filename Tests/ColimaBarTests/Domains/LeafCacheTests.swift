@@ -8,13 +8,14 @@ import Testing
     private let day: TimeInterval = 86400
 
     private func rig(
-        capacity: Int = 256, mintLimit: Int = 4096, suffixes: [String] = ["localhost"]
+        capacity: Int = 256, suffixes: [String] = ["localhost"], provider: TLSIdentityProvider? = nil,
+        resolves: @escaping @Sendable (String) -> Bool = { _ in true }
     ) throws -> (cache: LeafCache, clock: TestClock, ca: LocalCA) {
         let clock = TestClock()
         let ca = try LocalCA.create(permitted: suffixes, now: clock.now)
         let cache = LeafCache(
-            ca: ca, provider: PrivateIdentityProvider(), suffixes: suffixes, capacity: capacity,
-            mintLimit: mintLimit, now: { clock.now })
+            ca: ca, provider: provider ?? PrivateIdentityProvider(), suffixes: suffixes, capacity: capacity,
+            resolves: resolves, now: { clock.now })
         return (cache, clock, ca)
     }
 
@@ -31,6 +32,12 @@ import Testing
         let table: [(String?, String)] = [
             (nil, "localhost"),
             ("", "localhost"),
+            ("unrouted.localhost", "localhost"),
+            ("a.unrouted.localhost", "localhost"),
+            ("colimabar-selftest.localhost", "colimabar-selftest.localhost"),
+            ("colimabar-selftest.colima.internal", "colimabar-selftest.colima.internal"),
+            ("evillocalhost", "localhost"),
+            ("localhost.evil.com", "localhost"),
             ("web.shop.localhost", "web.shop.localhost"),
             ("WEB.Shop.LocalHost", "web.shop.localhost"),
             ("web.shop.localhost.", "web.shop.localhost"),
@@ -45,7 +52,8 @@ import Testing
             ("[::1]", "localhost"),
         ]
         for (sni, expected) in table {
-            #expect(LeafCache.mintName(sni: sni, suffixes: suffixes) == expected, "\(sni ?? "nil")")
+            let name = LeafCache.mintName(sni: sni, suffixes: suffixes) { !$0.contains("unrouted") }
+            #expect(name == expected, "\(sni ?? "nil")")
         }
     }
 
@@ -91,14 +99,74 @@ import Testing
         #expect(cache.mintedCount == 4)
     }
 
-    @Test func aCacheMintsNoMoreThanItsLimitAndServesLocalhostAfterwards() throws {
-        let (cache, _, _) = try rig(mintLimit: 2)
-        #expect(name(cache.identity(forSNI: "a.localhost")) == "a.localhost")
-        #expect(name(cache.identity(forSNI: "b.localhost")) == "b.localhost")
-        #expect(name(cache.identity(forSNI: "c.localhost")) == "localhost")
+    @Test func aNameWithoutARouteGetsTheLocalhostLeafAndIsNeverMinted() throws {
+        let (cache, _, _) = try rig(resolves: { $0 == "web.localhost" })
+        #expect(name(cache.identity(forSNI: "random.localhost")) == "localhost")
+        #expect(cache.mintedCount == 1)  // the localhost leaf
+        for i in 0..<500 { #expect(name(cache.identity(forSNI: "flood-\(i).localhost")) == "localhost") }
+        #expect(cache.mintedCount == 1)
+        // The real name still gets its own leaf, and keeps it.
+        #expect(name(cache.identity(forSNI: "web.localhost")) == "web.localhost")
+        #expect(cache.mintedCount == 2)
+        #expect(name(cache.identity(forSNI: "web.localhost")) == "web.localhost")
+        #expect(cache.mintedCount == 2)
+    }
+
+    @Test func theSelfTestNameIsMintedForEachSuffix() throws {
+        let suffixes = ["localhost", "colima.internal"]
+        let (cache, _, _) = try rig(suffixes: suffixes, resolves: { _ in false })
+        #expect(name(cache.identity(forSNI: "colimabar-selftest.localhost")) == "colimabar-selftest.localhost")
+        #expect(
+            name(cache.identity(forSNI: "colimabar-selftest.colima.internal"))
+                == "colimabar-selftest.colima.internal")
+        #expect(cache.mintedCount == 2)
+    }
+
+    @Test func aFloodOfRouteSubdomainsStaysInsideTheCapacity() throws {
+        let provider = FakeDomainTLS.RecordingProvider()
+        let (cache, _, _) = try rig(capacity: 8, provider: provider, resolves: { $0.hasSuffix("web.localhost") })
+        for i in 0..<40 { _ = cache.identity(forSNI: "n\(i).web.localhost") }
+        #expect(cache.mintedCount == 40)
+        #expect(provider.discardCount == 32)
+        // A name that was dropped gets a new leaf at its next request.
+        #expect(name(cache.identity(forSNI: "n0.web.localhost")) == "n0.web.localhost")
+        #expect(cache.mintedCount == 41)
+    }
+
+    @Test func theKeychainOfALeafGoesWhenTheCacheDropsTheLeaf() throws {
+        let temp = try TempFolder()
+        let provider = try #require(FileKeychainIdentityProvider(cacheDir: temp.path))
+        defer { provider.removeAll() }
+        let (cache, _, _) = try rig(capacity: 2, provider: provider)
+        for host in ["a", "b", "c", "d", "e"] { _ = cache.identity(forSNI: "\(host).localhost") }
+        // Two leaves stay: each has a key and a certificate.
+        #expect(provider.itemCount == 4)
+    }
+
+    @Test func aLeafThatIsMadeAgainReplacesTheOldOneInTheKeychain() throws {
+        let temp = try TempFolder()
+        let provider = try #require(FileKeychainIdentityProvider(cacheDir: temp.path))
+        defer { provider.removeAll() }
+        let (cache, clock, _) = try rig(provider: provider)
+        _ = cache.identity(forSNI: "a.localhost")
+        #expect(provider.itemCount == 2)
+        clock.advance(30 * day)
+        _ = cache.identity(forSNI: "a.localhost")
+        #expect(cache.mintedCount == 2)
+        #expect(provider.itemCount == 2)
+    }
+
+    @Test func theFallbackCertificateIsMadeAgainAfterItIsDropped() throws {
+        let (cache, _, _) = try rig()
+        _ = cache.multiSANIdentity(names: ["a.localhost"])
+        _ = cache.multiSANIdentity(names: ["a.localhost"])
+        #expect(cache.mintedCount == 1)
+        _ = cache.identity(forSNI: "b.localhost")
+        cache.dropMultiSAN()
+        _ = cache.multiSANIdentity(names: ["a.localhost"])
         #expect(cache.mintedCount == 3)
-        #expect(name(cache.identity(forSNI: "d.localhost")) == "localhost")
-        #expect(cache.mintedCount == 3)
+        _ = cache.identity(forSNI: "b.localhost")
+        #expect(cache.mintedCount == 3)  // the leaf of a name stays
     }
 
     @Test func oneIdentityServesAllTheNamesOfTheFallbackMode() throws {

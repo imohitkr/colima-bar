@@ -24,13 +24,27 @@ extension ColimaModel {
 
     // MARK: - The switch
 
-    /// The HTTPS switch calls it.
+    /// The HTTPS switch calls it. Turning HTTPS off works when the master
+    /// switch is off too, so the CA can always go.
     func setHTTPS(_ on: Bool) {
-        guard !isDebug, domainsEnabled, httpsSetupTask == nil else { return }
+        guard !isDebug, httpsSetupTask == nil else { return }
         if on, !httpsEnabled {
+            guard domainsEnabled else { return }
             enableHTTPS()
         } else if !on, httpsEnabled {
             disableHTTPS()
+        }
+    }
+
+    /// True while a CA install runs or ran when the app ended. The next launch cleans up.
+    var httpsInstallPending: Bool { domainsStore.bool(forKey: Defaults.Key.domainsHTTPSPending.rawValue) }
+
+    private func setHTTPSInstallPending(_ on: Bool) {
+        guard !isDebug else { return }
+        if on {
+            domainsStore.set(true, forKey: Defaults.Key.domainsHTTPSPending.rawValue)
+        } else {
+            domainsStore.removeObject(forKey: Defaults.Key.domainsHTTPSPending.rawValue)
         }
     }
 
@@ -44,56 +58,77 @@ extension ColimaModel {
         httpsSetupTask = Task {
             defer { httpsSetupTask = nil }
             let prepared = await Self.blocking { Result { try services.prepareCA(permitted: suffixes) } }
+            guard !Task.isCancelled else { return }
             guard case .success(let ca) = prepared else {
                 return setHTTPSStatus(
                     .init(
                         phase: .off,
                         problem: "HTTPS could not start. ColimaBar could not make the certificate authority."))
             }
-            switch await Self.blocking({ services.install(ca) }) {
-            case .done:
-                tlsCA = ca
-                setHTTPSEnabled(true)
-                await startHTTPS()
-            case .cancelled:
-                services.removeCAFiles()
-                setHTTPSStatus(.init(phase: .off, problem: "You cancelled the password dialog. HTTPS stays off."))
-            case .failed(let status):
-                services.removeCAFiles()
-                setHTTPSStatus(.init(phase: .off, problem: "HTTPS could not start: macOS error \(status)."))
-            }
+            await install(ca)
         }
     }
 
-    /// Stops HTTPS and removes the CA: the trust (one dialog), the keychain
-    /// certificate and the key file. The key file goes even when the user
-    /// cancels the dialog, so the CA can never sign again.
+    /// Installs a CA that `services` saved, with one dialog, and starts the
+    /// listener. A cancel or an error deletes the files again and leaves
+    /// HTTPS off. The marker tells the next launch about an install that the
+    /// quit of the app interrupted. It runs inside `httpsSetupTask`.
+    private func install(_ ca: LocalCA) async {
+        let services = domainTLS
+        setHTTPSInstallPending(true)
+        let outcome = await Self.blocking { services.install(ca) }
+        guard !Task.isCancelled else { return }
+        switch outcome {
+        case .done:
+            tlsCA = ca
+            setHTTPSEnabled(true)
+            setHTTPSInstallPending(false)
+            if domainsEnabled {
+                await runHTTPS()
+            } else {
+                setHTTPSStatus(.init(phase: .off))
+            }
+        case .cancelled:
+            services.removeCAFiles()
+            setHTTPSInstallPending(false)
+            setHTTPSEnabled(false)
+            setHTTPSStatus(.init(phase: .off, problem: "You cancelled the password dialog. HTTPS stays off."))
+        case .failed(let status):
+            services.removeCAFiles()
+            setHTTPSInstallPending(false)
+            setHTTPSEnabled(false)
+            setHTTPSStatus(.init(phase: .off, problem: "HTTPS could not start: macOS error \(status)."))
+        }
+    }
+
+    /// Stops HTTPS and removes the CA. The key file goes first, before the
+    /// dialog, so the CA can never sign again, even if the user cancels or the
+    /// app ends. Then macOS removes the trust (one dialog) and the keychain
+    /// certificate. If the files are gone, the certificates with the label of
+    /// the CA go instead.
     private func disableHTTPS() {
         dismissPopover()
         tearDownHTTPS()
         let ca = tlsCA ?? domainTLS.loadCA()
         tlsCA = nil
+        setHTTPSEnabled(false)
         setHTTPSStatus(.init(phase: .removing))
         let services = domainTLS
+        services.removeCAFiles()
         httpsSetupTask = Task {
             defer { httpsSetupTask = nil }
-            var outcome = TrustStore.Outcome.done
-            if let ca { outcome = await Self.blocking { services.uninstall(ca) } }
-            services.removeCAFiles()
-            setHTTPSEnabled(false)
+            let outcome = await Self.blocking { ca.map { services.uninstall($0) } ?? services.uninstallLeftovers() }
+            guard !Task.isCancelled else { return }
             let note: String
             switch outcome {
-            case _ where ca == nil:
-                note =
-                    "HTTPS is off. ColimaBar found no certificate authority file. If Keychain Access lists one, delete it there."
             case .done:
                 note = "ColimaBar removed the certificate authority."
             case .cancelled:
                 note =
-                    "macOS still lists a trust setting for the removed certificate authority. It has no effect, because the key is deleted."
+                    "macOS still lists the certificate authority and its trust setting. They have no effect, because ColimaBar deleted the key. Delete the certificate \"ColimaBar Local CA\" in Keychain Access."
             case .failed(let status):
                 note =
-                    "macOS could not remove the trust setting (error \(status)). It has no effect, because the key is deleted."
+                    "macOS could not remove the certificate authority (error \(status)). It has no effect, because ColimaBar deleted the key. Delete the certificate \"ColimaBar Local CA\" in Keychain Access."
             }
             setHTTPSStatus(.init(phase: .off, problem: note))
         }
@@ -105,26 +140,68 @@ extension ColimaModel {
     }
 
     /// "Trust Again…": adds the CA to the login keychain and trusts it again.
+    /// A CA that does not cover the names of the domains is replaced: macOS
+    /// removes the old one (one dialog), then trusts a new one (a second dialog).
     func trustCAAgain() {
         guard !isDebug, httpsEnabled, httpsSetupTask == nil, domainStatus.https.phase == .untrusted,
             let ca = tlsCA ?? domainTLS.loadCA()
         else { return }
         dismissPopover()
         let services = domainTLS
-        let before = domainStatus.https
-        httpsSetupTask = Task {
-            defer { httpsSetupTask = nil }
-            switch await Self.blocking({ services.install(ca) }) {
-            case .done:
+        let token = httpsStartToken
+        if ca.covers(activeDomainSuffixes) {
+            httpsSetupTask = Task {
+                defer { httpsSetupTask = nil }
+                let outcome = await Self.blocking { services.install(ca) }
+                guard !Task.isCancelled, outcome == .done else { return }
                 let trusted = await Self.blocking { services.isTrusted(ca) }
-                var https = domainStatus.https
-                if https.listening { https.phase = trusted ? .running : .untrusted }
-                setHTTPSStatus(https)
-            case .cancelled, .failed:
-                setHTTPSStatus(before)
+                guard !Task.isCancelled else { return }
+                applyHTTPSTrust(trusted, token: token)
             }
+        } else {
+            reissueCA(old: ca)
         }
     }
+
+    /// Replaces `old` with a CA that covers the active suffixes. The old CA
+    /// goes first. If the user cancels that dialog, nothing changes: the old
+    /// CA stays installed with its files. If the user cancels the second
+    /// dialog, the new files go and HTTPS is off. It never leaves the old files
+    /// without the old CA, or a CA in the keychain without its files.
+    private func reissueCA(old: LocalCA) {
+        tearDownHTTPS()
+        setHTTPSStatus(.init(phase: .settingUp))
+        let services = domainTLS
+        let suffixes = activeDomainSuffixes
+        httpsSetupTask = Task {
+            defer { httpsSetupTask = nil }
+            let removed = await Self.blocking { services.uninstall(old) }
+            guard !Task.isCancelled else { return }
+            guard removed == .done else {
+                tlsCA = old
+                return setHTTPSStatus(
+                    .init(
+                        phase: .untrusted,
+                        problem: "ColimaBar did not replace the certificate authority. \(Self.needsNewCAText)"))
+            }
+            tlsCA = nil
+            let prepared = await Self.blocking { Result { try services.prepareCA(permitted: suffixes) } }
+            guard !Task.isCancelled else { return }
+            guard case .success(let ca) = prepared else {
+                services.removeCAFiles()
+                setHTTPSEnabled(false)
+                return setHTTPSStatus(
+                    .init(
+                        phase: .off,
+                        problem: "HTTPS could not start. ColimaBar could not make the certificate authority."))
+            }
+            await install(ca)
+        }
+    }
+
+    /// The text for a CA that does not permit the active suffixes.
+    nonisolated static let needsNewCAText =
+        "The certificate authority does not cover the current names. Click Trust Again to make a new one."
 
     /// Shows `ca.pem` in Finder, for tools with their own trust store.
     func showCACertificate() {
@@ -138,17 +215,51 @@ extension ColimaModel {
 
     // MARK: - Listener
 
-    /// Starts the listener for a launch with the setting on. It shows no dialog.
+    /// Cleans up an install that the app did not finish, then starts the
+    /// listener for a launch with the setting on. It shows no dialog.
     func startHTTPSAtLaunch() {
-        guard httpsEnabled else { return }
-        Task { await startHTTPS(retryFirst: true) }
+        guard !isDebug else { return }
+        Task {
+            await recoverPendingInstall()
+            guard domainsEnabled, httpsEnabled, httpsSetupTask == nil else { return }
+            await runHTTPS(retryFirst: true)
+        }
+    }
+
+    /// The app ended while the password dialog showed. If macOS trusts the
+    /// saved CA, the install finished: keep it and turn HTTPS on. Else delete
+    /// the files and the certificate (an untrusted certificate needs no dialog).
+    private func recoverPendingInstall() async {
+        guard httpsInstallPending else { return }
+        guard !httpsEnabled else { return setHTTPSInstallPending(false) }
+        let services = domainTLS
+        let keep = await Self.blocking { () -> Bool in
+            guard let ca = services.loadCA() else {
+                services.removeCAFiles()
+                return false
+            }
+            if services.isTrusted(ca) { return true }
+            _ = services.uninstall(ca)
+            services.removeCAFiles()
+            return false
+        }
+        if keep { setHTTPSEnabled(true) }
+        setHTTPSInstallPending(false)
+    }
+
+    /// Starts the listener again, for a retry, a move or a wake. It does nothing while a setup runs.
+    func startHTTPS(retryFirst: Bool = false) async {
+        guard httpsSetupTask == nil else { return }
+        await runHTTPS(retryFirst: retryFirst)
     }
 
     /// Loads the CA, makes the identity provider, starts the TLS listener and
     /// tests it. It falls back to one certificate for all names if the
     /// per-name certificates fail the test. A missing trust only sets the
-    /// `.untrusted` phase. It shows no dialog.
-    func startHTTPS(retryFirst: Bool = false) async {
+    /// `.untrusted` phase. A CA that does not cover the active suffixes starts
+    /// no listener (`needsNewCAText`). It shows no dialog. A listener that runs
+    /// keeps its status and links until the new port is bound.
+    private func runHTTPS(retryFirst: Bool = false) async {
         guard !isDebug, domainsEnabled, httpsEnabled else { return }
         httpsStartToken += 1
         let token = httpsStartToken
@@ -156,45 +267,60 @@ extension ColimaModel {
         httpsRetry = nil
         multiSANTask?.cancel()
         multiSANTask = nil
+        multiSANRenewTask?.cancel()
+        multiSANRenewTask = nil
         httpsStartPublished = domainBlockedPorts
-        setHTTPSStatus(.init(phase: .settingUp))
+        if !(domainStatus.https.listening && domainProxy.httpsPort != nil) {
+            setHTTPSStatus(.init(phase: .settingUp))
+        }
         domainProxy.onHTTPSListenerFailure = { [weak self] in
             Task { @MainActor in self?.httpsListenerFailed(token: token) }
         }
         guard let ca = tlsCA ?? domainTLS.loadCA() else {
             return setHTTPSFailed(
-                "The certificate authority files are missing. Turn HTTPS off and on.", retry: false)
+                "HTTPS could not start. The certificate authority files are missing or invalid. Turn HTTPS off and on.",
+                retry: false)
         }
         tlsCA = ca
+        let suffixes = activeDomainSuffixes
+        guard ca.covers(suffixes) else {
+            domainProxy.stopHTTPS()
+            return setHTTPSStatus(.init(phase: .untrusted, problem: Self.needsNewCAText))
+        }
         guard let provider = await ensureTLSProvider(ca: ca) else {
             guard token == httpsStartToken else { return }
-            return setHTTPSFailed("The TLS identity test failed.")
+            return setHTTPSFailed("HTTPS could not start. The TLS identity test failed.")
         }
         guard token == httpsStartToken, domainsEnabled, httpsEnabled else { return }
-        let cache = LeafCache(ca: ca, provider: provider, suffixes: activeDomainSuffixes)
+        let proxy = domainProxy
+        let cache = LeafCache(
+            ca: ca, provider: provider, suffixes: suffixes,
+            resolves: { proxy.routes.hasRoute(for: $0) })
         leafCache = cache
         tlsMode = .perSNI
         guard var port = await listenHTTPS(cache: cache, mode: .perSNI, token: token, retryFirst: retryFirst) else {
             return
         }
-        if await !domainTLS.selfTest(port: port, ca: ca) {
+        if await !domainTLS.selfTest(port: port, ca: ca, suffixes: suffixes) {
             guard token == httpsStartToken else { return }
             log.error("the HTTPS self-test failed with a certificate for each name")
             tlsMode = .multiSAN
             guard let again = await listenHTTPS(cache: cache, mode: .multiSAN, token: token, retryFirst: false)
             else { return }
             port = again
-            guard await domainTLS.selfTest(port: port, ca: ca) else {
+            guard await domainTLS.selfTest(port: port, ca: ca, suffixes: suffixes) else {
                 guard token == httpsStartToken else { return }
                 domainProxy.stopHTTPS()
-                return setHTTPSFailed("The HTTPS self-test failed.")
+                return setHTTPSFailed("HTTPS could not start. The HTTPS self-test failed.")
             }
         }
         let services = domainTLS
         let trusted = await Self.blocking { services.isTrusted(ca) }
         guard token == httpsStartToken else { return }
         httpsRetryCount = 0
+        httpsTrustCheckedAt = Date()
         setHTTPSStatus(.init(phase: trusted ? .running : .untrusted, port: port))
+        if tlsMode == .multiSAN { scheduleMultiSANRenewal(token: token) }
         // A container may have published the port while HTTPS started.
         if Self.httpsConflictPort(status: domainStatus, published: domainRoutes.publishedHostPorts) {
             if let port = domainStatus.https.port { noteDomainConflict(port: Int(port)) }
@@ -274,28 +400,53 @@ extension ColimaModel {
 
     /// In the fallback mode, the certificate lists the names. When the routes
     /// change, wait 2 s, then start the listener again with a new certificate.
+    /// The fallback is best effort: a browser may not accept `*.localhost`,
+    /// and a name that a container gets after the change waits for the new certificate.
     func syncMultiSANLeaf() {
-        guard !isDebug, httpsEnabled, tlsMode == .multiSAN, domainStatus.https.listening, let cache = leafCache,
-            let ca = tlsCA, multiSANNames() != multiSANServed
+        guard !isDebug, httpsEnabled, httpsSetupTask == nil, tlsMode == .multiSAN, domainStatus.https.listening,
+            let cache = leafCache, let ca = tlsCA, multiSANNames() != multiSANServed
         else { return }
         multiSANTask?.cancel()
         let token = httpsStartToken
         multiSANTask = Task {
             try? await Task.sleep(for: .seconds(domainTimings.multiSANDebounce))
             guard !Task.isCancelled, token == httpsStartToken, domainStatus.https.listening else { return }
-            multiSANTask = nil
-            guard let port = await listenHTTPS(cache: cache, mode: .multiSAN, token: token, retryFirst: false),
-                token == httpsStartToken
-            else { return }
-            var https = domainStatus.https
-            https.port = port
-            if await !domainTLS.selfTest(port: port, ca: ca), token == httpsStartToken {
-                domainProxy.stopHTTPS()
-                setHTTPSFailed("The HTTPS self-test failed.")
-                return
-            }
-            setHTTPSStatus(https)
+            await relistenMultiSAN(cache: cache, ca: ca, token: token)
         }
+    }
+
+    /// The certificate of the fallback mode lives 30 days. A new one is made
+    /// before the old one is in its renewal window, so a long run never serves an expired one.
+    private func scheduleMultiSANRenewal(token: Int) {
+        multiSANRenewTask?.cancel()
+        multiSANRenewTask = Task {
+            try? await Task.sleep(for: .seconds(domainTimings.multiSANRenew))
+            guard !Task.isCancelled, token == httpsStartToken, httpsEnabled, domainsEnabled,
+                domainStatus.https.listening, let cache = leafCache, let ca = tlsCA
+            else { return }
+            cache.dropMultiSAN()
+            await relistenMultiSAN(cache: cache, ca: ca, token: token)
+            guard !Task.isCancelled, token == httpsStartToken else { return }
+            scheduleMultiSANRenewal(token: token)
+        }
+    }
+
+    /// Starts the listener of the fallback mode again and tests it. Each wait
+    /// checks the token and the status again, so a stop or a new start wins.
+    private func relistenMultiSAN(cache: LeafCache, ca: LocalCA, token: Int) async {
+        guard let port = await listenHTTPS(cache: cache, mode: .multiSAN, token: token, retryFirst: false),
+            token == httpsStartToken
+        else { return }
+        let passed = await domainTLS.selfTest(port: port, ca: ca, suffixes: activeDomainSuffixes)
+        guard !Task.isCancelled, token == httpsStartToken, httpsEnabled, domainsEnabled else { return }
+        guard passed else {
+            domainProxy.stopHTTPS()
+            return setHTTPSFailed("HTTPS could not start. The HTTPS self-test failed.")
+        }
+        var https = domainStatus.https
+        guard https.listening else { return }
+        https.port = port
+        setHTTPSStatus(https)
     }
 
     // MARK: - Stop
@@ -309,6 +460,17 @@ extension ColimaModel {
         httpsRetry = nil
         multiSANTask?.cancel()
         multiSANTask = nil
+        multiSANRenewTask?.cancel()
+        multiSANRenewTask = nil
+    }
+
+    /// Quit: stops every task of HTTPS, also a setup that waits for a dialog,
+    /// and deletes the temporary keychain. A cancelled setup changes no state, and
+    /// the marker of an install tells the next launch what to clean up.
+    func stopHTTPSForQuit() {
+        invalidateHTTPSTasks()
+        httpsSetupTask?.cancel()
+        tlsProvider?.removeAll()
     }
 
     /// Stops the listener and deletes the temporary keychain. The CA stays.
@@ -352,7 +514,7 @@ extension ColimaModel {
         guard !isDebug, domainsEnabled, httpsEnabled, token == httpsStartToken else { return }
         httpsStartToken += 1
         httpsRetryCount = 0
-        setHTTPSFailed("The listener stopped. ColimaBar tries again soon.")
+        setHTTPSFailed("The HTTPS listener stopped. ColimaBar tries again soon.")
     }
 
     /// The routes changed. Fix a conflict, give a failed listener a new try, or go back to port 443.
@@ -422,7 +584,7 @@ extension ColimaModel {
         }
     }
 
-    /// After a wake: unlock the temporary keychain and start the listener if it is gone.
+    /// After a wake: unlock the temporary keychain, check the trust, and start the listener if it is gone.
     func httpsAfterWake() {
         guard !isDebug, domainsEnabled, httpsEnabled, httpsSetupTask == nil else { return }
         tlsProvider?.unlockIfNeeded()
@@ -431,16 +593,50 @@ extension ColimaModel {
         if domainProxy.httpsPort == nil {
             Task { await startHTTPS() }
         } else {
+            refreshHTTPSTrust(minGap: 0)
             moveHTTPSBackToFirstPort()
         }
     }
 
-    /// The heartbeat calls it. A listener on 8443 looks for a free port 443, at most once in a rebind gap.
+    /// The heartbeat calls it. It checks the trust at most once in `trustRecheck`. A
+    /// listener on 8443 looks for a free port 443, at most once in a rebind gap.
     func httpsHeartbeat() {
-        guard !isDebug, domainsEnabled, httpsEnabled, domainStatus.https.listening, domainStatus.https.usesFallback,
-            Date().timeIntervalSince(httpsMoveBackAt) >= domainTimings.rebindGap
+        guard !isDebug, domainsEnabled, httpsEnabled, httpsSetupTask == nil, domainStatus.https.listening else {
+            return
+        }
+        refreshHTTPSTrust(minGap: domainTimings.trustRecheck)
+        guard domainStatus.https.usesFallback, Date().timeIntervalSince(httpsMoveBackAt) >= domainTimings.rebindGap
         else { return }
         moveHTTPSBackToFirstPort()
+    }
+
+    /// Asks macOS again if it trusts the CA, off the main actor, when the last
+    /// check is `minGap` seconds old. The user can remove the trust in
+    /// Keychain Access at any time.
+    func refreshHTTPSTrust(minGap: TimeInterval) {
+        guard !isDebug, httpsEnabled, domainStatus.https.listening, !httpsTrustChecking, let ca = tlsCA,
+            Date().timeIntervalSince(httpsTrustCheckedAt) >= minGap
+        else { return }
+        httpsTrustChecking = true
+        httpsTrustCheckedAt = Date()
+        let token = httpsStartToken
+        let services = domainTLS
+        Task {
+            let trusted = await Self.blocking { services.isTrusted(ca) }
+            httpsTrustChecking = false
+            applyHTTPSTrust(trusted, token: token)
+        }
+    }
+
+    /// Sets `.running` or `.untrusted` from a trust check, if the listener
+    /// still runs and no newer start has begun.
+    private func applyHTTPSTrust(_ trusted: Bool, token: Int) {
+        guard token == httpsStartToken, httpsEnabled, domainStatus.https.listening else { return }
+        var https = domainStatus.https
+        let phase: DomainStatus.HTTPS.Phase = trusted ? .running : .untrusted
+        guard https.phase != phase else { return }
+        https.phase = phase
+        setHTTPSStatus(https)
     }
 
     /// The line in the diagnostics file. It holds the state and counts, no names.
@@ -448,15 +644,18 @@ extension ColimaModel {
         guard httpsEnabled else { return "off" }
         let https = domainStatus.https
         let phase: String
+        let trust: String
         switch https.phase {
-        case .off: phase = "off"
-        case .settingUp: phase = "starting"
-        case .removing: phase = "removing"
-        case .failed: phase = "failed"
-        case .running, .untrusted: phase = "listening on port \(https.port.map(String.init) ?? "?")"
+        case .off: (phase, trust) = ("off", "unknown")
+        case .settingUp: (phase, trust) = ("starting", "unknown")
+        case .removing: (phase, trust) = ("removing", "unknown")
+        case .failed: (phase, trust) = ("failed", "unknown")
+        case .running: (phase, trust) = ("listening on port \(https.port.map(String.init) ?? "?")", "yes")
+        case .untrusted:
+            (phase, trust) = (https.port.map { "listening on port \($0)" } ?? "not listening", "no")
         }
         let mode = tlsMode == .perSNI ? "a certificate for each name" : "one certificate"
         return
-            "\(phase), identity: \(tlsProvider?.name ?? "none"), \(mode), leaves made: \(leafCache?.mintedCount ?? 0), CA trusted: \(https.phase == .running ? "yes" : "no")"
+            "\(phase), identity: \(tlsProvider?.name ?? "none"), \(mode), leaves made: \(leafCache?.mintedCount ?? 0), CA trusted: \(trust)"
     }
 }

@@ -29,7 +29,8 @@ struct DomainsSection: View {
         }
         .hint(Help.domainsHTTPS)
         .disabled(
-            !model.domainsEnabled || model.isDebug || model.domainStatus.https.phase == .settingUp
+            (!model.domainsEnabled && !model.httpsEnabled) || model.isDebug
+                || model.domainStatus.https.phase == .settingUp
                 || model.domainStatus.https.phase == .removing
         )
         .padding(.leading, 22)

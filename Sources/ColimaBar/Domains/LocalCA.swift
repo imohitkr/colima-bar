@@ -64,10 +64,18 @@ struct LocalCA: @unchecked Sendable {
             permitted: permitted)
     }
 
-    /// The CA of saved files. The key must belong to the certificate.
-    static func restore(certificateDER der: [UInt8], keyX963: [UInt8]) throws -> LocalCA {
+    /// The CA of saved files. The certificate must be a valid self-signed CA
+    /// (issuer is subject, CA flag, inside its dates, signature of its own
+    /// key), and the key must belong to it: a nonce that the key signs must
+    /// verify with the public key of the certificate.
+    static func restore(certificateDER der: [UInt8], keyX963: [UInt8], now: Date = Date()) throws -> LocalCA {
         guard let certificate = SecCertificateCreateWithData(nil, Data(der) as CFData),
-            let certKey = SecCertificateCopyKey(certificate), let certX963 = try? publicX963(of: certKey)
+            let certKey = SecCertificateCopyKey(certificate), let certX963 = try? publicX963(of: certKey),
+            let info = X509Builder.readCA(certificateDER: der),
+            info.isCA, info.issuer == info.subject, info.notBefore <= now, now <= info.notAfter,
+            SecKeyVerifySignature(
+                certKey, .ecdsaSignatureMessageX962SHA256, Data(info.tbs) as CFData, Data(info.signature) as CFData,
+                nil)
         else { throw Failure.certificate }
         guard keyX963.count == 97 else { throw Failure.key }
         let attributes: [CFString: Any] = [
@@ -77,12 +85,25 @@ struct LocalCA: @unchecked Sendable {
         guard let key = SecKeyCreateWithData(Data(keyX963) as CFData, attributes as CFDictionary, nil),
             let x963 = try? publicX963(of: key)
         else { throw Failure.key }
-        guard x963 == certX963 else { throw Failure.keyMismatch }
+        guard x963 == certX963, signsFor(key, certKey) else { throw Failure.keyMismatch }
         guard let permitted = X509Builder.permittedDNS(certificateDER: der) else { throw Failure.certificate }
         return LocalCA(
-            certificate: certificate, der: der, key: key, publicX963: x963, name: try subjectDER(of: der),
+            certificate: certificate, der: der, key: key, publicX963: x963, name: info.subject,
             keyID: X509Builder.keyID(x963), permitted: permitted)
     }
+
+    /// True when `key` signs a new nonce and `publicKey` verifies it.
+    private static func signsFor(_ key: SecKey, _ publicKey: SecKey) -> Bool {
+        var nonce = [UInt8](repeating: 0, count: 32)
+        guard SecRandomCopyBytes(kSecRandomDefault, nonce.count, &nonce) == errSecSuccess,
+            let signature = SecKeyCreateSignature(key, .ecdsaSignatureMessageX962SHA256, Data(nonce) as CFData, nil)
+        else { return false }
+        return SecKeyVerifySignature(
+            publicKey, .ecdsaSignatureMessageX962SHA256, Data(nonce) as CFData, signature, nil)
+    }
+
+    /// True when every name of `suffixes` is a permitted name of this CA.
+    func covers(_ suffixes: [String]) -> Bool { Set(suffixes).isSubset(of: Set(permitted)) }
 
     /// The private key as `04 || X || Y || D`, for the key file.
     func keyX963() throws -> [UInt8] {
@@ -142,18 +163,5 @@ struct LocalCA: @unchecked Sendable {
     private static func isPublic(_ key: SecKey) -> Bool {
         let attributes = SecKeyCopyAttributes(key) as? [CFString: Any]
         return (attributes?[kSecAttrKeyClass] as? String) == (kSecAttrKeyClassPublic as String)
-    }
-
-    /// The DER of the subject Name of a certificate.
-    private static func subjectDER(of der: [UInt8]) throws -> [UInt8] {
-        guard let cert = DER.read(der[...]), let top = DER.children(cert.content), let tbs = top.first,
-            let fields = DER.children(tbs.content)
-        else { throw Failure.certificate }
-        // Fields: [0] version, serial, algorithm, issuer, validity, subject, ...
-        // The CA is self-signed, so the issuer is the subject. Re-encode field 3.
-        let hasVersion = fields.first?.tag == 0xA0
-        let issuerIndex = hasVersion ? 3 : 2
-        guard fields.count > issuerIndex else { throw Failure.certificate }
-        return DER.tlv(fields[issuerIndex].tag, Array(fields[issuerIndex].content))
     }
 }

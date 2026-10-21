@@ -38,14 +38,17 @@ import Testing
             case .privateAPI:
                 provider = PrivateIdentityProvider()
             }
-            cache = LeafCache(ca: ca, provider: provider, suffixes: suffixes)
-            proxy = DomainProxy(addresses: ["127.0.0.1"])
+            let proxy = DomainProxy(addresses: ["127.0.0.1"])
+            self.proxy = proxy
+            cache = LeafCache(
+                ca: ca, provider: provider, suffixes: suffixes, resolves: { proxy.routes.hasRoute(for: $0) })
             let server = DomainTLSServer(cache: cache, mode: mode, names: names)
             let queue = DispatchQueue(label: "test.mint")
-            let candidates = try [UInt16(LoopbackListener.unusedPort())]
             port = Int(
-                try #require(await proxy.startHTTPS(candidates: candidates) { server.options(mintQueue: queue) }))
-            httpPort = Int(try #require(await proxy.start(candidates: [UInt16(try LoopbackListener.unusedPort())])))
+                try await PortRetry.start {
+                    await proxy.startHTTPS(candidates: [$0]) { server.options(mintQueue: queue) }
+                })
+            httpPort = Int(try await PortRetry.start { await proxy.start(candidates: [$0]) })
         }
 
         func close() {
@@ -112,6 +115,25 @@ import Testing
         #expect(rig.cache.mintedCount == 1)
     }
 
+    @Test func aFloodOfUnknownNamesMintsNothingAndTheRealNamesStillWork() async throws {
+        let rig = try await Rig(kind: .fileKeychain)
+        defer { rig.close() }
+        let alpha = try LoopbackHTTPServer(marker: "alpha-server")
+        rig.proxy.routes = routes(["web": alpha.port])
+        for i in 0..<30 {
+            let r = await TLSClient.exchange(
+                port: rig.port, sni: "random-\(i).localhost", anchor: nil, send: get("random-\(i).localhost"),
+                until: "</html>")
+            #expect(r.leafName == "localhost")
+        }
+        #expect(rig.cache.mintedCount == 1)  // the leaf of localhost
+        let real = await TLSClient.exchange(
+            port: rig.port, sni: "web.localhost", anchor: rig.ca.certificate, send: get("web.localhost"),
+            until: "alpha-server")
+        #expect(real.leafName == "web.localhost" && real.text.contains("alpha-server"))
+        #expect(rig.cache.mintedCount == 2)
+    }
+
     @Test(arguments: ProviderKind.allCases)
     func oneCertificateServesEveryNameInTheFallbackMode(kind: ProviderKind) async throws {
         let names = ["web.localhost", "api.localhost", "localhost"]
@@ -148,6 +170,7 @@ import Testing
     @Test func theConnectionNegotiatesHTTP11EvenIfTheClientOffersHTTP2() async throws {
         let rig = try await Rig(kind: .privateAPI)
         defer { rig.close() }
+        rig.proxy.routes = routes(["web": 1])
         let r = await TLSClient.exchange(
             port: rig.port, sni: "web.localhost", anchor: rig.ca.certificate, alpns: ["h2", "http/1.1"],
             send: get("web.localhost"), until: "</html>")
@@ -164,8 +187,9 @@ import Testing
         defer { rig.close() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         rig.proxy.routes = routes(["web": alpha.port])
+        // The SNI value names a route, so the handshake passes. The Host header names no route.
         let r = await TLSClient.exchange(
-            port: rig.port, sni: "nope.localhost", anchor: rig.ca.certificate, send: get("nope.localhost"),
+            port: rig.port, sni: "web.localhost", anchor: rig.ca.certificate, send: get("nope.localhost"),
             until: "</html>")
         #expect(r.text.hasPrefix("HTTP/1.1 404"))
         #expect(r.text.contains("href=\"https://web.localhost:\(rig.port)/\""))
@@ -216,7 +240,7 @@ import Testing
         defer { rig.close() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         rig.proxy.routes = routes(["web": alpha.port])
-        let next = try #require(await rig.proxy.start(candidates: [UInt16(try LoopbackListener.unusedPort())]))
+        let next = try await PortRetry.start { await rig.proxy.start(candidates: [$0]) }
         #expect(next != UInt16(rig.httpPort) && rig.proxy.httpsPort == UInt16(rig.port))
         let r = await TLSClient.exchange(
             port: rig.port, sni: "web.localhost", anchor: rig.ca.certificate, send: get("web.localhost"),
@@ -258,17 +282,17 @@ import Testing
 
     @Test func aHandshakeThatNeverEndsIsClosedAtTheHeadTimeout() async throws {
         let ca = try LocalCA.create(permitted: ["localhost"])
-        let cache = LeafCache(ca: ca, provider: PrivateIdentityProvider(), suffixes: ["localhost"])
+        let cache = LeafCache(
+            ca: ca, provider: PrivateIdentityProvider(), suffixes: ["localhost"], resolves: { _ in false })
         var limits = DomainProxy.Limits()
         limits.headTimeout = 0.3
         let proxy = DomainProxy(addresses: ["127.0.0.1"], limits: limits)
         defer { proxy.stop() }
         let server = DomainTLSServer(cache: cache, mode: .perSNI)
         let queue = DispatchQueue(label: "test.mint")
-        let port = try #require(
-            await proxy.startHTTPS(candidates: [UInt16(try LoopbackListener.unusedPort())]) {
-                server.options(mintQueue: queue)
-            })
+        let port = try await PortRetry.start {
+            await proxy.startHTTPS(candidates: [$0]) { server.options(mintQueue: queue) }
+        }
         let silent = await onOwnThread {
             // Connects and says nothing: the TLS handshake never starts.
             let client = TCPClient(port: Int(port))

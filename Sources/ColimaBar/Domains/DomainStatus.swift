@@ -17,7 +17,7 @@ struct DomainStatus: Equatable, Sendable {
             case settingUp
             /// The listener runs and macOS trusts the certificate authority.
             case running
-            /// The listener runs but macOS does not trust the certificate authority.
+            /// macOS does not trust the certificate authority, or the authority does not cover the names. The listener runs only in the first case.
             case untrusted
             case failed
             /// ColimaBar removes the certificate authority.
@@ -26,11 +26,11 @@ struct DomainStatus: Equatable, Sendable {
 
         var phase: Phase = .off
         var port: UInt16?
-        /// The text for `.failed`, or a note after a cancel or a removal.
+        /// The text for `.failed`, a note after a cancel or a removal, or why `.untrusted` has no listener.
         var problem: String?
 
         /// True when the HTTPS listener has a port that links can use.
-        var listening: Bool { phase == .running || phase == .untrusted }
+        var listening: Bool { (phase == .running || phase == .untrusted) && port != nil }
 
         /// True when the HTTPS listener uses a port other than 443.
         var usesFallback: Bool { port.map { $0 != DomainPorts.https[0] } ?? false }
@@ -41,8 +41,9 @@ struct DomainStatus: Equatable, Sendable {
             case .off: return problem
             case .settingUp: return "Setting up HTTPS…"
             case .removing: return "Removing the certificate authority…"
-            case .failed: return "HTTPS could not start. \(problem ?? "")".trimmingCharacters(in: .whitespaces)
-            case .untrusted: return "macOS does not trust the certificate authority. Browsers show a warning."
+            case .failed: return problem ?? "HTTPS could not start."
+            case .untrusted:
+                return problem ?? "macOS does not trust the certificate authority. Browsers show a warning."
             case .running:
                 return usesFallback
                     ? "Port 443 is busy, so HTTPS listens on port \(port ?? 0)."

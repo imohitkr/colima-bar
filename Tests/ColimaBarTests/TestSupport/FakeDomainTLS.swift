@@ -12,12 +12,16 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
     private var saved: LocalCA?
     private var eventLog: [String] = []
     private var selfTests: [Bool] = []
+    private var selfTestSuffixLists: [[String]] = []
     private var made: [RecordingProvider] = []
     private var settings = Settings()
+    private var installHook: (@Sendable () -> Void)?
+    private var uninstallHook: (@Sendable () -> Void)?
 
     private struct Settings {
         var install = TrustStore.Outcome.done
         var uninstall = TrustStore.Outcome.done
+        var leftovers = TrustStore.Outcome.done
         var trusted = true
         var providerWorks = true
     }
@@ -38,6 +42,12 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
         get { lock.withLock { settings.uninstall } }
         set { lock.withLock { settings.uninstall = newValue } }
     }
+    var leftoversOutcome: TrustStore.Outcome {
+        get { lock.withLock { settings.leftovers } }
+        set { lock.withLock { settings.leftovers = newValue } }
+    }
+    /// The suffixes of each self-test, in order.
+    var selfTestSuffixes: [[String]] { lock.withLock { selfTestSuffixLists } }
     var trusted: Bool {
         get { lock.withLock { settings.trusted } }
         set { lock.withLock { settings.trusted = newValue } }
@@ -48,6 +58,10 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
     }
     /// The results of the next self-tests. When the list is empty, a self-test passes.
     func queueSelfTests(_ results: [Bool]) { lock.withLock { selfTests = results } }
+    /// Runs inside `install`, while the real dialog would show.
+    func onInstall(_ body: (@Sendable () -> Void)?) { lock.withLock { installHook = body } }
+    /// Runs inside `uninstall`, while the real dialog would show.
+    func onUninstall(_ body: (@Sendable () -> Void)?) { lock.withLock { uninstallHook = body } }
     var providers: [RecordingProvider] { lock.withLock { made } }
 
     private func record(_ event: String) { lock.withLock { eventLog.append(event) } }
@@ -56,7 +70,7 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
 
     func prepareCA(permitted: [String]) throws -> LocalCA {
         record("prepare")
-        if let existing = ca { return existing }
+        if let existing = ca, Set(existing.permitted) == Set(permitted) { return existing }
         let created = try LocalCA.create(permitted: permitted)
         ca = created
         return created
@@ -69,12 +83,19 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
 
     func install(_ ca: LocalCA) -> TrustStore.Outcome {
         record("install")
+        lock.withLock { installHook }?()
         return installOutcome
     }
 
     func uninstall(_ ca: LocalCA) -> TrustStore.Outcome {
         record("uninstall")
+        lock.withLock { uninstallHook }?()
         return uninstallOutcome
+    }
+
+    func uninstallLeftovers() -> TrustStore.Outcome {
+        record("uninstallLeftovers")
+        return leftoversOutcome
     }
 
     func isTrusted(_ ca: LocalCA) -> Bool { trusted }
@@ -89,9 +110,12 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
 
     func cleanStale() { record("cleanStale") }
 
-    func selfTest(port: UInt16, ca: LocalCA) async -> Bool {
+    func selfTest(port: UInt16, ca: LocalCA, suffixes: [String]) async -> Bool {
         record("selfTest \(port)")
-        return lock.withLock { selfTests.isEmpty ? true : selfTests.removeFirst() }
+        return lock.withLock {
+            selfTestSuffixLists.append(suffixes)
+            return selfTests.isEmpty ? true : selfTests.removeFirst()
+        }
     }
 
     /// An identity provider in memory that counts its calls.
@@ -99,13 +123,16 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
         private let inner = PrivateIdentityProvider()
         private let lock = NSLock()
         private var removals = 0
+        private var discards = 0
         private var unlocks = 0
         let name = "recording"
         var removeCount: Int { lock.withLock { removals } }
+        var discardCount: Int { lock.withLock { discards } }
         var unlockCount: Int { lock.withLock { unlocks } }
         func identity(certificate: SecCertificate, key: SecKey) throws -> SecIdentity {
             try inner.identity(certificate: certificate, key: key)
         }
+        func discard(certificate: SecCertificate, key: SecKey) { lock.withLock { discards += 1 } }
         func unlockIfNeeded() { lock.withLock { unlocks += 1 } }
         func removeAll() { lock.withLock { removals += 1 } }
     }

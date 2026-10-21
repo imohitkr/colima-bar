@@ -10,7 +10,7 @@ This page tells you how to remove ColimaBar, and what stays on your Mac.
 2. Choose **Uninstall ColimaBar…**.
 3. Click **Uninstall** to confirm.
 
-ColimaBar runs its uninstall script in iTerm, or in Terminal when iTerm is not installed. The script asks for your password only to remove the `/var/run/docker.sock` link, a `colimabar` command link in a folder that you cannot write to, and the trust of the local certificate authority of HTTPS (if you turned HTTPS on).
+ColimaBar runs its uninstall script in iTerm, or in Terminal when iTerm is not installed. The script asks for your password only to remove the `/var/run/docker.sock` link, a `colimabar` command link in a folder that you cannot write to, and the certificate and trust setting of the local certificate authority of HTTPS (if you turned HTTPS on).
 
 ## Run the script manually
 
@@ -37,7 +37,7 @@ The script does these steps:
 3. It clears the launchd `DOCKER_HOST` and the testcontainers `docker.host` that ColimaBar set. It also clears the launchd `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE`.
 4. It removes the `/var/run/docker.sock` symlink if it points to the ColimaBar socket. This step asks for your password.
 5. It deletes the app, the ColimaBar cache (`~/.cache/colima-bar`) and the ColimaBar settings.
-   It also deletes the files of ColimaBar in `~/Library/Application Support/ColimaBar` and `~/Library/Caches/com.imohitkr.ColimaBar`. The first folder holds the key of the local certificate authority of HTTPS for container domains. The script then removes that certificate and its trust setting from your login keychain. If you turned HTTPS on, macOS can ask for your password. If the removal fails, the script says so. Then delete the certificate "ColimaBar Local CA" in Keychain Access.
+   It also deletes the folder `domains` in `~/Library/Application Support/ColimaBar` and the folder `tls` in `~/Library/Caches/com.imohitkr.ColimaBar`, and the parent folders if they are empty then. The first folder holds the key of the local certificate authority of HTTPS for container domains. The script then removes that certificate and its trust setting from your login keychain. If you turned HTTPS on, macOS can ask for your password. If the removal fails, the script says so. Then delete the certificate "ColimaBar Local CA" in Keychain Access.
 6. It removes the `colimabar` command links in `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin` and `~/bin`. It removes a link only if it points to the command inside `ColimaBar.app`. If the folder needs it, the script asks for your password.
 7. It creates `~/.cache/colima-bar/docker.sock` again, as a symlink to the Colima socket of the `default` profile.
 8. It creates each profile socket in `~/.cache/colima-bar/profiles` again, as a symlink to the Colima socket of its profile.

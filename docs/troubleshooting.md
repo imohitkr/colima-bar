@@ -79,8 +79,9 @@ The proxy serves HTTPS with a certificate that the local certificate authority o
 
 1. Open the System tab. If the caption under **Use HTTPS with a local certificate authority** says that macOS does not trust the certificate authority, click **Trust Again…** and type your password.
 2. Open `https://web.localhost` or another name of a container. The name must end in `.localhost`. An IP address, or a name outside `.localhost`, always gets a warning.
-3. Firefox 119 and older keep their own certificates. Update Firefox, or import `ca.pem` in its settings. **Show Certificate** shows the file.
+3. Firefox can use the certificates of macOS from version 120. With an older version, set `security.enterprise_roots.enabled` to `true`, or import `ca.pem` in its settings. **Show Certificate** shows the file.
 4. If the toggle shows an error, turn HTTPS off and on again. This makes a new certificate authority.
+5. A name that no running container uses gets the certificate of `localhost`, so the browser warns. Start the container first.
 
 If you cancelled the password dialog, HTTPS stays off. Turn it on again and type your password.
 

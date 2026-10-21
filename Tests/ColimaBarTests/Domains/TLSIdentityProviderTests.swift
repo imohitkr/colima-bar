@@ -89,6 +89,7 @@ import Testing
     private final class BrokenProvider: TLSIdentityProvider, @unchecked Sendable {
         let name = "broken"
         func identity(certificate: SecCertificate, key: SecKey) throws -> SecIdentity { throw POSIXError(.EIO) }
+        func discard(certificate: SecCertificate, key: SecKey) {}
         func unlockIfNeeded() {}
         func removeAll() {}
     }

@@ -404,7 +404,7 @@ enum Help {
     }
     static let domainsDebug = "A debug run does not start the proxy."
     static let domainsHTTPS =
-        "Serve the names over HTTPS too. ColimaBar makes a certificate authority that works only for .localhost names and your custom suffix, and only for websites. macOS asks for your password to trust it. Turn this off to remove it."
+        "Serve the names over HTTPS too. ColimaBar makes a certificate authority that works only for .localhost names, and only for websites. macOS asks for your password to trust it. Turn this off to remove it."
     static let domainsTrustAgain =
         "Add the certificate authority to your login keychain and trust it again. macOS asks for your password."
     static let domainsShowCA =

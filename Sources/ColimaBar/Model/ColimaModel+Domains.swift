@@ -16,6 +16,10 @@ struct DomainTimings: Sendable {
     var rebindGap: TimeInterval = ColimaModel.domainRebindGap
     /// How long the fallback mode of HTTPS waits after a route change before it makes a new certificate.
     var multiSANDebounce: TimeInterval = 2
+    /// How long the fallback mode of HTTPS serves one certificate before it makes a new one. A certificate lives 30 days.
+    var multiSANRenew: TimeInterval = 29 * 86400
+    /// The least time between two checks if macOS still trusts the certificate authority.
+    var trustRecheck: TimeInterval = 60
 
     /// The wait before try `attempt` (0 is the first) of a failed proxy.
     func failureDelay(attempt: Int) -> TimeInterval {
@@ -162,6 +166,7 @@ extension ColimaModel {
         } else {
             // The master switch off stops HTTPS but keeps the certificate authority.
             tearDownHTTPS()
+            if httpsSetupTask == nil { setHTTPSStatus(.init(phase: .off)) }
             stopDomainProxy()
             rebuildDomainRoutes()
         }

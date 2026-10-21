@@ -17,17 +17,21 @@ import Testing
 
     private func rig(
         https: Bool = false, ca: Bool = false, domains: Bool = true, gap: TimeInterval = 0,
-        failureRetry: TimeInterval = 0.05
+        failureRetry: TimeInterval = 0.05, pending: Bool = false, permitted: [String] = ["localhost"],
+        trustRecheck: TimeInterval = 60, multiSANRenew: TimeInterval = 3600
     ) throws -> Rig {
         let proxy = FakeDomainProxy()
         let tls = FakeDomainTLS()
-        if ca { tls.ca = try LocalCA.create(permitted: ["localhost"]) }
+        if ca { tls.ca = try LocalCA.create(permitted: permitted) }
         let store = TestProcess.emptyStore()
+        if pending { store.set(true, forKey: Defaults.Key.domainsHTTPSPending.rawValue) }
         let model = ColimaModel(
             profile: "https-life-\(UUID().uuidString.prefix(6))", domainProxy: proxy, domainsEnabled: domains,
             domainsStore: store, httpsEnabled: https, domainTLS: tls)
         model.domainTimings = DomainTimings(
-            launchRetry: 0.01, failureRetry: failureRetry, rebindGap: gap, multiSANDebounce: 0.05)
+            launchRetry: 0.01, failureRetry: failureRetry, rebindGap: gap, multiSANDebounce: 0.05,
+            multiSANRenew: multiSANRenew,
+            trustRecheck: trustRecheck)
         model.setState(.running)
         let dialogs = Counter()
         model.dismissPopover = { dialogs.add() }
@@ -134,7 +138,8 @@ import Testing
         #expect(r.tls.events == ["prepare", "install", "removeFiles"])
         #expect(r.tls.ca == nil)
         #expect(!r.model.httpsEnabled)
-        #expect(r.store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) == nil)
+        #expect(r.store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool != true)
+        #expect(!r.model.httpsInstallPending)
         #expect(r.proxy.httpsStarts.isEmpty)
     }
 
@@ -204,7 +209,7 @@ import Testing
         r.tls.providerWorks = false
         r.model.setHTTPS(true)
         #expect(await waitUntil { r.model.domainStatus.https.phase == .failed })
-        #expect(r.model.domainStatus.https.problem == "The TLS identity test failed.")
+        #expect(r.model.domainStatus.https.problem == "HTTPS could not start. The TLS identity test failed.")
         #expect(r.proxy.httpsStarts.isEmpty)
     }
 
@@ -247,35 +252,49 @@ import Testing
 
     // MARK: Turning off
 
+    private func removed(_ r: Rig) async -> Bool {
+        await waitUntil { r.model.domainStatus.https.phase == .off && r.model.domainStatus.https.problem != nil }
+    }
+
     @Test func turningHTTPSOffRemovesTheCA() async throws {
         let r = try rig()
         await turnOn(r)
         let provider = try #require(r.tls.providers.first)
         r.model.setHTTPS(false)
-        #expect(await waitUntil { !r.model.httpsEnabled })
-        #expect(Array(r.tls.events.suffix(2)) == ["uninstall", "removeFiles"])
+        #expect(await removed(r))
+        // The key file goes before the dialog.
+        #expect(Array(r.tls.events.suffix(2)) == ["removeFiles", "uninstall"])
         #expect(r.proxy.httpsPort == nil && r.proxy.httpsStops >= 1)
         #expect(provider.removeCount == 1)
         #expect(r.tls.ca == nil)
-        #expect(r.model.domainStatus.https.phase == .off)
         #expect(r.model.domainStatus.https.caption == "ColimaBar removed the certificate authority.")
         #expect(r.store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool == false)
         #expect(r.dialogs.value == 2)
         #expect(r.model.domainURL("web.shop") == nil)
     }
 
-    @Test func aCancelledRemovalStillDeletesTheKeyAndSaysSo() async throws {
+    @Test func theKeyFileIsGoneWhileTheRemovalDialogShows() async throws {
+        let r = try rig()
+        await turnOn(r)
+        let keyGone = Counter()
+        let tls = r.tls
+        tls.onUninstall { if tls.ca == nil { keyGone.add() } }
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        #expect(keyGone.value == 1)
+    }
+
+    @Test func aCancelledRemovalKeepsTheCertificateAndSaysSo() async throws {
         let r = try rig()
         await turnOn(r)
         r.tls.uninstallOutcome = .cancelled
         r.model.setHTTPS(false)
-        #expect(await waitUntil { !r.model.httpsEnabled })
-        #expect(Array(r.tls.events.suffix(2)) == ["uninstall", "removeFiles"])
+        #expect(await removed(r))
+        #expect(Array(r.tls.events.suffix(2)) == ["removeFiles", "uninstall"])
         #expect(r.tls.ca == nil)
-        #expect(
-            r.model.domainStatus.https.caption
-                == "macOS still lists a trust setting for the removed certificate authority. It has no effect, because the key is deleted."
-        )
+        let caption = try #require(r.model.domainStatus.https.caption)
+        #expect(caption.contains("still lists the certificate authority and its trust setting"))
+        #expect(caption.contains("Keychain Access"))
     }
 
     @Test func aFailedRemovalNamesTheError() async throws {
@@ -283,17 +302,65 @@ import Testing
         await turnOn(r)
         r.tls.uninstallOutcome = .failed(-1)
         r.model.setHTTPS(false)
-        #expect(await waitUntil { !r.model.httpsEnabled })
+        #expect(await removed(r))
         #expect(r.model.domainStatus.https.caption?.contains("error -1") == true)
         #expect(r.tls.ca == nil)
     }
 
-    @Test func turningHTTPSOffWithNoFilesTellsTheUser() async throws {
+    @Test func withoutFilesTheLabelledCertificatesGo() async throws {
         let r = try rig(https: true)
         r.model.setHTTPS(false)
-        #expect(await waitUntil { !r.model.httpsEnabled })
+        #expect(await removed(r))
+        #expect(Array(r.tls.events.suffix(2)) == ["removeFiles", "uninstallLeftovers"])
         #expect(!r.tls.events.contains("uninstall"))
-        #expect(r.model.domainStatus.https.caption?.contains("found no certificate authority file") == true)
+        #expect(r.model.domainStatus.https.caption == "ColimaBar removed the certificate authority.")
+        #expect(!r.model.httpsEnabled)
+    }
+
+    @Test func aCancelledLeftoverRemovalSaysSo() async throws {
+        let r = try rig(https: true)
+        r.tls.leftoversOutcome = .cancelled
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        #expect(r.model.domainStatus.https.caption?.contains("Keychain Access") == true)
+    }
+
+    @Test func turningHTTPSOffWorksWhileTheMasterSwitchIsOff() async throws {
+        let r = try rig(https: true, ca: true, domains: false)
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        #expect(r.tls.events == ["removeFiles", "uninstall"])
+        #expect(!r.model.httpsEnabled && r.tls.ca == nil)
+        // Turning it on still needs the master switch.
+        r.model.setHTTPS(true)
+        #expect(!r.tls.events.contains("install"))
+    }
+
+    @Test func theMasterSwitchOffWhileTheDialogShowsLeavesAConsistentState() async throws {
+        let r = try rig()
+        let model = r.model
+        r.tls.onInstall { DispatchQueue.main.async { MainActor.assumeIsolated { model.domainsEnabled = false } } }
+        r.model.setHTTPS(true)
+        #expect(await waitUntil { !r.model.domainsEnabled })
+        #expect(await waitUntil { r.model.httpsEnabled && r.model.domainStatus.https.phase == .off })
+        #expect(r.proxy.httpsStarts.isEmpty)
+        // The master switch on again starts HTTPS with the same CA and no dialog.
+        r.model.domainsEnabled = true
+        #expect(await running(r))
+        #expect(r.tls.events.filter { $0 == "install" }.count == 1)
+    }
+
+    @Test func theSwitchesDuringARemovalDoNotRestartHTTPS() async throws {
+        let r = try rig()
+        await turnOn(r)
+        r.model.setHTTPS(false)
+        r.model.domainsEnabled = false
+        r.model.domainsEnabled = true
+        r.model.startHTTPSAtLaunch()
+        #expect(await removed(r))
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(r.proxy.httpsStarts.count == 1)
+        #expect(r.proxy.httpsPort == nil)
     }
 
     @Test func theMasterSwitchOffStopsHTTPSButKeepsTheCA() async throws {
@@ -336,7 +403,8 @@ import Testing
         #expect(await waitUntil { r.model.domainStatus.https.phase == .failed })
         #expect(
             r.model.domainStatus.https.problem
-                == "The certificate authority files are missing. Turn HTTPS off and on.")
+                == "HTTPS could not start. The certificate authority files are missing or invalid. Turn HTTPS off and on."
+        )
         try await Task.sleep(for: .milliseconds(150))
         #expect(r.model.domainStatus.https.phase == .failed)
         #expect(!r.tls.events.contains("prepare") && !r.tls.events.contains("install"))
@@ -366,7 +434,7 @@ import Testing
         await turnOn(r)
         r.proxy.failHTTPSListener()
         #expect(await waitUntil { r.model.domainStatus.https.phase == .failed })
-        #expect(r.model.domainStatus.https.problem == "The listener stopped. ColimaBar tries again soon.")
+        #expect(r.model.domainStatus.https.problem == "The HTTPS listener stopped. ColimaBar tries again soon.")
         #expect(await running(r))
         #expect(r.proxy.httpsStarts.count == 2)
     }
@@ -442,6 +510,280 @@ import Testing
         r.model.updateDomainRoutes(try containers(web("shop", host: 5000)))
         try await Task.sleep(for: .milliseconds(150))
         #expect(r.proxy.httpsStarts.count == 1)
+    }
+
+    // MARK: Replacing a CA
+
+    @Test func aCAThatDoesNotCoverTheSuffixesStartsNoListener() async throws {
+        let r = try rig(https: true, ca: true, permitted: ["old.test"])
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        let https = r.model.domainStatus.https
+        #expect(https.port == nil && !https.listening)
+        #expect(https.caption == ColimaModel.needsNewCAText)
+        #expect(r.proxy.httpsStarts.isEmpty && r.tls.events.isEmpty)
+        #expect(r.model.httpsStatusText.contains("not listening") && r.model.httpsStatusText.contains("trusted: no"))
+        // A wake and the heartbeat do not change that or open a dialog.
+        r.model.httpsAfterWake()
+        r.model.httpsHeartbeat()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(r.model.domainStatus.https.phase == .untrusted && r.dialogs.value == 0)
+    }
+
+    @Test func trustAgainReplacesACAThatDoesNotCoverTheSuffixes() async throws {
+        let r = try rig(https: true, ca: true, permitted: ["old.test"])
+        let old = try #require(r.tls.ca)
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        r.model.trustCAAgain()
+        #expect(await running(r))
+        // The old CA goes first (trust and certificate), then the new one is made and trusted.
+        #expect(r.tls.events == ["uninstall", "prepare", "install", "makeProvider", "selfTest 443"])
+        let new = try #require(r.tls.ca)
+        #expect(Set(new.permitted) == ["localhost"] && new.der != old.der)
+        #expect(r.model.httpsEnabled && !r.model.httpsInstallPending)
+        #expect(r.dialogs.value == 1)
+    }
+
+    @Test func aCancelledReplacementKeepsTheOldCAWithItsFiles() async throws {
+        let r = try rig(https: true, ca: true, permitted: ["old.test"])
+        let old = try #require(r.tls.ca)
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        r.tls.uninstallOutcome = .cancelled
+        r.model.trustCAAgain()
+        #expect(
+            await waitUntil { r.model.domainStatus.https.problem?.hasPrefix("ColimaBar did not replace") == true })
+        #expect(r.model.domainStatus.https.phase == .untrusted)
+        #expect(r.tls.events == ["uninstall"])
+        #expect(r.tls.ca?.der == old.der && r.model.httpsEnabled)
+        // The next try works.
+        r.tls.uninstallOutcome = .done
+        r.model.trustCAAgain()
+        #expect(await running(r))
+    }
+
+    @Test func aCancelledSecondDialogLeavesNoCAAndHTTPSOff() async throws {
+        let r = try rig(https: true, ca: true, permitted: ["old.test"])
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        r.tls.installOutcome = .cancelled
+        r.model.trustCAAgain()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .off })
+        #expect(r.tls.events == ["uninstall", "prepare", "install", "removeFiles"])
+        #expect(r.tls.ca == nil && !r.model.httpsEnabled && !r.model.httpsInstallPending)
+        #expect(r.store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool == false)
+    }
+
+    @Test func nothingStartsHTTPSWhileAReplacementWaitsForItsDialog() async throws {
+        let r = try rig(https: true, ca: true, permitted: ["old.test"])
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        r.tls.onUninstall { Thread.sleep(forTimeInterval: 0.3) }
+        r.model.trustCAAgain()
+        await r.model.startHTTPS()
+        r.model.startHTTPSAtLaunch()
+        r.model.httpsAfterWake()
+        r.model.httpsHeartbeat()
+        r.model.setHTTPS(false)
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(r.proxy.httpsStarts.isEmpty)
+        #expect(r.model.httpsEnabled)
+        #expect(await running(r))
+        #expect(r.proxy.httpsStarts == [[443]])
+    }
+
+    // MARK: Install marker
+
+    @Test func theMarkerStandsWhileTheInstallDialogShows() async throws {
+        let r = try rig()
+        let during = Counter()
+        let key = Defaults.Key.domainsHTTPSPending.rawValue
+        nonisolated(unsafe) let store = r.store
+        r.tls.onInstall { if store.bool(forKey: key) { during.add() } }
+        await turnOn(r)
+        #expect(during.value == 1)
+        #expect(!r.model.httpsInstallPending)
+    }
+
+    @Test func aLaunchAfterAnInterruptedInstallKeepsACAThatMacOSTrusts() async throws {
+        let r = try rig(https: false, ca: true, pending: true)
+        #expect(r.model.httpsInstallPending)
+        r.model.startHTTPSAtLaunch()
+        #expect(await running(r))
+        #expect(r.model.httpsEnabled && !r.model.httpsInstallPending)
+        #expect(r.store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool == true)
+        #expect(!r.tls.events.contains("install") && r.dialogs.value == 0)
+    }
+
+    @Test func aLaunchAfterAnInterruptedInstallDeletesACAThatMacOSDoesNotTrust() async throws {
+        let r = try rig(https: false, ca: true, pending: true)
+        r.tls.trusted = false
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { !r.model.httpsInstallPending })
+        #expect(Array(r.tls.events.suffix(2)) == ["uninstall", "removeFiles"])
+        #expect(r.tls.ca == nil && !r.model.httpsEnabled)
+        #expect(r.proxy.httpsStarts.isEmpty && r.dialogs.value == 0)
+    }
+
+    @Test func aLaunchAfterAnInterruptedInstallWithoutFilesClearsTheMarker() async throws {
+        let r = try rig(https: false, ca: false, pending: true)
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { !r.model.httpsInstallPending })
+        #expect(!r.model.httpsEnabled && r.proxy.httpsStarts.isEmpty)
+    }
+
+    @Test func aMarkerWithTheSettingOnIsJustCleared() async throws {
+        let r = try rig(https: true, ca: true, pending: true)
+        r.model.startHTTPSAtLaunch()
+        #expect(await running(r))
+        #expect(!r.model.httpsInstallPending && !r.tls.events.contains("removeFiles"))
+    }
+
+    @Test func quitWhileTheDialogShowsChangesNoStateAndKeepsTheMarker() async throws {
+        let r = try rig()
+        r.tls.onInstall { Thread.sleep(forTimeInterval: 0.2) }
+        r.model.setHTTPS(true)
+        #expect(await waitUntil { r.tls.events.contains("install") })
+        r.model.stopHTTPSForQuit()
+        try await Task.sleep(for: .milliseconds(400))
+        #expect(!r.model.httpsEnabled && r.proxy.httpsStarts.isEmpty)
+        #expect(r.model.httpsInstallPending)
+        #expect(!r.tls.events.contains("removeFiles"))
+    }
+
+    // MARK: The trust changes
+
+    @Test func aWakeNoticesAChangedTrust() async throws {
+        let r = try rig()
+        await turnOn(r)
+        r.tls.trusted = false
+        r.model.httpsAfterWake()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        #expect(r.model.domainStatus.https.port == 443)
+        #expect(r.model.domainURL("web.shop") == nil || r.model.domainURL("web.shop")?.scheme == "http")
+        r.tls.trusted = true
+        r.model.httpsAfterWake()
+        #expect(await running(r))
+    }
+
+    @Test func theHeartbeatChecksTheTrustAtMostOnceInTheGap() async throws {
+        let slow = try rig(trustRecheck: 3600)
+        await turnOn(slow)
+        slow.tls.trusted = false
+        slow.model.httpsHeartbeat()
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(slow.model.domainStatus.https.phase == .running)
+        let fast = try rig(trustRecheck: 0)
+        await turnOn(fast)
+        fast.tls.trusted = false
+        fast.model.httpsHeartbeat()
+        #expect(await waitUntil { fast.model.domainStatus.https.phase == .untrusted })
+    }
+
+    @Test func aTrustCheckThatEndsAfterAStopChangesNothing() async throws {
+        let r = try rig(trustRecheck: 0)
+        await turnOn(r)
+        r.tls.trusted = false
+        r.model.httpsHeartbeat()
+        r.model.tearDownHTTPS()
+        r.model.setHTTPSStatus(.init(phase: .failed, problem: "x"))
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(r.model.domainStatus.https.phase == .failed)
+    }
+
+    // MARK: Status while the listener moves
+
+    @Test func aMoveKeepsTheStatusAndLinksUntilTheNewPortIsBound() async throws {
+        let r = try rig()
+        r.proxy.busyHTTPSPorts = [443]
+        await turnOn(r)
+        #expect(r.model.domainStatus.https.port == 8443)
+        let seen = Box<[DomainStatus.HTTPS]>([])
+        let model = r.model
+        r.proxy.onStartHTTPS { _ in
+            let now = await MainActor.run { model.domainStatus.https }
+            seen.mutate { $0.append(now) }
+        }
+        r.proxy.busyHTTPSPorts = []
+        r.model.rebuildDomainRoutes()
+        #expect(
+            await waitUntil { r.model.domainStatus.https.port == 443 && r.model.domainStatus.https.phase == .running })
+        let phases = seen.value
+        #expect(!phases.isEmpty)
+        #expect(phases.allSatisfy { $0.phase == .running && $0.port == 8443 })
+    }
+
+    @Test func aFirstStartShowsTheSettingUpPhase() async throws {
+        let r = try rig(https: true, ca: true)
+        let seen = Box<[DomainStatus.HTTPS.Phase]>([])
+        let model = r.model
+        r.proxy.onStartHTTPS { _ in
+            let now = await MainActor.run { model.domainStatus.https.phase }
+            seen.mutate { $0.append(now) }
+        }
+        r.model.startHTTPSAtLaunch()
+        #expect(await running(r))
+        #expect(seen.value == [.settingUp])
+    }
+
+    // MARK: Captions and diagnostics
+
+    @Test func eachProblemHasItsOwnCaption() async throws {
+        let r = try rig()
+        r.proxy.busyHTTPSPorts = [443, 8443]
+        r.model.setHTTPS(true)
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .failed })
+        let busy = try #require(r.model.domainStatus.https.caption)
+        #expect(busy.hasPrefix("Ports 443 and 8443 are busy.") && !busy.hasPrefix("HTTPS could not start."))
+        r.proxy.busyHTTPSPorts = []
+        #expect(await running(r))
+        r.proxy.failHTTPSListener()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .failed })
+        #expect(
+            r.model.domainStatus.https.caption == "The HTTPS listener stopped. ColimaBar tries again soon.")
+    }
+
+    @Test func theDiagnosticsSayUnknownWhenTheTrustIsUnknown() async throws {
+        let r = try rig()
+        r.proxy.busyHTTPSPorts = [443, 8443]
+        r.model.setHTTPS(true)
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .failed })
+        #expect(
+            r.model.httpsStatusText.hasPrefix("failed,") && r.model.httpsStatusText.hasSuffix("CA trusted: unknown"))
+        r.tls.trusted = false
+        r.proxy.busyHTTPSPorts = []
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        #expect(r.model.httpsStatusText.hasSuffix("CA trusted: no"))
+    }
+
+    // MARK: The fallback certificate
+
+    @Test func theFallbackCertificateIsMadeAgainBeforeItExpires() async throws {
+        let r = try rig(multiSANRenew: 0.1)
+        r.tls.queueSelfTests([false, true])
+        await turnOn(r)
+        #expect(r.model.tlsMode == .multiSAN)
+        #expect(await waitUntil { r.proxy.httpsStarts.count >= 4 })
+        #expect(r.model.domainStatus.https.phase == .running)
+        // A stop ends the timer.
+        r.model.tearDownHTTPS()
+        let count = r.proxy.httpsStarts.count
+        try await Task.sleep(for: .milliseconds(300))
+        #expect(r.proxy.httpsStarts.count == count && r.proxy.httpsPort == nil)
+    }
+
+    @Test func aStopWhileTheFallbackCertificateChangesWins() async throws {
+        let r = try rig()
+        r.tls.queueSelfTests([false, true])
+        await turnOn(r)
+        let before = r.proxy.httpsStarts.count
+        r.model.updateDomainRoutes(try containers(web("shop", host: 5000)))
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(r.proxy.httpsStarts.count == before)
+        #expect(r.proxy.httpsPort == nil && r.model.domainStatus.https.phase == .off)
     }
 
     // MARK: Claims and restart hints

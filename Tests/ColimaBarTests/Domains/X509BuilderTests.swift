@@ -131,6 +131,28 @@ import Testing
         #expect(!trusted(try leaf(both, names: ["evil.internal"]), host: "evil.internal", anchor: both))
     }
 
+    @Test func aNameThatOnlyEndsInTheSuffixLettersIsRejected() throws {
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        for name in ["evillocalhost", "notlocalhost", "localhost.evil.com", "localhostx"] {
+            #expect(!trusted(try leaf(ca, names: [name]), host: name, anchor: ca), "\(name)")
+        }
+        #expect(trusted(try leaf(ca, names: ["a.localhost"]), host: "a.localhost", anchor: ca))
+    }
+
+    @Test func aSANWithAnEmptyLabelIsRejected() throws {
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        for name in [".localhost", "a..localhost", "..localhost"] {
+            #expect(!trusted(try leaf(ca, names: [name]), host: name, anchor: ca), "\(name)")
+        }
+    }
+
+    @Test func aSANInUpperCaseIsTrustedLikeItsLowerCaseName() throws {
+        // DNS names are not case sensitive. The proxy sends lower case names only (`LeafCache.mintName`).
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        let upper = try leaf(ca, names: ["WEB.LOCALHOST"])
+        #expect(trusted(upper, host: "web.localhost", anchor: ca) == trusted(upper, host: "WEB.LOCALHOST", anchor: ca))
+    }
+
     @Test func aLeafWithAnIPAddressIsRejected() throws {
         let ca = try LocalCA.create(permitted: ["localhost"])
         let withIP = try leaf(ca, names: ["web.localhost"], ips: [[127, 0, 0, 1]])

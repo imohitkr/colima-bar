@@ -14,8 +14,7 @@ import Testing
         let proxy =
             unchecked
             ? DomainProxy(unchecked: addresses, limits: limits) : DomainProxy(addresses: addresses, limits: limits)
-        let candidates = try [LoopbackListener.unusedPort(), LoopbackListener.unusedPort()].map { UInt16($0) }
-        let port = try #require(await proxy.start(candidates: candidates))
+        let port = try await PortRetry.start { await proxy.start(candidates: [$0]) }
         return (proxy, Int(port))
     }
 
@@ -188,6 +187,43 @@ import Testing
         #expect(await proxy.start(candidates: [UInt16(held.port)]) == nil)
         #expect(proxy.port == nil)
         #expect(await proxy.start(candidates: []) == nil)
+    }
+
+    /// A socket that holds `port` on 127.0.0.1 and never listens: a probe finds
+    /// the port free, but a bind fails with EADDRINUSE. The caller closes it.
+    private func holdWithoutListening(_ port: Int) -> Int32? {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return nil }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = UInt16(port).bigEndian
+        addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+        let bound = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bound == 0 else {
+            close(fd)
+            return nil
+        }
+        return fd
+    }
+
+    @Test func aPortThatCannotBeBoundFailsAtOnceAndNotAtTheReadyTimeout() async throws {
+        let port = try LoopbackListener.unusedPort()
+        let fd = try #require(holdWithoutListening(port))
+        defer { close(fd) }
+        var limits = DomainProxy.Limits()
+        limits.readyTimeout = 30
+        let proxy = DomainProxy(addresses: ["127.0.0.1"], limits: limits)
+        defer { proxy.stop() }
+        let started = Date()
+        let other = UInt16(try LoopbackListener.unusedPort())
+        #expect(await proxy.start(candidates: [UInt16(port), other]) == other)
+        // EADDRINUSE moves on to the next candidate long before the 30 s of the ready timeout.
+        #expect(Date().timeIntervalSince(started) < 15)
     }
 
     @Test func aSecondStartReplacesTheFirstListener() async throws {

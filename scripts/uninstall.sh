@@ -245,10 +245,14 @@ defaults delete com.imohitkr.ColimaBar >/dev/null 2>&1
 
 # BEGIN ca removal: the tests run this block alone.
 # The local certificate authority of HTTPS for container domains. The folder
-# holds its key, so it goes first: the authority can never sign again. Then the
-# certificate and its user trust setting go. -t deletes the trust setting too,
-# and macOS can ask for your password.
-rm -rf "$HOME/Library/Application Support/ColimaBar" "$HOME/Library/Caches/com.imohitkr.ColimaBar"
+# holds its key, so it goes first: the authority can never sign again. The
+# script deletes only the folders that ColimaBar makes, and the parent folders
+# only when they are empty. Then the certificate and its user trust setting
+# go. -t deletes the trust setting too, and macOS can ask for your password.
+SUPPORT_DIR="$HOME/Library/Application Support/ColimaBar"
+CACHES_DIR="$HOME/Library/Caches/com.imohitkr.ColimaBar"
+rm -rf "$SUPPORT_DIR/domains" "$SUPPORT_DIR/domains.new" "$CACHES_DIR/tls"
+rmdir "$SUPPORT_DIR" "$CACHES_DIR" 2>/dev/null
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 while IFS= read -r hash; do
   [ -n "$hash" ] || continue

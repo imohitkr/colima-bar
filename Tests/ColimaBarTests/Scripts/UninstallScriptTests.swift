@@ -214,13 +214,14 @@ import Testing
         status: Int32, out: String
     ) {
         try await sb.bash(
-            ["-c", "set -uo pipefail; . '\(try helpers(sb))'; . '\(try removalBlock(sb))'"],
+            ["-c", "set -uo pipefail; . '\(try helpers(sb))'; . '\(try removalBlock(sb))' 2>&1"],
             env: ["STUB_SECURITY_FIND": foundTwice].merging(env) { $1 })
     }
 
     @Test func theScriptDeletesTheCertificateAndItsTrustAndTheFolders() async throws {
         let sb = try ScriptSandbox()
         try sb.write("Library/Application Support/ColimaBar/domains/ca-key.raw", "key")
+        try sb.write("Library/Application Support/ColimaBar/domains.new/ca-key.raw", "half-written")
         try sb.write("Library/Caches/com.imohitkr.ColimaBar/tls/tls-1.keychain-db", "kc")
         try sb.write("Library/Application Support/Other/keep.txt", "keep")
         let r = try await runRemoval(sb)
@@ -233,9 +234,27 @@ import Testing
                 "security delete-certificate -t -Z FEDCBA9876543210FEDCBA9876543210FEDCBA98 \(keychain)",
             ])
         let fm = FileManager.default
+        // The folders of ColimaBar are empty after the removal, so they go too.
         #expect(!fm.fileExists(atPath: sb.home + "/Library/Application Support/ColimaBar"))
         #expect(!fm.fileExists(atPath: sb.home + "/Library/Caches/com.imohitkr.ColimaBar"))
         #expect(fm.fileExists(atPath: sb.home + "/Library/Application Support/Other/keep.txt"))
+    }
+
+    @Test func theScriptKeepsOtherFilesInTheFoldersOfColimaBar() async throws {
+        let sb = try ScriptSandbox()
+        try sb.write("Library/Application Support/ColimaBar/domains/ca-key.raw", "key")
+        try sb.write("Library/Application Support/ColimaBar/other-feature/data.json", "{}")
+        try sb.write("Library/Caches/com.imohitkr.ColimaBar/tls/tls-1.keychain-db", "kc")
+        try sb.write("Library/Caches/com.imohitkr.ColimaBar/fsCachedData/entry", "cache")
+        let r = try await runRemoval(sb)
+        #expect(r.status == 0)
+        let fm = FileManager.default
+        let support = sb.home + "/Library/Application Support/ColimaBar"
+        let caches = sb.home + "/Library/Caches/com.imohitkr.ColimaBar"
+        #expect(!fm.fileExists(atPath: support + "/domains"))
+        #expect(!fm.fileExists(atPath: caches + "/tls"))
+        #expect(fm.fileExists(atPath: support + "/other-feature/data.json"))
+        #expect(fm.fileExists(atPath: caches + "/fsCachedData/entry"))
     }
 
     @Test func theKeyGoesEvenWhenSecurityCannotDeleteTheCertificate() async throws {
@@ -245,11 +264,14 @@ import Testing
         #expect(r.status == 0)
         #expect(!FileManager.default.fileExists(atPath: sb.home + "/Library/Application Support/ColimaBar"))
         #expect(sb.calls.filter { $0.contains("delete-certificate") }.count == 2)
+        // The script says so for each certificate that it could not remove.
+        let message = "Could not remove the ColimaBar certificate authority. Remove it in Keychain Access."
+        #expect(r.out.components(separatedBy: message).count == 3)
     }
 
     @Test func theRemovalDeletesTheKeyBeforeItAsksSecurity() throws {
         let text = try script()
-        let rm = try #require(text.range(of: "rm -rf \"$HOME/Library/Application Support/ColimaBar\""))
+        let rm = try #require(text.range(of: "rm -rf \"$SUPPORT_DIR/domains\""))
         let del = try #require(text.range(of: "security delete-certificate -t -Z"))
         #expect(rm.lowerBound < del.lowerBound)
     }

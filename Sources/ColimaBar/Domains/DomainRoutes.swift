@@ -274,3 +274,12 @@ struct DomainRoutes: Equatable, Sendable {
         return Int(String(digits.reversed()))
     }
 }
+
+extension DomainRoutes {
+    /// True when `host` is a route name or a subdomain of one. HTTPS makes a
+    /// certificate only for such a name.
+    func hasRoute(for host: String) -> Bool {
+        if case .route = resolve(host: host) { return true }
+        return false
+    }
+}

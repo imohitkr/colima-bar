@@ -376,6 +376,9 @@ final class ColimaModel {
     @ObservationIgnored var httpsStartToken = 0
     @ObservationIgnored var httpsSetupTask: Task<Void, Never>?
     @ObservationIgnored var multiSANTask: Task<Void, Never>?
+    @ObservationIgnored var multiSANRenewTask: Task<Void, Never>?
+    @ObservationIgnored var httpsTrustCheckedAt = Date.distantPast
+    @ObservationIgnored var httpsTrustChecking = false
     @ObservationIgnored var httpsRetry: Task<Void, Never>?
     @ObservationIgnored var httpsRetryCount = 0
     @ObservationIgnored var httpsRebindAt: Date?
@@ -537,10 +540,8 @@ final class ColimaModel {
             publishAppStatus()
             // A copy that died leaves a temporary keychain in the cache folder.
             domainTLS.cleanStale()
-            if domainsEnabled {
-                startDomainProxy(retryFirst: true)
-                startHTTPSAtLaunch()
-            }
+            if domainsEnabled { startDomainProxy(retryFirst: true) }
+            startHTTPSAtLaunch()
         } else {
             setDomainStatus(DomainStatus(phase: .debugRun))
         }
@@ -631,9 +632,8 @@ final class ColimaModel {
         proxy.stop()
         if !isDebug {
             invalidateDomainTasks()
-            invalidateHTTPSTasks()
+            stopHTTPSForQuit()
             domainProxy.stop()
-            tlsProvider?.removeAll()
             profileProxies.shutdown()
             AppStatusFile.removeIfOwned()
         }

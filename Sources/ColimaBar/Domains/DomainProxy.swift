@@ -343,10 +343,17 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
                 switch state {
                 case .ready:
                     ready += 1
-                case .failed(let error), .waiting(let error):
+                case .failed(let error):
                     // A Mac with no IPv6 on lo0 still serves IPv4.
                     guard address.contains(":"), Self.ipv6Unavailable(error) else { return finish(false) }
                     attempt.unavailable.insert(address)
+                case .waiting(let error):
+                    if address.contains(":"), Self.ipv6Unavailable(error) {
+                        attempt.unavailable.insert(address)
+                    } else if Self.bindFailure(error) {
+                        return finish(false)
+                    }
+                // Another `.waiting` can pass: the listener may get ready before `readyTimeout`.
                 case .cancelled:
                     return finish(false)
                 default:
@@ -393,6 +400,12 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
         let timeout = DispatchWorkItem { finish(false) }
         attempt.timeout = timeout
         queue.asyncAfter(deadline: .now() + limits.readyTimeout, execute: timeout)
+    }
+
+    /// A `.waiting` error that never passes: another socket holds the port, or the user may not bind it.
+    private static func bindFailure(_ error: NWError) -> Bool {
+        if case .posix(let code) = error { return code == .EADDRINUSE || code == .EACCES }
+        return false
     }
 
     private static func ipv6Unavailable(_ error: NWError) -> Bool {

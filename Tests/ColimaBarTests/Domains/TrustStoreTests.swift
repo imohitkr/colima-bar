@@ -23,4 +23,11 @@ import Testing
         let ca = try LocalCA.create(permitted: ["localhost"])
         #expect(!TrustStore.isTrusted(ca))
     }
+
+    @Test func aTestProcessNeverChangesTheKeychainOrTheTrustSettings() throws {
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        #expect(TrustStore.install(ca) == .failed(errSecNotAvailable))
+        #expect(TrustStore.remove(ca) == .failed(errSecNotAvailable))
+        #expect(TrustStore.removeLabelled() == .failed(errSecNotAvailable))
+    }
 }

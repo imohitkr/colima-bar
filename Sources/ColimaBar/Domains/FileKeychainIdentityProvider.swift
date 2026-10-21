@@ -83,6 +83,34 @@ final class FileKeychainIdentityProvider: TLSIdentityProvider, @unchecked Sendab
         return identity
     }
 
+    func discard(certificate: SecCertificate, key: SecKey) {
+        guard let kc = lock.withLock({ keychain }), let x963 = try? LocalCA.publicX963(of: key) else { return }
+        let list = [kc] as CFArray
+        SecItemDelete(
+            [kSecClass: kSecClassCertificate, kSecValueRef: certificate, kSecMatchSearchList: list] as CFDictionary)
+        SecItemDelete(
+            [
+                kSecClass: kSecClassKey, kSecAttrApplicationLabel: Data(X509Builder.keyID(x963)),
+                kSecMatchSearchList: list,
+            ] as CFDictionary)
+    }
+
+    /// The number of keys and certificates in the keychain. A test reads it.
+    var itemCount: Int {
+        guard let kc = lock.withLock({ keychain }) else { return 0 }
+        return [kSecClassKey, kSecClassCertificate].reduce(0) { total, cls in
+            let query: [CFString: Any] = [
+                kSecClass: cls, kSecMatchSearchList: [kc] as CFArray, kSecMatchLimit: kSecMatchLimitAll,
+                kSecReturnRef: true,
+            ]
+            var result: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+                let items = result as? [AnyObject]
+            else { return total }
+            return total + items.count
+        }
+    }
+
     func unlockIfNeeded() {
         lock.withLock {
             guard let keychain else { return }

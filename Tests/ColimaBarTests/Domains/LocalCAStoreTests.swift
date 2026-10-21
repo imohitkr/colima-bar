@@ -49,6 +49,56 @@ import Testing
         #expect(mode(dir + "/ca-key.raw") == 0o600)
     }
 
+    @Test func aSaveLeavesNoStagingFolderAndReplacesAHalfWrittenOne() throws {
+        let temp = try TempFolder()
+        let dir = temp.path + "/domains"
+        // A crash of an earlier save left a staging folder.
+        try FileManager.default.createDirectory(atPath: dir + ".new", withIntermediateDirectories: true)
+        try "half".write(toFile: dir + ".new/ca-key.raw", atomically: true, encoding: .utf8)
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        try LocalCAStore.save(ca, dir: dir)
+        #expect(!FileManager.default.fileExists(atPath: dir + ".new"))
+        #expect(LocalCAStore.load(dir: dir)?.der == ca.der)
+        let next = try LocalCA.create(permitted: ["localhost"])
+        try LocalCAStore.save(next, dir: dir)
+        #expect(!FileManager.default.fileExists(atPath: dir + ".new"))
+        #expect(LocalCAStore.load(dir: dir)?.der == next.der)
+        // The files of the old set are gone, not mixed in.
+        #expect(
+            try FileManager.default.contentsOfDirectory(atPath: dir).sorted() == ["ca-key.raw", "ca.der", "ca.pem"])
+    }
+
+    @Test func aHalfWrittenStagingFolderNeverLoads() throws {
+        let temp = try TempFolder()
+        let (ca, dir) = try saved(temp)
+        let other = try LocalCA.create(permitted: ["localhost"])
+        // A certificate with the key of another CA, as a crash between two writes would leave it.
+        let mixed = temp.path + "/mixed"
+        try FileManager.default.createDirectory(
+            atPath: mixed, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700])
+        for (name, data) in [("ca.der", Data(other.der)), ("ca-key.raw", Data(try ca.keyX963()))] {
+            let writer = try PrivateFileWriter(destination: mixed + "/" + name, replace: true)
+            try writer.write(data)
+            try writer.commit()
+        }
+        #expect(LocalCAStore.load(dir: mixed) == nil)
+        #expect(LocalCAStore.load(dir: dir)?.der == ca.der)
+    }
+
+    @Test func aSaveReplacesASymlinkAtTheFolderWithoutFollowingIt() throws {
+        let temp = try TempFolder()
+        let target = temp.path + "/target"
+        try FileManager.default.createDirectory(atPath: target, withIntermediateDirectories: false)
+        try "keep".write(toFile: target + "/keep.txt", atomically: true, encoding: .utf8)
+        let dir = temp.path + "/domains"
+        symlink(target, dir)
+        let ca = try LocalCA.create(permitted: ["localhost"])
+        try LocalCAStore.save(ca, dir: dir)
+        #expect(LocalCAStore.load(dir: dir)?.der == ca.der)
+        #expect(FileManager.default.fileExists(atPath: target + "/keep.txt"))
+        #expect(!FileManager.default.fileExists(atPath: target + "/ca-key.raw"))
+    }
+
     @Test func nothingLoadsFromAMissingFolder() throws {
         let temp = try TempFolder()
         #expect(LocalCAStore.load(dir: temp.path + "/none") == nil)
@@ -108,6 +158,14 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: dir))
         #expect(LocalCAStore.load(dir: dir) == nil)
         LocalCAStore.remove(dir: dir)  // nothing left: no error
+    }
+
+    @Test func removeAlsoDeletesAStagingFolder() throws {
+        let temp = try TempFolder()
+        let (_, dir) = try saved(temp)
+        try FileManager.default.createDirectory(atPath: dir + ".new", withIntermediateDirectories: true)
+        LocalCAStore.remove(dir: dir)
+        #expect(!FileManager.default.fileExists(atPath: dir + ".new"))
     }
 
     @Test func aTestProcessNeverWritesTheFolderOfTheUser() throws {
