@@ -46,6 +46,15 @@ enum CtlAction: String, CaseIterable, Sendable {
     case imageRemove = "img-rm"
     case imagePull = "img-pull"
     case volumeRemove = "vol-rm"
+    /// Empties the json log file of a container in the VM. Args: the full
+    /// container ID and the name for the dialog. The script builds the path.
+    case logTruncate = "log-truncate"
+    /// Runs fstrim in the running VM, so the Mac can take back free blocks of
+    /// the disk image. It writes the busy marker "Trimming disk". No dialog.
+    case diskTrim = "disk-trim"
+    /// The weekly cleanup: dangling images and build cache. No dialog. It
+    /// exits with 2 for a stopped VM, so it never starts one.
+    case autoPrune = "auto-prune"
     case stopAll = "stop-all"
     case prune
     case ssh
@@ -68,7 +77,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     var changesDisk: Bool {
         switch self {
         case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll, .diskShrink, .composePull,
-            .composeDown:
+            .composeDown, .autoPrune:
             true
         default: false
         }
@@ -94,7 +103,7 @@ enum CtlAction: String, CaseIterable, Sendable {
         switch self {
         case .resources, .rosetta, .k8s, .vmConfig: running
         case .disk, .diskShrink, .profileDelete, .repair, .containerRemove, .imageRemove, .volumeRemove, .stopAll,
-            .prune, .composeDown:
+            .prune, .composeDown, .logTruncate:
             true
         default: false
         }

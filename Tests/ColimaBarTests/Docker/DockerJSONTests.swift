@@ -96,4 +96,26 @@ import Testing
         #expect(try !volume(#"{"Name":"a","Driver":"local","Options":{"type":"nfs"}}"#).isPlain)
         #expect(try !volume(#"{"Name":"a","Driver":"other"}"#).isPlain)
     }
+
+    @Test func systemDFDecodesTheCleanupFields() throws {
+        let json = """
+            {"Containers":[{"Id":"abc","Names":["/api"],"Image":"api:1","Labels":{"a":"b"},"SizeRw":5,"State":"exited"}],
+             "BuildCache":[{"ID":"x1","Type":"regular","Description":"d","LastUsedAt":"2026-01-02T03:04:05Z",
+                            "Size":9,"InUse":false,"Shared":true}]}
+            """
+        let df = try JSONDecoder().decode(APIDF.self, from: Data(json.utf8))
+        let c = try #require(df.Containers?.first)
+        #expect(c.Id == "abc" && c.Names == ["/api"] && c.Image == "api:1" && c.Labels == ["a": "b"])
+        let k = try #require(df.BuildCache?.first)
+        #expect(k.ID == "x1" && k.Type == "regular" && k.Description == "d")
+        #expect(k.LastUsedAt == "2026-01-02T03:04:05Z")
+    }
+
+    @Test func systemDFDecodesWithoutThem() throws {
+        let json =
+            #"{"Containers":[{"SizeRw":5,"State":"exited"}],"BuildCache":[{"Size":9,"InUse":false,"Shared":false}]}"#
+        let df = try JSONDecoder().decode(APIDF.self, from: Data(json.utf8))
+        #expect(df.Containers?.first?.Id == nil)
+        #expect(df.BuildCache?.first?.ID == nil)
+    }
 }

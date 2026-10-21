@@ -16,6 +16,8 @@ final class ViewState {
     var showDoctor = false
     /// The VM settings page replaces the tabs and the stopped screen.
     var showVMConfig = false
+    /// The Cleanup page replaces the tabs and the stopped screen.
+    var showCleanup = false
     /// The container that the Inspect page shows. The page replaces the
     /// tabs while the VM runs. It never keeps a value of the container.
     var inspectID: String? {

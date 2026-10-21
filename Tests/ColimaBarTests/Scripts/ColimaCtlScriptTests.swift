@@ -355,6 +355,7 @@ import Testing
         (["disk-shrink", "50"], "Delete all Docker data of profile 'work' and shrink its disk from 100 GB to 50 GB?"),
         (["prune", "dangling"], "Remove dangling images and build cache of profile 'work'?"),
         (["prune", "all"], "Full cleanup of profile 'work':"),
+        (["prune", "cache"], "Remove the unused build cache of profile 'work'?"),
     ])
     func vmDialogsNameTheProfile(args: [String], text: String) async throws {
         let sb = try ScriptSandbox()

@@ -707,6 +707,34 @@ repair_vm() {
   start_vm
 }
 
+# prune_dangling -> removes dangling images and the unused build cache. The
+# Cleanup buttons and the weekly cleanup use it. docker uses the Colima
+# socket of the profile (DOCKER_HOST), never a proxy socket, so it never
+# starts the VM.
+prune_dangling() {
+  docker image prune -f && docker builder prune -f
+}
+
+# trim_disk -> fstrim of all mounted file systems in the VM. The Mac can
+# then take back the blocks of the disk image that the VM freed. The output
+# goes to stdout: ColimaBar reads the trimmed bytes from it. The profile goes
+# before the "--": the colima function would put it after, in the remote command.
+trim_disk() {
+  colima_home
+  local out rc
+  out=$(command colima ssh --profile "$PROFILE" -- sudo -n fstrim -av)
+  rc=$?
+  printf '%s\n' "$out"
+  # fstrim exits with 64 when some file systems fail (for example /boot/efi)
+  # and others work. "colima ssh" may turn any remote failure into exit 1, so
+  # any non-zero status is a success if a line says it trimmed bytes. The
+  # formats are the ones DiskTrim.trimmedBytes reads.
+  if [ "$rc" -ne 0 ]; then
+    case "$out" in *"bytes) trimmed"* | *"bytes were trimmed"*) return 0 ;; esac
+  fi
+  return "$rc"
+}
+
 restart_vm() {
   if vm_up; then
     colima stop || return "$STOP_FAILED"
@@ -1177,6 +1205,50 @@ $list" || exit 2
     confirm "Remove volume $2? Data in it is lost for good." || exit 2
     out=$(docker volume rm -- "$2" 2>&1) || { notify "Remove failed: ${out##*: }"; exit 1; } ;;
 
+  # log-truncate ID [NAME]: empties the json log file of a container in the VM.
+  # ID is the full ID of 64 hex characters, never a path: the script builds
+  # the path. NAME is only for the dialog. Not a VM action: no lock.
+  log-truncate)
+    id="${2:-}"; name="${3:-}"
+    hex=0123456789abcdef
+    names=ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-
+    bad_id="${id//[$hex]/}"
+    if [ "${#id}" -ne 64 ] || [ -n "$bad_id" ]; then
+      notify "Couldn't empty the log: the container ID is not valid."; exit 1
+    fi
+    bad_name="${name//[$names]/}"
+    if [ -z "$name" ] || [ -n "$bad_name" ] || [ "${#name}" -gt 128 ]; then name="${id:0:12}"; fi
+    vm_up || { notify "The VM of $NAMED is not running. Start it, then try again."; exit 1; }
+    confirm "Empty the log of container $name in $NAMED? docker logs then shows only new lines." || exit 2
+    # The VM can stop while the dialog is open.
+    vm_up || { notify "The VM of $NAMED stopped. Start it, then try again."; exit 1; }
+    log="/var/lib/docker/containers/$id/$id-json.log"
+    colima_home
+    # -c: create no file. A log that is gone (the container was removed) stays
+    # missing, and truncate then exits with 0: a no-op success.
+    command colima ssh --profile "$PROFILE" -- sudo -n truncate -c -s 0 -- "$log" >/dev/null \
+      || { notify "Couldn't empty the log of container $name - $SEE_LOG"; exit 1; } ;;
+
+  # disk-trim: returns the free space of the VM disk to the Mac (fstrim). It
+  # never starts the VM. It takes the lock, so no start or stop runs during it.
+  disk-trim)
+    lock_vm
+    no_start_in_progress
+    vm_up || { notify "The VM of $NAMED is not running. Start it, then try again."; exit 1; }
+    with_busy "Trimming disk" trim_disk \
+      || { notify "Couldn't return the free space of $NAMED to the Mac - $SEE_LOG"; exit 1; } ;;
+
+  # auto-prune: the weekly cleanup from ColimaBar: dangling images and the
+  # unused build cache. No dialog. It never starts the VM: a held lock, a
+  # start in progress or a stopped VM exit with 2, and ColimaBar tries again
+  # later. Quiet: only a failure notifies.
+  auto-prune)
+    lock_vm quiet
+    start_in_progress && exit 2
+    vm_up || exit 2
+    with_busy "Cleaning up" prune_dangling >/dev/null \
+      || { notify "The weekly cleanup of $NAMED failed - $SEE_LOG"; exit 1; } ;;
+
   stop-all)
     n=$(running_count)
     [ "$n" -gt 0 ] || exit 0
@@ -1184,11 +1256,13 @@ $list" || exit 2
     docker ps -q | xargs docker stop >/dev/null || { notify "Failed to stop some containers"; exit 1; }
     ;;
 
-  # Cleanup: prune dangling|images|volumes|all
+  # Cleanup: prune dangling|images|volumes|all|cache
   prune)
     case "$2" in
       dangling) msg="Remove dangling images and build cache of $NAMED?"
-                cmd() { docker image prune -f && docker builder prune -f; } ;;
+                cmd() { prune_dangling; } ;;
+      cache)    msg="Remove the unused build cache of $NAMED? The next builds take longer."
+                cmd() { docker builder prune -f; } ;;
       images)   msg="Remove ALL images of $NAMED not used by a container? They will need to be pulled again."
                 cmd() { docker image prune -af; } ;;
       volumes)  msg="Remove ALL volumes of $NAMED not used by a container? Data in them is lost for good."
@@ -1211,7 +1285,7 @@ $list" || exit 2
     if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
-    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|ctr-*|compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...|img-rm|img-pull|vol-rm|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
+    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|ctr-*|compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...|img-rm|img-pull|vol-rm|log-truncate ID [NAME]|disk-trim|auto-prune|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
     echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta, k8s and vm-config stop if the VM state differs" >&2
     echo "env: COLIMABAR_UPGRADE_NOTE and COLIMABAR_RELEASE_NOTES make start, restart and the config actions ask after an upgrade" >&2

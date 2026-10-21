@@ -6,6 +6,12 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Cleanup page. On the System tab, click **Clean Up…** in **Disk usage**. The page lists the largest images, unused volumes, stopped containers, build cache entries and container log files, each with its size. Remove an item, or empty a log, with one click. ColimaBar asks first. See [Clean up disk space](docs/usage.md#clean-up-disk-space).
+- **Return Free Space** runs fstrim in the VM, so the disk image on the Mac gets smaller. The notification gives the size before and after.
+- Weekly cleanup (off by default). It removes dangling images and unused build cache of the selected profile while the VM runs and no other action runs. It waits while docker traffic is live, so it never removes an image that a build or a pull is about to use. It never starts the VM. A failed run tries again after 6 hours. The settings file has it.
+
 ## [0.12.0] - 2026-10-19
 
 ### Added

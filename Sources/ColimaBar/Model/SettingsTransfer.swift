@@ -31,6 +31,8 @@ enum SettingsTransfer {
         case checkUpdates
         case profile
         case launchAtLogin
+        /// The weekly cleanup of dangling images and build cache.
+        case scheduledPrune
         /// The keyboard shortcut for the dashboard, as a spec. An empty string means none.
         case hotKey
 
@@ -47,6 +49,7 @@ enum SettingsTransfer {
             case .checkUpdates: "Daily version check"
             case .profile: "Profile"
             case .launchAtLogin: "Launch at login"
+            case .scheduledPrune: "Weekly cleanup"
             case .hotKey: "Keyboard shortcut"
             }
         }
