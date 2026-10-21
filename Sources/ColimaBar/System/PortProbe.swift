@@ -47,6 +47,19 @@ enum PortProbe {
         }
     }
 
+    /// True when something on this Mac accepts a connection on `port`, on
+    /// 127.0.0.1 or on ::1 (`ipv6`). A connection that closes at once counts:
+    /// a process listens there. The proxy of container domains uses it to
+    /// skip a busy port before it binds.
+    static func listens(port: Int, ipv6: Bool, timeout: TimeInterval) async -> Bool {
+        await withCheckedContinuation { cont in
+            Thread.detachNewThread {
+                let r = checkSync(port: port, connectTimeout: timeout, peekWait: 0, ipv6: ipv6)
+                cont.resume(returning: r == .open || r == .closed)
+            }
+        }
+    }
+
     static func check(port: Int, connectTimeout: TimeInterval = 1, peekWait: TimeInterval = 0.5) async -> Result {
         await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -56,9 +69,11 @@ enum PortProbe {
     }
 
     /// The blocking probe. Call it off the main thread only.
-    static func checkSync(port: Int, connectTimeout: TimeInterval = 1, peekWait: TimeInterval = 0.5) -> Result {
+    static func checkSync(
+        port: Int, connectTimeout: TimeInterval = 1, peekWait: TimeInterval = 0.5, ipv6: Bool = false
+    ) -> Result {
         guard (1...65535).contains(port) else { return .refused }
-        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        let fd = socket(ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else {
             log.error("port probe: socket() failed, errno \(errno, privacy: .public)")
             return .error
@@ -72,14 +87,28 @@ enum PortProbe {
             return .error
         }
 
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = UInt16(port).bigEndian
-        addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
-        let rc = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        let rc: Int32
+        if ipv6 {
+            var addr = sockaddr_in6()
+            addr.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+            addr.sin6_family = sa_family_t(AF_INET6)
+            addr.sin6_port = UInt16(port).bigEndian
+            addr.sin6_addr = in6addr_loopback
+            rc = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
+                }
+            }
+        } else {
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = UInt16(port).bigEndian
+            addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+            rc = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
             }
         }
         if rc != 0 {

@@ -33,6 +33,28 @@ import Testing
         #expect(await probe(try LoopbackListener.unusedPort()) == .refused)
     }
 
+    @Test func listensIsTrueForAnyServerOnTheLoopback() async throws {
+        let quiet = try LoopbackListener(.quiet)
+        defer { quiet.stop() }
+        #expect(await PortProbe.listens(port: quiet.port, ipv6: false, timeout: 2))
+        let dead = try LoopbackListener(.closesAtOnce)
+        defer { dead.stop() }
+        #expect(await PortProbe.listens(port: dead.port, ipv6: false, timeout: 2))
+    }
+
+    @Test func listensIsFalseWhenNothingListens() async throws {
+        let port = try LoopbackListener.unusedPort()
+        #expect(!(await PortProbe.listens(port: port, ipv6: false, timeout: 2)))
+        #expect(!(await PortProbe.listens(port: port, ipv6: true, timeout: 2)))
+    }
+
+    @Test func listensLooksAtTheOtherFamilyOnly() async throws {
+        // The listener is on 127.0.0.1, so ::1 does not answer.
+        let quiet = try LoopbackListener(.quiet)
+        defer { quiet.stop() }
+        #expect(!(await PortProbe.listens(port: quiet.port, ipv6: true, timeout: 2)))
+    }
+
     @Test func aPortOutOfRangeIsRefused() async {
         #expect(await probe(0) == .refused)
         #expect(await probe(70000) == .refused)

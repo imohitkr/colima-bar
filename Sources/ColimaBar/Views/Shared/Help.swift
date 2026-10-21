@@ -356,6 +356,23 @@ enum Help {
         }
     }
 
+    // Domains
+    static let domains =
+        "Open containers at names such as web.shop.localhost: the service and project for Compose, the container name for others. ColimaBar runs a proxy on this Mac only. It never starts the VM."
+    static let domainLabels =
+        "Set the label dev.colimabar.port to pick the container port. Set dev.colimabar.domains to add names, for example admin.shop.localhost@8081, or to off for no name."
+    static func domainLink(_ url: String) -> String {
+        "Open \(url) in your browser. The ColimaBar proxy forwards it to the container."
+    }
+    static let domainMenu = "Open a service of this project at its .localhost name."
+    static func domainTaken(_ name: String, by: String) -> String {
+        "\(name) already points to \(by). Use the label dev.colimabar.domains to give this container another name."
+    }
+    static func domainPortNotPublished(_ p: Int) -> String {
+        "The label dev.colimabar.port names port \(p), but the container does not publish it."
+    }
+    static let domainsDebug = "A debug run does not start the proxy."
+
     // Network notice
     static let networkPorts =
         "Published ports answer in the VM but not on the Mac. Port forwarding is broken, for example after a network change or a sleep."

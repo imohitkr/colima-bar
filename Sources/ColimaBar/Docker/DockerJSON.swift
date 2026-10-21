@@ -66,6 +66,8 @@ struct APIContainer: Decodable {
     let Status: String
     let Ports: [Port]?
     let Labels: [String: String]?
+    /// Seconds since 1970. Optional, so older fixtures still decode.
+    let Created: Int64?
 }
 
 struct APIStats: Decodable {

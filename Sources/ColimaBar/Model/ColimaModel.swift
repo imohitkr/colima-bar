@@ -16,7 +16,12 @@ import os
 @MainActor @Observable
 final class ColimaModel {
     private(set) var state: VMState = .unknown {
-        didSet { if state != oldValue { wakeHeartbeat() } }
+        didSet {
+            if state != oldValue {
+                wakeHeartbeat()
+                rebuildDomainRoutes()
+            }
+        }
     }
     private(set) var busy: String?
     private(set) var vm = VMInfo()
@@ -164,6 +169,16 @@ final class ColimaModel {
             syncKeeper()
         }
     }
+    /// Open containers at .localhost names (`ColimaModel+Domains`). Off by default.
+    var domainsEnabled = Defaults.bool(.domains) ?? false {
+        didSet {
+            guard domainsEnabled != oldValue else { return }
+            Defaults.set(domainsEnabled, .domains)
+            domainsSettingChanged()
+        }
+    }
+    private(set) var domainRoutes = DomainRoutes.empty
+    private(set) var domainStatus = DomainStatus()
     /// The removed containers whose last lines `keeper` holds. The alerts
     /// strip reads it. It changes only when a buffer is kept or dropped.
     private(set) var savedLogIDs: Set<String> = []
@@ -319,6 +334,13 @@ final class ColimaModel {
     @ObservationIgnored private var lastPing = Date()
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
     @ObservationIgnored private(set) var isDebug = false
+    /// The proxy of container domains. It listens only while the setting is on.
+    @ObservationIgnored let domainProxy = DomainProxy()
+    @ObservationIgnored var domainCandidates: [DomainCandidate] = []
+    @ObservationIgnored var domainStartToken = 0
+    @ObservationIgnored var domainRebindAt: Date?
+    /// COLIMABAR_DOMAINS=1 in a debug run: show the names, start nothing.
+    @ObservationIgnored var domainsShownInDebug = false
     /// The runner of the volume transfer that runs now.
     @ObservationIgnored var volumeRunner: VolumeBackupRunner?
     /// The profile of that transfer, and why it stopped if the VM or the profile changed.
@@ -450,6 +472,9 @@ final class ColimaModel {
             powerObserver = observer
             startNetworkObserver()
             publishAppStatus()
+            if domainsEnabled { startDomainProxy(retryFirst: true) }
+        } else {
+            setDomainStatus(DomainStatus(phase: .debugRun))
         }
         Task { await refreshAll() }
         lastPing = Date()
@@ -537,6 +562,7 @@ final class ColimaModel {
     func shutdown() {
         proxy.stop()
         if !isDebug {
+            domainProxy.stop()
             profileProxies.shutdown()
             AppStatusFile.removeIfOwned()
         }
@@ -779,6 +805,7 @@ final class ColimaModel {
         resetDF()
         syncStatStreams()
         set(\.containers, [])
+        updateDomainRoutes([])
         set(\.stats, [:])
         set(\.images, [])
         set(\.volumes, [])
@@ -848,7 +875,8 @@ final class ColimaModel {
             let list = try? JSONDecoder().decode([APIContainer].self, from: r.body)
         else { return false }
         // The helper containers of a volume backup are not the user's containers.
-        let mapped = Self.visibleContainers(list).map { c in
+        let visible = Self.visibleContainers(list)
+        let mapped = visible.map { c in
             Container(
                 id: c.Id, name: c.Names.first.map { String($0.drop { $0 == "/" }) } ?? String(c.Id.prefix(12)),
                 image: c.Image, state: c.State, status: c.Status,
@@ -858,6 +886,7 @@ final class ColimaModel {
         }
         // Stable order by name: rows never reorder because a number changed.
         set(\.containers, mapped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
+        updateDomainRoutes(visible)
         syncStatStreams()
         await refreshComposeIssues()
         sweepHelperLeftoversOnce()
@@ -1371,6 +1400,7 @@ final class ColimaModel {
     /// again, refresh at once, and check each running VM.
     private func recoverAfterSleep() async {
         restartStreams()
+        domainsAfterWake()
         await refreshAll()
         let blocked = Set(profiles.map(\.name).filter { isBlockedForSleepCheck($0) })
         let names = AfterSleepCheck.profiles(profiles, blocked: blocked)
@@ -1797,6 +1827,10 @@ final class ColimaModel {
         updateLogItems()
     }
     func setState(_ s: VMState) { set(\.state, s) }
+
+    /// `ColimaModel+Domains` stores its state through these two.
+    func setDomainRoutes(_ routes: DomainRoutes) { set(\.domainRoutes, routes) }
+    func setDomainStatus(_ status: DomainStatus) { set(\.domainStatus, status) }
     func setLogSizesChecking(_ on: Bool) { set(\.logSizesChecking, on) }
     func setDiskImage(_ size: DiskImageSize?) { set(\.diskImage, size) }
     func setTrimming(_ on: Bool) { set(\.isTrimming, on) }

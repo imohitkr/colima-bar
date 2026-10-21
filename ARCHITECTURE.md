@@ -12,7 +12,7 @@ ColimaBar is a menu bar app for [Colima](https://github.com/abiosoft/colima). It
 
 It also takes `colimabar://` links, a keyboard shortcut and the `colimabar` command.
 
-ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit, SystemConfiguration for the network watch, Carbon HIToolbox for the keyboard shortcut; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
+ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit, Network for the proxy of container domains, SystemConfiguration for the network watch, Carbon HIToolbox for the keyboard shortcut; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
 
 ColimaBar gets its data from these sources:
 
@@ -76,6 +76,10 @@ The `colimabar` command. See [Command line](#command-line). `CLIParser` reads th
 ### `Proxy/`
 
 `SocketProxy` is the auto-start proxy. `SocketProxy+HTTP` parses just enough HTTP to answer pings and to classify requests. `ProfileProxies` owns one `SocketProxy` for each docker profile. `ProfileSocket` derives and checks the path of a profile socket. `UnixSocket` has the socket helpers.
+
+### `Domains/`
+
+Container domains: names such as `web.shop.localhost` for published ports. The pure types decide everything, so tests need no network. `DomainName` makes and checks names and hosts. `DomainPorts` has the proxy ports and the order of container ports. `DomainCandidate` is a running container with its ports and labels (`dev.colimabar.port`, `dev.colimabar.domains`). `DomainRoutes.build` turns the candidates into the table of names and routes, and `resolve(host:)` answers a Host. `HTTPHead` parses the head of an HTTP/1.x request. `DomainPage` writes the error pages. `DomainLink` builds the links. `DomainStatus` is what the System tab shows. `DomainProxy` owns the listeners on `127.0.0.1` and `::1`. `DomainSession` handles one client connection: it reads the head, finds the route, connects upstream and splices the bytes. `ColimaModel+Domains` is the glue.
 
 ### `System/`
 
@@ -437,10 +441,25 @@ When the dashboard is closed, the app idles at about 0% CPU. These limits keep m
 | Saved logs of removed containers | 500 lines and 128 KB of raw log data for each container, 50 containers (about 6.4 MB), 5 minutes after a failure | `RemovedLogKeeper` |
 | Proxy request head | 64 KB, then HTTP 431 | `SocketProxy.maxHead` |
 | Proxy copy buffer | 16 KB for each direction | `SocketProxy.bufferSize` |
+| Domain proxy request head | 64 KB, then HTTP 431 | `HTTPHead.maxBytes` |
+| Domain proxy head timeout | 10 s, then HTTP 408 | `DomainProxy.Limits.headTimeout` |
+| Domain proxy sessions | 512, then HTTP 503 | `DomainProxy.Limits.maxSessions` |
+| Domain proxy upstream connect | 5 s, then HTTP 502 | `DomainProxy.Limits.connectTimeout` |
 | Idle client while the VM is down | closed after 5 minutes | `SocketProxy.idleTimeout` |
 | `ctl.log` | starts again after 1 MB | `Shell` |
 
 Live stats stream only while a dashboard is on screen. Saved-log streams open only while the option is on, one for each running auto-remove container. `/system/df` runs only for the tabs and the Cleanup page that show it. The log listing of the Cleanup page runs only while the page shows, at most once each 60 s. Graphs use SwiftUI `Shape`, not Swift Charts, because Swift Charts uses a lot of graphics memory.
+
+### Container domains
+
+The setting `domains` turns on a proxy that opens containers at `.localhost` names. A browser resolves `*.localhost` to the Mac itself, so the feature needs no DNS setup.
+
+- **Routes.** `refreshContainers()` gives the raw `[APIContainer]` list to `updateDomainRoutes`. It makes `DomainCandidate` values and calls `DomainRoutes.build`. The result goes to the UI (`domainRoutes`, set only when it changes) and to the proxy (`domainProxy.routes`). The model rebuilds the routes when the list, the VM state or the setting changes.
+- **Names.** A Compose service is `SERVICE.PROJECT`. Another container is its name. Replicas get `SERVICE-N.PROJECT`. Labels add names. The container port comes from the label, else the first published port of `DomainPorts.preferred`, else the lowest web port. A collision goes to the label, then the older container.
+- **Resolve.** The Host must end in an active suffix. Else the answer is `foreign` and the page shows no list. If the VM does not run, the answer is a 503 page. A request never starts a VM. Else the longest known parent name wins.
+- **Proxy.** `DomainProxy` binds `127.0.0.1` and `::1` on port 80, else 8080. Before it binds, it skips a port that a running container publishes or that answers a connect. `queue` runs every Network.framework handler. `table` has its own lock, and a session reads one snapshot of it. A session reads the head, connects to `127.0.0.1:<published host port>` (with TLS for container ports 443 and 8443, with any certificate) and splices both directions with backpressure. It has no idle timeout after the head.
+- **Lifecycle.** The proxy starts at launch and when the setting turns on. It stops when the setting turns off and at quit. `domainStartToken` drops the result of an older start. If a container starts to publish the port of the proxy, the model moves the proxy once in 30 s. After a wake, the model starts the proxy again if it does not listen. If a listener fails, the model starts it again once after 5 s.
+- **Debug runs.** A debug run starts no listener. With `COLIMABAR_DOMAINS=1` it computes the routes, so a screenshot shows the links.
 
 ### Links
 
@@ -492,7 +511,7 @@ The JSON of `status` and `doctor` has `schemaVersion` 1. Every key is always the
 
 ### Debug runs
 
-`--snapshot`, `--popover`, `--notify-test`, `--diagnostics` and `--cli` start a debug run. A debug run ignores links. It does not change the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It also skips system sleep, power and network changes and auto-stop. It runs the Doctor checks (they only read: the network checks connect to ports on the Mac without data, run `colima ssh` and look up a name), but makes no Doctor fix and writes no VM settings. It may write the diagnostics file that the user chose. It writes no upgrade record. It runs no docker compose, opens no debug shell, makes no volume backup or restore, removes no helper container, trims no disk, empties no log and runs no weekly cleanup. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
+`--snapshot`, `--popover`, `--notify-test`, `--diagnostics` and `--cli` start a debug run. A debug run ignores links. It does not change the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It starts no domain proxy. It also skips system sleep, power and network changes and auto-stop. It runs the Doctor checks (they only read: the network checks connect to ports on the Mac without data, run `colima ssh` and look up a name), but makes no Doctor fix and writes no VM settings. It may write the diagnostics file that the user chose. It writes no upgrade record. It runs no docker compose, opens no debug shell, makes no volume backup or restore, removes no helper container, trims no disk, empties no log and runs no weekly cleanup. Thus it can run next to the installed app. [CONTRIBUTING.md](CONTRIBUTING.md#debug-flags) lists the flags.
 
 ## Invariants
 
@@ -508,9 +527,10 @@ Do not break these rules.
 - **Log `since`.** The Docker logs `since` parameter must be UNIX seconds with nine digits of nanoseconds (`sec.nanos`). See `LogStore.sinceParam`.
 - **Readiness gate after a wake.** An open socket does not mean that the Docker daemon is ready. `wakeForProxy()` waits for `colima start` to exit, then for several successful `/images/json` probes in a row (`ReadinessGate`, also used by `colimabar start`). During a wake of profile P, every proxy whose upstream is P holds its requests until the shared wake ends (`SocketProxy.holdForWake`, set by `syncWakeHolds()`). These are the stable socket when P is selected, and the profile socket of P. While a wake runs, `connectIfAwake()` returns `.down`, so no request is spliced before the gate passes.
 - **Replace the bundle only by rename.** An in-app update swaps the whole bundle with `renamex_np` (`BundleSwap`). It never writes into the running bundle, and it changes nothing in the Applications folder before the download passes every check.
+- **Domain proxy.** It binds only `127.0.0.1` and `::1`. Its upstream is only `127.0.0.1` and a published host port from the Docker list. It never starts a VM. It stops at quit and when the setting is off.
 - **Links.** A link never returns data, writes a file or reaches a shell. Its profile must pass `ProfileName.isValid` and be in a fresh `colima list`. VM links ask while `askBeforeLinks` is on. A debug run ignores links.
 - **Command line.** `--cli` never creates `NSApplication`. The command never writes a setting and never changes the system, except through `colima-ctl.sh` (`start`, `stop`, `restart`), the file that the user names (`diagnostics`) and `NSWorkspace.openApplication` (`open`). It never overwrites a file. Only a normal run writes `app-status.json`. The JSON keys of `status` and `doctor` are a contract.
-- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. The `colimabar` command (`--cli`) is a debug run too. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It does not back up or restore volumes, does not remove helper containers, does not trim the disk, empty a log or run the weekly cleanup. It registers no keyboard shortcut. It never downloads or installs an update. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep, power or network changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
+- **Debug runs.** `--snapshot`, `--popover`, `--notify-test` and `--diagnostics` set `AppDelegate.isDebugRun`. The `colimabar` command (`--cli`) is a debug run too. A debug run must not change the proxy sockets, the docker routes and contexts or the login item. It does not back up or restore volumes, does not remove helper containers, does not trim the disk, empty a log or run the weekly cleanup. It registers no keyboard shortcut. It starts no domain proxy. It never downloads or installs an update. It may write only the chosen diagnostics file. It writes and prunes no record of good starts. It does not observe system sleep, power or network changes, it does not auto-stop a VM, and it makes no Doctor fix or repair.
 
 ## Testing
 

@@ -20,6 +20,7 @@ import Testing
         .launchAtLogin: .bool(true),
         .scheduledPrune: .bool(false),
         .hotKey: .string("control+option+command+C"),
+        .domains: .bool(true),
     ]
 
     /// A settings file with `settings` as its JSON settings object.
@@ -52,6 +53,18 @@ import Testing
         #expect(root["app"] as? String == "0.5.0")
         let settings = try #require(root["settings"] as? [String: Any])
         #expect(Set(settings.keys) == Set(T.Setting.allCases.map(\.rawValue)))
+    }
+
+    @Test func containerDomainsIsASettingAndTheOtherDomainSettingsAreNot() throws {
+        #expect(T.Setting.domains.title == "Container domains")
+        let settings = try #require(try object(try T.encode(sample, appVersion: "1"))["settings"] as? [String: Any])
+        #expect(settings["domains"] as? Bool == true)
+        for key in ["domainsHTTPS", "domainSuffix", "domainsSuffix"] { #expect(settings[key] == nil) }
+        let plan = try T.plan(file(#"{"domains": false, "domainsHTTPS": true}"#), current: sample, profiles: [])
+        #expect(plan.changes.map(\.setting) == [.domains])
+        let wrongType = try T.plan(file(#"{"domains": "yes"}"#), current: sample, profiles: [])
+        #expect(wrongType.changes.isEmpty)
+        #expect(wrongType.skipped.count == 1)
     }
 
     @Test func scheduledPruneIsASetting() throws {

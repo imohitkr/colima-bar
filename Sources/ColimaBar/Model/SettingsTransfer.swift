@@ -36,6 +36,8 @@ enum SettingsTransfer {
         case scheduledPrune
         /// The keyboard shortcut for the dashboard, as a spec. An empty string means none.
         case hotKey
+        /// Open containers at .localhost names. HTTPS and the custom suffix are not in the file.
+        case domains
 
         /// The name that the confirmation and the summary show.
         var title: String {
@@ -53,6 +55,7 @@ enum SettingsTransfer {
             case .launchAtLogin: "Launch at login"
             case .scheduledPrune: "Weekly cleanup"
             case .hotKey: "Keyboard shortcut"
+            case .domains: "Container domains"
             }
         }
     }

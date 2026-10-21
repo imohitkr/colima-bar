@@ -13,7 +13,7 @@ import Testing
             "didMigrateLoginItem", "revealOnLaunch", "keepRemovedLogs",
             "goodStartVersions", "installedVersion", "recoveryPath", "askBeforeLinks", "linkHandoff", "hotKey",
             "debugShellImage", "scheduledPrune", "scheduledPruneLastRun",
-            "notifyOnRecovery", "mutedProjects",
+            "notifyOnRecovery", "mutedProjects", "domains",
         ]
         #expect(Set(Defaults.Key.allCases.map(\.rawValue)) == expected)
     }
