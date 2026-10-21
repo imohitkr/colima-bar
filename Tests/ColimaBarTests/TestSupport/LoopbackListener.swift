@@ -125,11 +125,30 @@ final class LoopbackListener: @unchecked Sendable {
 
     deinit { stop() }
 
-    /// A port that nothing listens on: it was free a moment ago.
+    /// A port that nothing listens on: it was free a moment ago. It is below
+    /// the ephemeral range (49152 and up), so a listener of a parallel test,
+    /// which binds port 0, cannot get it before the probe.
     static func unusedPort() throws -> Int {
-        let l = try LoopbackListener(.quiet)
-        let port = l.port
-        l.stop()
-        return port
+        for _ in 0..<50 {
+            let port = Int.random(in: 20000..<49152)
+            if isFree(port) { return port }
+        }
+        throw POSIXError(.EADDRINUSE)
+    }
+
+    private static func isFree(_ port: Int) -> Bool {
+        let s = socket(AF_INET, SOCK_STREAM, 0)
+        guard s >= 0 else { return false }
+        defer { close(s) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = UInt16(port).bigEndian
+        addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+        return withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) == 0
+            }
+        }
     }
 }

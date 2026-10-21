@@ -26,6 +26,35 @@ env:
 
 # Actions are pinned to full commit SHAs, so a moved tag cannot change them.
 jobs:
+  # Tests and the release build run in parallel jobs. Each compiles the
+  # package once (debug or release), so neither waits for the other.
+  test:
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Installs Swift $SWIFT_VERSION with swiftly and fails on any other version.
+      - uses: ./.github/actions/setup-swift
+        with:
+          version: ${{ env.SWIFT_VERSION }}
+
+      # The key has the commit, so each run saves a fresh .build and the next
+      # run restores the newest one by prefix. Tag builds start clean, so a
+      # poisoned cache cannot reach a release.
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        with:
+          path: .build
+          key: spm-debug-${{ runner.os }}-swift-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            spm-debug-${{ runner.os }}-swift-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
+
+      - name: Test
+        run: swift test
+
   build:
     runs-on: macos-26
     timeout-minutes: 30
@@ -35,20 +64,17 @@ jobs:
           fetch-depth: 0   # git describe for the version
           persist-credentials: false
 
-      # Installs Swift $SWIFT_VERSION with swiftly and fails on any other version.
       - uses: ./.github/actions/setup-swift
         with:
           version: ${{ env.SWIFT_VERSION }}
 
-      # Tag builds start clean, so a poisoned cache cannot reach a release.
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         with:
           path: .build
-          key: spm-${{ runner.os }}-swift-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
-
-      - name: Test
-        run: swift test
+          key: spm-release-${{ runner.os }}-swift-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-${{ github.sha }}
+          restore-keys: |
+            spm-release-${{ runner.os }}-swift-${{ env.SWIFT_VERSION }}-${{ hashFiles('Package.swift', 'Package.resolved') }}-
 
       - name: Build app
         run: ./build.sh
@@ -123,7 +149,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, lint, scripts-and-workflows]
+    needs: [test, build, lint, scripts-and-workflows]
     runs-on: macos-26
     timeout-minutes: 30
     permissions:
