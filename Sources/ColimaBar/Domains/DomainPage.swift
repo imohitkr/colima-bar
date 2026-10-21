@@ -7,7 +7,7 @@ enum DomainPage {
         case badRequest
         /// 404, for a name under our suffix. `known` holds the names that
         /// work now, as `host` or `host:port`, ready for a link.
-        case notFound(host: String, profile: String, known: [String])
+        case notFound(host: String, profile: String, known: [String], secure: Bool = false)
         /// 404, with no list.
         case foreign
         /// 408
@@ -71,7 +71,7 @@ enum DomainPage {
         switch kind {
         case .badRequest:
             return (400, "Bad Request", "Bad request", p("The request has no valid Host header."))
-        case .notFound(let host, let profile, let known):
+        case .notFound(let host, let profile, let known, let secure):
             var body = p("No running container of profile \(profile) has this name.")
             if known.isEmpty {
                 body += p("No running container publishes a web port.")
@@ -79,7 +79,9 @@ enum DomainPage {
                 body += p("Names that work now:")
                 body +=
                     "<ul>"
-                    + known.prefix(maxKnown).map { "<li><a href=\"http://\(escape($0))/\">\(escape($0))</a></li>" }
+                    + known.prefix(maxKnown).map {
+                        "<li><a href=\"\(secure ? "https" : "http")://\(escape($0))/\">\(escape($0))</a></li>"
+                    }
                     .joined() + "</ul>"
             }
             return (404, "Not Found", "No container at \(host)", body)

@@ -543,6 +543,34 @@ ColimaBar remembers the host ports of the containers of the profile, also of sto
 
 Colima forwards a published port once, when the container starts. If the proxy held port 80 at that moment, Colima could not forward port 80 of the container, and it does not try again. ColimaBar then moves the proxy to 8080 and shows a line under the switch: "web uses port 80. Restart web so its port 80 works on the Mac." It also adds an entry to the alerts list. Restart the container once. The line goes away when the container stops. To avoid the problem, publish the container on another host port, for example `-p 8000:80`.
 
+### HTTPS
+
+HTTPS is off by default. It needs **Open containers at .localhost names**. To turn it on, set **Use HTTPS with a local certificate authority** under that switch.
+
+1. ColimaBar makes a certificate authority (CA) for this Mac. macOS asks for your password or Touch ID one time, to trust it for you. Click **Cancel** to keep HTTPS off.
+2. The links of the containers then start with `https://`. Browsers show a lock.
+
+What the CA can and cannot sign:
+
+- It signs certificates for websites under `.localhost`, and for nothing else. Its certificate lists `localhost` as the only name that it may sign, and it excludes all IP addresses.
+- You trust it for websites only (the SSL policy of macOS). It cannot sign code, mail or anything else.
+- ColimaBar makes a short certificate (30 days) for each name when a browser asks for it. These certificates stay in memory.
+- The key of the CA is a file in `~/Library/Application Support/ColimaBar/domains`. Only your user can read it, and Time Machine skips it. The key is never in a keychain. Only the certificate of the CA is in your login keychain. Any process of your user can read the key file. A stolen key can sign only names under `.localhost`.
+
+To turn HTTPS off, clear the switch. macOS asks for your password one more time, to remove the trust. ColimaBar then deletes the certificate, the trust setting and the key file. Turn HTTPS on again to make a new CA. If you turn off **Open containers at .localhost names**, HTTPS stops, but the CA stays.
+
+HTTPS listens on port 443, or on port 8443 when 443 is busy or a container publishes it, running or stopped. The rules are the same as for port 80 and 8080, including the line that asks you to restart a container whose port 443 the HTTPS listener held when the container started. The caption under the switch shows the port. If macOS does not trust the CA, the caption says so and **Trust Again…** asks for the password again.
+
+Tools that use their own trust store need the certificate file. Click **Show Certificate** to show `ca.pem` in Finder. Then point the tool to it:
+
+- Node.js: `NODE_EXTRA_CA_CERTS=/path/to/ca.pem`
+- Python and `curl` builds that do not use macOS: `SSL_CERT_FILE=/path/to/ca.pem`
+- Python `requests`: `REQUESTS_CA_BUNDLE=/path/to/ca.pem`
+
+Firefox 119 and older, Homebrew `curl` and Java keep their own stores, so they need the file too. Firefox 120 and later trust the certificates of macOS.
+
+The proxy offers HTTP/1.1 only over HTTPS. The checks of the TLS setup run when HTTPS turns on. If the certificate for each name fails the check, ColimaBar serves one certificate for all names. The setting is not in the settings file, because turning it on needs your password.
+
 ### Error pages
 
 - **404**: no running container of the selected profile has this name. The page lists the names that work. For a host that does not end in `.localhost`, the page shows no list.
@@ -560,7 +588,7 @@ Colima forwards a published port once, when the container starts. If the proxy h
 - The proxy speaks HTTP/1.1 and splices the bytes, so WebSockets and server-sent events work. It does not speak HTTP/2.
 - The proxy reads the `Host` header of the first request on a connection only. Later requests on the same connection go to the same container, whatever their `Host`. A browser opens a new connection for each name, so this is rarely visible. A tool that reuses one connection for several names gets the container of the first name.
 - The proxy has no idle timeout after the request head. An open connection stays until one side closes it.
-- A debug run (screenshots) starts no proxy.
+- A debug run (screenshots) starts no proxy, makes no CA and changes no keychain or trust setting.
 - Other users of this Mac can reach the proxy on the loopback address, as they can reach a published port.
 
 ## Profiles

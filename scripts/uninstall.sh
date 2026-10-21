@@ -153,6 +153,15 @@ term_app() {
   return 0
 }
 
+# colimabar_ca_hashes KEYCHAIN -> the SHA-1 hashes (one for each line) of the
+# certificates in KEYCHAIN with "ColimaBar Local CA" in their name: the local
+# certificate authority of HTTPS for container domains.
+colimabar_ca_hashes() {
+  security find-certificate -a -Z -c "ColimaBar Local CA" "$1" 2>/dev/null \
+    | sed -n 's/^SHA-1 hash: \([0-9A-Fa-f]*\)$/\1/p'
+  return 0
+}
+
 # END helpers
 
 COLIMA_SOCK="$(colima_dir)/default/docker.sock"
@@ -233,6 +242,20 @@ done < <(command_link_dirs)
 # The same for each profile socket: link it to the Colima socket of its profile.
 link_profile_sockets ${PROFILE_NAMES[@]+"${PROFILE_NAMES[@]}"}
 defaults delete com.imohitkr.ColimaBar >/dev/null 2>&1
+
+# BEGIN ca removal: the tests run this block alone.
+# The local certificate authority of HTTPS for container domains. The folder
+# holds its key, so it goes first: the authority can never sign again. Then the
+# certificate and its user trust setting go. -t deletes the trust setting too,
+# and macOS can ask for your password.
+rm -rf "$HOME/Library/Application Support/ColimaBar" "$HOME/Library/Caches/com.imohitkr.ColimaBar"
+KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+while IFS= read -r hash; do
+  [ -n "$hash" ] || continue
+  security delete-certificate -t -Z "$hash" "$KEYCHAIN" >/dev/null 2>&1 \
+    || echo "Could not remove the ColimaBar certificate authority. Remove it in Keychain Access." >&2
+done < <(colimabar_ca_hashes "$KEYCHAIN")
+# END ca removal
 
 echo "ColimaBar removed. Docker clients now use Colima's socket: $COLIMA_SOCK"
 echo "$STABLE now links to Colima's socket, so a DOCKER_HOST that points at it keeps working."

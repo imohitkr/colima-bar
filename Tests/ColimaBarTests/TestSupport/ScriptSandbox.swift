@@ -26,6 +26,10 @@ import Foundation
 /// finds no process and logs nothing, so a real `colima start` on the Mac
 /// does not change a test.
 ///
+/// The stub `security` logs its arguments and changes no keychain. For
+/// `find-certificate` it prints `STUB_SECURITY_FIND`. `STUB_SECURITY_DELETE_EXIT`
+/// is the exit status of `delete-certificate` (default 0).
+///
 /// The stub `ps` answers `-o command= -p PID` and `-o etime= -p PID` from a
 /// table. It starts empty: no process runs. `stubProcesses(_:)` fills it, for
 /// the owner checks of the lock, the busy marker and the pid files of Lima.
@@ -95,6 +99,17 @@ final class ScriptSandbox {
             printf 'docker %s\\n' "$*" >> "\(log)"
             [ -n "${STUB_DOCKER_PROBE:-}" ] && [ -e "$STUB_DOCKER_PROBE" ] && printf 'docker saw marker\\n' >> "\(log)"
             exit "${STUB_DOCKER_EXIT:-0}"
+            """)
+        // The uninstall script looks for the certificate authority of HTTPS and deletes it.
+        try stub(
+            "security",
+            """
+            printf 'security %s\\n' "$*" >> "\(log)"
+            case "$1" in
+              find-certificate) [ -n "${STUB_SECURITY_FIND:-}" ] && printf '%s\\n' "$STUB_SECURITY_FIND"; exit 0 ;;
+              delete-certificate) exit "${STUB_SECURITY_DELETE_EXIT:-0}" ;;
+            esac
+            exit 0
             """)
         // colima-ctl.sh k8s on switches the kubectl context.
         try stub("kubectl", "printf 'kubectl %s\\n' \"$*\" >> \"\(log)\"\nexit 0")

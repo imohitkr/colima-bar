@@ -6,14 +6,24 @@ import os
 protocol DomainProxying: AnyObject, Sendable {
     var routes: DomainRoutes { get set }
     var onListenerFailure: (@Sendable () -> Void)? { get set }
+    /// Called when the HTTPS listener fails after it was ready. Only HTTPS has stopped then.
+    var onHTTPSListenerFailure: (@Sendable () -> Void)? { get set }
     var port: UInt16? { get }
+    var httpsPort: UInt16? { get }
     func start(candidates: [UInt16]) async -> UInt16?
+    /// Like `start`, for the HTTPS listener. `tls` makes the TLS options of one listener.
+    func startHTTPS(candidates: [UInt16], tls: @escaping @Sendable () -> NWProtocolTLS.Options) async -> UInt16?
+    /// Stops the HTTP and the HTTPS listener, and every session.
     func stop()
+    /// Stops the HTTPS listener and its sessions. The HTTP listener stays.
+    func stopHTTPS()
     /// True when nothing on this Mac accepts connections on `port`.
     func isFree(port: UInt16) async -> Bool
 }
 
-/// The HTTP proxy of container domains. It listens on 127.0.0.1 and ::1 only.
+/// The proxy of container domains. It listens on 127.0.0.1 and ::1 only, with
+/// an HTTP listener and, when HTTPS is on, a TLS listener of its own. Each
+/// listener (a `Front`) has its own port, start generation and close wait.
 /// It reads the head of each request, finds the route of its Host and then
 /// splices the bytes to `127.0.0.1:<published host port>` (`DomainSession`).
 /// A request never starts a VM: a stopped VM gets a 503 page.
@@ -50,17 +60,27 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
     private let table = OSAllocatedUnfairLock(initialState: DomainRoutes.empty)
     private let failureHandler = OSAllocatedUnfairLock<(@Sendable () -> Void)?>(initialState: nil)
 
+    private let httpsFailureHandler = OSAllocatedUnfairLock<(@Sendable () -> Void)?>(initialState: nil)
+
+    /// One listener pair (127.0.0.1 and ::1) with its own state. `queue` guards it.
+    private final class Front: @unchecked Sendable {
+        let isTLS: Bool
+        var listeners: [NWListener] = []
+        var generation = 0
+        var boundPort: UInt16?
+        /// The latest close of listeners. A new start waits for it, even after a stop.
+        var latestDrain: ListenerDrain?
+        /// The bind attempt that runs now. The next start or stop aborts it.
+        var currentAttempt: Attempt?
+        init(isTLS: Bool) { self.isTLS = isTLS }
+    }
+
     // Guarded by `queue`.
-    private var listeners: [NWListener] = []
+    private let httpFront = Front(isTLS: false)
+    private let httpsFront = Front(isTLS: true)
     private var sessions: [ObjectIdentifier: DomainSession] = [:]
-    private var generation = 0
-    private var boundPort: UInt16?
-    /// The latest close of listeners. A new start waits for it, even after `stop()`.
-    private var latestDrain: ListenerDrain?
-    /// The bind attempt that runs now. The next start or stop aborts it.
-    private var currentAttempt: Attempt?
     /// Connections that get the busy page. `stop()` cancels them.
-    private var rejects: [ObjectIdentifier: NWConnection] = [:]
+    private var rejects: [ObjectIdentifier: (connection: NWConnection, isTLS: Bool)] = [:]
 
     /// The proxy serves the local Mac only: any other address stops the app.
     convenience init(addresses: [String] = DomainProxy.loopbackAddresses, limits: Limits = .init()) {
@@ -88,34 +108,59 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
         set { failureHandler.withLock { $0 = newValue } }
     }
 
+    /// Called when the HTTPS listener fails after it was ready.
+    var onHTTPSListenerFailure: (@Sendable () -> Void)? {
+        get { httpsFailureHandler.withLock { $0 } }
+        set { httpsFailureHandler.withLock { $0 = newValue } }
+    }
+
     /// The port that the proxy listens on, or nil.
-    var port: UInt16? { queue.sync { boundPort } }
+    var port: UInt16? { queue.sync { httpFront.boundPort } }
+
+    /// The port of the HTTPS listener, or nil.
+    var httpsPort: UInt16? { queue.sync { httpsFront.boundPort } }
 
     var sessionCount: Int { queue.sync { sessions.count } }
 
     /// The port, for code that already runs on `queue`.
-    var portOnQueue: UInt16? { boundPort }
+    var portOnQueue: UInt16? { httpFront.boundPort }
+
+    /// The HTTPS port, for code that already runs on `queue`.
+    var httpsPortOnQueue: UInt16? { httpsFront.boundPort }
 
     /// Binds the first candidate that every address accepts. Returns it, or
     /// nil. A call replaces the listeners of an earlier start. `stop()`
     /// while a start runs makes the start return nil with nothing bound.
     func start(candidates: [UInt16]) async -> UInt16? {
+        await start(httpFront, candidates: candidates, tls: nil)
+    }
+
+    func startHTTPS(candidates: [UInt16], tls: @escaping @Sendable () -> NWProtocolTLS.Options) async -> UInt16? {
+        await start(httpsFront, candidates: candidates, tls: tls)
+    }
+
+    private func start(
+        _ front: Front, candidates: [UInt16], tls: (@Sendable () -> NWProtocolTLS.Options)?
+    ) async -> UInt16? {
         // A test process never binds a port that the user's own tools may serve.
-        let candidates = TestProcess.isRunning ? candidates.filter { ![80, 443, 8080].contains($0) } : candidates
+        let candidates =
+            TestProcess.isRunning ? candidates.filter { ![80, 443, 8080, 8443].contains($0) } : candidates
         let (gen, closing) = queue.sync { () -> (Int, ListenerDrain) in
-            generation += 1
-            return (generation, tearDownListeners())
+            front.generation += 1
+            return (front.generation, tearDownListeners(front))
         }
         // `cancel()` is asynchronous. A probe before the old socket is closed would find our own port busy.
         await waitForClose(closing)
         for candidate in candidates {
-            guard queue.sync(execute: { generation == gen }) else { return nil }
+            guard queue.sync(execute: { front.generation == gen }) else { return nil }
             if await isBusy(candidate) {
                 log.notice("port \(candidate, privacy: .public) is busy")
                 continue
             }
             let bound = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
-                queue.async { self.bind(candidate, generation: gen) { cont.resume(returning: $0) } }
+                queue.async {
+                    self.bind(candidate, front: front, generation: gen, tls: tls) { cont.resume(returning: $0) }
+                }
             }
             if bound {
                 log.notice("listening on port \(candidate, privacy: .public)")
@@ -182,8 +227,16 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
         queue.sync { stopOnQueue() }
     }
 
+    /// Cancels the HTTPS listener and the sessions that use it.
+    func stopHTTPS() {
+        queue.sync { stopFront(httpsFront) }
+    }
+
     /// For tests: acts as if a ready listener failed.
-    func simulateListenerFailure() { queue.sync { listenerFailed() } }
+    func simulateListenerFailure() { queue.sync { listenerFailed(httpFront) } }
+
+    /// For tests: acts as if the ready HTTPS listener failed.
+    func simulateHTTPSListenerFailure() { queue.sync { listenerFailed(httpsFront) } }
 
     /// The connections that wait to get the busy page.
     var rejectCount: Int { queue.sync { rejects.count } }
@@ -196,27 +249,37 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
     // MARK: - Queue only
 
     private func stopOnQueue() {
-        generation += 1
-        tearDownListeners()
-        let open = Array(sessions.values)
-        sessions = [:]
-        for s in open { s.cancel() }
-        let pending = Array(rejects.values)
-        rejects = [:]
-        for c in pending { c.cancel() }
+        stopFront(httpFront)
+        stopFront(httpsFront)
+    }
+
+    /// Cancels the listeners of `front` and the sessions and busy pages that use them.
+    private func stopFront(_ front: Front) {
+        front.generation += 1
+        tearDownListeners(front)
+        let open = sessions.filter { $0.value.isTLS == front.isTLS }
+        for (key, session) in open {
+            sessions[key] = nil
+            session.cancel()
+        }
+        let pending = rejects.filter { $0.value.isTLS == front.isTLS }
+        for (key, reject) in pending {
+            rejects[key] = nil
+            reject.connection.cancel()
+        }
     }
 
     /// Cancels the bound listeners and the ones of a bind that runs now. The
     /// drain also waits for an earlier drain, so a start after a stop waits too.
     @discardableResult
-    private func tearDownListeners() -> ListenerDrain {
-        var closing = listeners
-        if let attempt = currentAttempt {
+    private func tearDownListeners(_ front: Front) -> ListenerDrain {
+        var closing = front.listeners
+        if let attempt = front.currentAttempt {
             closing += attempt.listeners.map(\.listener)
             attempt.abort?()
         }
         let drain = ListenerDrain(closing.count)
-        if let previous = latestDrain, previous.remaining > 0 {
+        if let previous = front.latestDrain, previous.remaining > 0 {
             drain.remaining += 1
             previous.notify { [drain] in drain.listenerClosed() }
         }
@@ -226,9 +289,9 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
             }
             l.cancel()
         }
-        listeners = []
-        boundPort = nil
-        latestDrain = drain
+        front.listeners = []
+        front.boundPort = nil
+        front.latestDrain = drain
         return drain
     }
 
@@ -243,24 +306,29 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
         var abort: (@Sendable () -> Void)?
     }
 
-    private func bind(_ port: UInt16, generation gen: Int, completion: @escaping @Sendable (Bool) -> Void) {
-        guard generation == gen, let endpointPort = NWEndpoint.Port(rawValue: port) else { return completion(false) }
+    private func bind(
+        _ port: UInt16, front: Front, generation gen: Int, tls: (@Sendable () -> NWProtocolTLS.Options)?,
+        completion: @escaping @Sendable (Bool) -> Void
+    ) {
+        guard front.generation == gen, let endpointPort = NWEndpoint.Port(rawValue: port) else {
+            return completion(false)
+        }
         let attempt = Attempt()
-        currentAttempt = attempt
+        front.currentAttempt = attempt
 
         @Sendable func finish(_ success: Bool) {
             guard !attempt.done else { return }
             attempt.done = true
             attempt.timeout?.cancel()
             attempt.abort = nil
-            if currentAttempt === attempt { currentAttempt = nil }
-            if success, generation == gen {
+            if front.currentAttempt === attempt { front.currentAttempt = nil }
+            if success, front.generation == gen {
                 var held: [NWListener] = []
                 for (address, listener) in attempt.listeners {
                     if attempt.unavailable.contains(address) { listener.cancel() } else { held.append(listener) }
                 }
-                listeners = held
-                boundPort = port
+                front.listeners = held
+                front.boundPort = port
                 completion(true)
             } else {
                 for (_, listener) in attempt.listeners { listener.cancel() }
@@ -293,7 +361,7 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
             attempt.states[address] = .setup
             let tcp = NWProtocolTCP.Options()
             tcp.noDelay = true
-            let parameters = NWParameters(tls: nil, tcp: tcp)
+            let parameters = NWParameters(tls: tls?(), tcp: tcp)
             parameters.allowLocalEndpointReuse = true
             (parameters.defaultProtocolStack.internetProtocol as? NWProtocolIP.Options)?.version =
                 address.contains(":") ? .v6 : .v4
@@ -302,20 +370,24 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
                 for (_, l) in attempt.listeners { l.cancel() }
                 attempt.done = true
                 attempt.abort = nil
-                if currentAttempt === attempt { currentAttempt = nil }
+                if front.currentAttempt === attempt { front.currentAttempt = nil }
                 return completion(false)
             }
             attempt.listeners.append((address, listener))
             listener.stateUpdateHandler = { [weak self, weak listener] state in
                 guard let self, let listener else { return }
                 if attempt.done {
-                    if case .failed = state, listeners.contains(where: { $0 === listener }) { listenerFailed() }
+                    if case .failed = state, front.listeners.contains(where: { $0 === listener }) {
+                        listenerFailed(front)
+                    }
                     return
                 }
                 attempt.states[address] = state
                 evaluate()
             }
-            listener.newConnectionHandler = { [weak self] connection in self?.accept(connection, generation: gen) }
+            listener.newConnectionHandler = { [weak self] connection in
+                self?.accept(connection, front: front, generation: gen)
+            }
             listener.start(queue: queue)
         }
         let timeout = DispatchWorkItem { finish(false) }
@@ -328,19 +400,19 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
         return false
     }
 
-    private func listenerFailed() {
+    private func listenerFailed(_ front: Front) {
         log.error("a listener failed")
-        stopOnQueue()
-        onListenerFailure?()
+        stopFront(front)
+        if front.isTLS { onHTTPSListenerFailure?() } else { onListenerFailure?() }
     }
 
-    private func accept(_ connection: NWConnection, generation gen: Int) {
+    private func accept(_ connection: NWConnection, front: Front, generation gen: Int) {
         // A listener of an old start, or one that stop() cancelled, may still deliver a queued connection.
-        guard gen == generation, boundPort != nil else { return connection.cancel() }
+        guard gen == front.generation, front.boundPort != nil else { return connection.cancel() }
         guard sessions.count < limits.maxSessions else {
             guard rejects.count < limits.maxSessions else { return connection.cancel() }
             let key = ObjectIdentifier(connection)
-            rejects[key] = connection
+            rejects[key] = (connection, front.isTLS)
             connection.start(queue: queue)
             FinalPage(connection: connection, queue: queue, grace: limits.pageGrace) { [weak self] in
                 self?.rejects[key] = nil
@@ -348,7 +420,8 @@ final class DomainProxy: DomainProxying, @unchecked Sendable {
             }.run(DomainPage.response(.busy, headOnly: false))
             return
         }
-        let session = DomainSession(client: connection, proxy: self, queue: queue, limits: limits)
+        let session = DomainSession(
+            client: connection, proxy: self, queue: queue, limits: limits, isTLS: front.isTLS)
         sessions[ObjectIdentifier(session)] = session
         session.start()
     }

@@ -24,5 +24,34 @@ struct DomainsSection: View {
                 .foregroundStyle(Color.orange)
                 .padding(.leading, 22)
         }
+        Toggle(isOn: Binding(get: { model.httpsEnabled }, set: { model.setHTTPS($0) })) {
+            Label("Use HTTPS with a local certificate authority", systemImage: "lock")
+        }
+        .hint(Help.domainsHTTPS)
+        .disabled(
+            !model.domainsEnabled || model.isDebug || model.domainStatus.https.phase == .settingUp
+                || model.domainStatus.https.phase == .removing
+        )
+        .padding(.leading, 22)
+        if let caption = model.domainStatus.https.caption {
+            Text(caption)
+                .font(.caption2)
+                .foregroundStyle(
+                    model.domainStatus.https.phase == .failed || model.domainStatus.https.phase == .untrusted
+                        ? Color.orange : .secondary
+                )
+                .padding(.leading, 44)
+        }
+        if model.domainStatus.https.phase == .untrusted {
+            Button("Trust Again…") { model.trustCAAgain() }
+                .hint(Help.domainsTrustAgain)
+                .padding(.leading, 44)
+        }
+        if model.caExists {
+            Button("Show Certificate") { model.showCACertificate() }
+                .hint(Help.domainsShowCA)
+                .disabled(model.isDebug)
+                .padding(.leading, 44)
+        }
     }
 }

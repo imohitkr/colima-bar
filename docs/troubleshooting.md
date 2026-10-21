@@ -73,6 +73,27 @@ The name exists, but nothing answers on the published port. Do these steps:
 3. If the app listens on another port, set the label `dev.colimabar.port` on the container.
 4. If **Published ports stop answering** shows on the dashboard, the port forward is broken. See [Published ports stop answering](#published-ports-stop-answering).
 
+## The browser warns about the certificate
+
+The proxy serves HTTPS with a certificate that the local certificate authority of ColimaBar signed. A warning means that your browser does not trust that authority. Do these steps:
+
+1. Open the System tab. If the caption under **Use HTTPS with a local certificate authority** says that macOS does not trust the certificate authority, click **Trust Again…** and type your password.
+2. Open `https://web.localhost` or another name of a container. The name must end in `.localhost`. An IP address, or a name outside `.localhost`, always gets a warning.
+3. Firefox 119 and older keep their own certificates. Update Firefox, or import `ca.pem` in its settings. **Show Certificate** shows the file.
+4. If the toggle shows an error, turn HTTPS off and on again. This makes a new certificate authority.
+
+If you cancelled the password dialog, HTTPS stays off. Turn it on again and type your password.
+
+## Node or Python reject the certificate
+
+Node.js, Python and other tools use their own list of trusted authorities, not the one of macOS. Click **Show Certificate** on the System tab to show `ca.pem`. Then set one of these variables to its path, and start the tool again:
+
+- `NODE_EXTRA_CA_CERTS` for Node.js.
+- `SSL_CERT_FILE` for Python and OpenSSL based tools.
+- `REQUESTS_CA_BUNDLE` for the Python `requests` library.
+
+The certificate is valid only for names under `.localhost`. A tool that connects to `127.0.0.1` fails the check, because the certificate authority excludes IP addresses. Use the name of the container.
+
 ## The domain links say :8080
 
 Port 80 is busy, or a running container publishes it. The proxy of container domains then listens on port 8080. The caption under **Open containers at .localhost names** says so. To use port 80, stop the app or the container that uses it. ColimaBar goes back to port 80 by itself when the port is free, after a change of the containers or a wake.
@@ -82,6 +103,10 @@ Port 80 is busy, or a running container publishes it. The proxy of container dom
 You started a container with `-p 80:8000` while the proxy of container domains listened on port 80. Colima forwards a port only when the container starts. It could not forward port 80, because the proxy used it, and it does not try again. ColimaBar moved the proxy to 8080, but the port of the container stays closed. The System tab shows "Restart <container> so its port 80 works on the Mac."
 
 Restart the container once. The proxy stays on 8080 while a container, running or stopped, publishes port 80, so the next start works. To keep port 80 for your containers, turn off **Open containers at .localhost names**, or publish the container on another host port.
+
+## The domain links say :8443
+
+Port 443 is busy, or a container, running or stopped, publishes it. The HTTPS listener then uses port 8443. The caption under **Use HTTPS with a local certificate authority** says so. ColimaBar goes back to port 443 by itself when the port is free. If a container started while HTTPS held port 443, the System tab asks you to restart that container once, like for port 80.
 
 ## Names do not resolve in containers
 

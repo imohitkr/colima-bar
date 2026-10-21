@@ -180,6 +180,80 @@ import Testing
         #expect(r.out == "kill -TERM 100\n")
     }
 
+    // MARK: - The certificate authority of HTTPS
+
+    private let foundTwice =
+        "SHA-256 hash: AAAA\nSHA-1 hash: 0123456789ABCDEF0123456789ABCDEF01234567\nkeychain: \"x\"\nSHA-256 hash: BBBB\nSHA-1 hash: FEDCBA9876543210FEDCBA9876543210FEDCBA98"
+
+    @Test func theCAHashesComeFromTheOutputOfSecurity() async throws {
+        let sb = try ScriptSandbox()
+        let r = try await sb.bash(
+            ["-c", "set -uo pipefail; . '\(try helpers(sb))'; colimabar_ca_hashes /some/keychain"],
+            env: ["STUB_SECURITY_FIND": foundTwice])
+        #expect(
+            r.out.split(separator: "\n") == [
+                "0123456789ABCDEF0123456789ABCDEF01234567", "FEDCBA9876543210FEDCBA9876543210FEDCBA98",
+            ])
+        #expect(sb.calls == ["security find-certificate -a -Z -c ColimaBar Local CA /some/keychain"])
+        // No certificate: no hash and no error.
+        let none = try await sb.bash(["-c", "set -uo pipefail; . '\(try helpers(sb))'; colimabar_ca_hashes /k"])
+        #expect(none.status == 0 && none.out.isEmpty)
+    }
+
+    /// The block of the script that removes the certificate authority.
+    private func removalBlock(_ sb: ScriptSandbox) throws -> String {
+        let text = try script()
+        let start = try #require(text.range(of: "# BEGIN ca removal"))
+        let end = try #require(text.range(of: "# END ca removal"))
+        let path = sb.root + "/removal.sh"
+        try String(text[start.lowerBound..<end.upperBound]).write(toFile: path, atomically: true, encoding: .utf8)
+        return path
+    }
+
+    private func runRemoval(_ sb: ScriptSandbox, env: [String: String] = [:]) async throws -> (
+        status: Int32, out: String
+    ) {
+        try await sb.bash(
+            ["-c", "set -uo pipefail; . '\(try helpers(sb))'; . '\(try removalBlock(sb))'"],
+            env: ["STUB_SECURITY_FIND": foundTwice].merging(env) { $1 })
+    }
+
+    @Test func theScriptDeletesTheCertificateAndItsTrustAndTheFolders() async throws {
+        let sb = try ScriptSandbox()
+        try sb.write("Library/Application Support/ColimaBar/domains/ca-key.raw", "key")
+        try sb.write("Library/Caches/com.imohitkr.ColimaBar/tls/tls-1.keychain-db", "kc")
+        try sb.write("Library/Application Support/Other/keep.txt", "keep")
+        let r = try await runRemoval(sb)
+        #expect(r.status == 0)
+        let keychain = sb.home + "/Library/Keychains/login.keychain-db"
+        #expect(
+            sb.calls == [
+                "security find-certificate -a -Z -c ColimaBar Local CA \(keychain)",
+                "security delete-certificate -t -Z 0123456789ABCDEF0123456789ABCDEF01234567 \(keychain)",
+                "security delete-certificate -t -Z FEDCBA9876543210FEDCBA9876543210FEDCBA98 \(keychain)",
+            ])
+        let fm = FileManager.default
+        #expect(!fm.fileExists(atPath: sb.home + "/Library/Application Support/ColimaBar"))
+        #expect(!fm.fileExists(atPath: sb.home + "/Library/Caches/com.imohitkr.ColimaBar"))
+        #expect(fm.fileExists(atPath: sb.home + "/Library/Application Support/Other/keep.txt"))
+    }
+
+    @Test func theKeyGoesEvenWhenSecurityCannotDeleteTheCertificate() async throws {
+        let sb = try ScriptSandbox()
+        try sb.write("Library/Application Support/ColimaBar/domains/ca-key.raw", "key")
+        let r = try await runRemoval(sb, env: ["STUB_SECURITY_DELETE_EXIT": "1"])
+        #expect(r.status == 0)
+        #expect(!FileManager.default.fileExists(atPath: sb.home + "/Library/Application Support/ColimaBar"))
+        #expect(sb.calls.filter { $0.contains("delete-certificate") }.count == 2)
+    }
+
+    @Test func theRemovalDeletesTheKeyBeforeItAsksSecurity() throws {
+        let text = try script()
+        let rm = try #require(text.range(of: "rm -rf \"$HOME/Library/Application Support/ColimaBar\""))
+        let del = try #require(text.range(of: "security delete-certificate -t -Z"))
+        #expect(rm.lowerBound < del.lowerBound)
+    }
+
     @Test func theScriptUsesTheHelpers() throws {
         let text = try script()
         // It switches away from and removes only colimabar and the contexts of colimabar_contexts.

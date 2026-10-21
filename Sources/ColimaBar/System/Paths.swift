@@ -38,6 +38,11 @@ enum Paths {
         if let dir = env["DOCKER_CONFIG"], !dir.isEmpty { return "\(dir)/config.json" }
         return "\(home)/.docker/config.json"
     }
+    /// The files of the local certificate authority of HTTPS for container
+    /// domains (`LocalCAStore`).
+    static let domainsDir = "\(home)/Library/Application Support/ColimaBar/domains"
+    /// The temporary keychains of the TLS identities (`FileKeychainIdentityProvider`).
+    static let tlsCacheDir = "\(home)/Library/Caches/com.imohitkr.ColimaBar/tls"
     static let testcontainersProps = "\(home)/.testcontainers.properties"
 
     /// The Colima folder and Lima's folder of the Colima instances.

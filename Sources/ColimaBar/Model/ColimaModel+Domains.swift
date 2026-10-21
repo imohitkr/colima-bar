@@ -14,6 +14,8 @@ struct DomainTimings: Sendable {
     var failureRetry: TimeInterval = 5
     /// How long the proxy waits before it moves again for a port.
     var rebindGap: TimeInterval = ColimaModel.domainRebindGap
+    /// How long the fallback mode of HTTPS waits after a route change before it makes a new certificate.
+    var multiSANDebounce: TimeInterval = 2
 
     /// The wait before try `attempt` (0 is the first) of a failed proxy.
     func failureDelay(attempt: Int) -> TimeInterval {
@@ -39,6 +41,9 @@ extension ColimaModel {
     /// service on port 80. A debug run shows links with port 80.
     func domainURL(_ relative: String) -> URL? {
         let port: UInt16
+        if !isDebug, domainStatus.https.phase == .running, let httpsPort = domainStatus.https.port {
+            return DomainLink.url(relative: relative, suffix: primaryDomainSuffix, secure: true, port: httpsPort)
+        }
         if isDebug {
             port = 80
         } else if domainStatus.phase == .running {
@@ -94,6 +99,17 @@ extension ColimaModel {
         guard !isDebug else { return }
         domainProxy.routes = table
         reviewDomainProxy(published: table.publishedHostPorts)
+        reviewHTTPS(published: table.publishedHostPorts)
+        syncMultiSANLeaf()
+    }
+
+    /// Sets the HTTP part of the status. HTTPS keeps its own part.
+    func setDomainHTTPStatus(phase: DomainStatus.Phase, httpPort: UInt16? = nil, problem: String? = nil) {
+        var status = domainStatus
+        status.phase = phase
+        status.httpPort = httpPort
+        status.problem = problem
+        setDomainStatus(status)
     }
 
     /// The ports that the proxy must not use: the ports of the running containers,
@@ -102,7 +118,7 @@ extension ColimaModel {
 
     /// The proxy holds a port that a running container publishes. Lima did not
     /// forward that port. Tell the user to restart the container, once for each container.
-    private func noteDomainConflict(port: Int) {
+    func noteDomainConflict(port: Int) {
         let known = Set(domainRestartHints.map(\.id))
         let fresh = domainClaims.runningHolders(of: port).filter { !known.contains($0.id) }
         guard !fresh.isEmpty else { return }
@@ -142,7 +158,10 @@ extension ColimaModel {
         if domainsEnabled {
             rebuildDomainRoutes()
             startDomainProxy()
+            startHTTPSAtLaunch()
         } else {
+            // The master switch off stops HTTPS but keeps the certificate authority.
+            tearDownHTTPS()
             stopDomainProxy()
             rebuildDomainRoutes()
         }
@@ -156,7 +175,7 @@ extension ColimaModel {
         domainStartToken += 1
         let token = domainStartToken
         domainStartPublished = domainBlockedPorts
-        setDomainStatus(DomainStatus(phase: .starting))
+        setDomainHTTPStatus(phase: .starting)
         let candidates = DomainPorts.candidates(DomainPorts.http, published: domainStartPublished)
         guard !candidates.isEmpty else {
             domainProxy.stop()
@@ -189,7 +208,7 @@ extension ColimaModel {
             guard token == domainStartToken else { return }
             if let port {
                 domainRetryCount = 0
-                setDomainStatus(DomainStatus(phase: .running, httpPort: port))
+                setDomainHTTPStatus(phase: .running, httpPort: port)
                 // A container may have published the port while the proxy started.
                 if Self.domainConflictPort(status: domainStatus, published: domainRoutes.publishedHostPorts) {
                     if let port = domainStatus.httpPort { noteDomainConflict(port: Int(port)) }
@@ -280,7 +299,9 @@ extension ColimaModel {
     /// The listener normally survives a sleep. Start it again if it is gone.
     /// A proxy on the fallback port goes back to port 80 when that is free.
     func domainsAfterWake() {
-        guard !isDebug, domainsEnabled, domainStatus.phase != .starting else { return }
+        guard !isDebug, domainsEnabled else { return }
+        httpsAfterWake()
+        guard domainStatus.phase != .starting else { return }
         if domainProxy.port == nil {
             startDomainProxy()
         } else {
@@ -290,6 +311,7 @@ extension ColimaModel {
 
     /// The heartbeat calls it. A proxy on the fallback port looks for a free port 80, at most once in a rebind gap.
     func domainsHeartbeat() {
+        httpsHeartbeat()
         guard !isDebug, domainsEnabled, domainStatus.phase == .running, domainStatus.usesFallback,
             Date().timeIntervalSince(domainMoveBackAt) >= domainTimings.rebindGap
         else { return }
@@ -307,7 +329,7 @@ extension ColimaModel {
     /// Shows the failure and plans the next try: after 5 s, 15 s, 60 s, then each 5 min.
     /// A change of the container ports, a wake or a new start also tries.
     private func setDomainFailed(_ problem: String) {
-        setDomainStatus(DomainStatus(phase: .failed, problem: problem))
+        setDomainHTTPStatus(phase: .failed, problem: problem)
         domainRetry?.cancel()
         let delay = domainTimings.failureDelay(attempt: domainRetryCount)
         domainRetryCount += 1

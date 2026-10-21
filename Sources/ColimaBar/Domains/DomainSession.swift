@@ -10,6 +10,8 @@ final class DomainSession: @unchecked Sendable {
     private let proxy: DomainProxy
     private let queue: DispatchQueue
     private let limits: DomainProxy.Limits
+    /// True for a client of the HTTPS listener.
+    let isTLS: Bool
     private let log = Logger(category: "domains")
 
     private var head: [UInt8] = []
@@ -24,7 +26,8 @@ final class DomainSession: @unchecked Sendable {
     private var clientReadEnded = false
     private var upstreamHalfClosed = false
 
-    init(client: NWConnection, proxy: DomainProxy, queue: DispatchQueue, limits: DomainProxy.Limits) {
+    init(client: NWConnection, proxy: DomainProxy, queue: DispatchQueue, limits: DomainProxy.Limits, isTLS: Bool) {
+        self.isTLS = isTLS
         self.client = client
         self.proxy = proxy
         self.queue = queue
@@ -97,10 +100,12 @@ final class DomainSession: @unchecked Sendable {
             respond(.foreign, headOnly: request.isHead)
         case .unknown:
             let host = request.host.flatMap(DomainName.normalizedHost) ?? ""
-            let port = proxy.portOnQueue.flatMap { $0 == 80 ? nil : ":\($0)" } ?? ""
+            let own = isTLS ? proxy.httpsPortOnQueue : proxy.portOnQueue
+            let port = own.flatMap { $0 == (isTLS ? 443 : 80) ? nil : ":\($0)" } ?? ""
             let suffix = table.suffixes.first ?? DomainName.localhost
             let known = table.routes.keys.sorted().map { DomainLink.host(relative: $0, suffix: suffix) + port }
-            respond(.notFound(host: host, profile: table.profile, known: known), headOnly: request.isHead)
+            respond(
+                .notFound(host: host, profile: table.profile, known: known, secure: isTLS), headOnly: request.isHead)
         case .vmStopped:
             respond(.vmStopped(profile: table.profile), headOnly: request.isHead)
         case .route(let route):
@@ -127,7 +132,7 @@ final class DomainSession: @unchecked Sendable {
         else { return respond(.badRequest, headOnly: false) }
         let host = request.host.flatMap(DomainName.normalizedHost) ?? "localhost"
         // A route to the port of the proxy would make the proxy dial itself until it is full.
-        if let own = proxy.portOnQueue, Int(own) == route.hostPort {
+        if [proxy.portOnQueue, proxy.httpsPortOnQueue].contains(where: { $0.map(Int.init) == route.hostPort }) {
             return respond(
                 .selfLoop(host: host, container: route.containerName, hostPort: route.hostPort),
                 headOnly: request.isHead)
