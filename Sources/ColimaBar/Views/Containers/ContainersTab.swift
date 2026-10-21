@@ -23,6 +23,8 @@ struct ContainersTab: View {
                     if let project = g.project {
                         if model.isMuted(project: project) {
                             IconButton("bell.slash", Help.projectMuted) { model.setMuted(false, project: project) }
+                        } else {
+                            IconButton("bell", Help.muteProject) { model.setMuted(true, project: project) }
                         }
                         IconButton("play.fill", "Start all in \(project)") { model.project(project, .start) }
                         IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, .restart) }

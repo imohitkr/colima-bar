@@ -94,7 +94,7 @@ A spinner shows while docker compose runs for the project. If it fails, a notifi
 
 #### Mute a Compose project
 
-To stop the banners of one project, right-click its header and choose **Mute Alerts**. A bell icon with a slash shows in the header. Click it, or choose **Unmute Alerts**, to send banners again. The mute stops only the banner and the sound. The Containers tab still lists the alerts of the project. ColimaBar keeps the mute for each profile and project on this Mac. The settings file does not hold it. ColimaBar keeps up to 200 mutes.
+To stop the banners of one project, click the bell icon in its header. You can also right-click the header and choose **Mute Alerts**. The bell then shows a slash. Click it again, or choose **Unmute Alerts**, to send banners again. The mute stops only the banner and the sound. The Containers tab still lists the alerts of the project. ColimaBar keeps the mute for each profile and project on this Mac. The settings file does not hold it. ColimaBar keeps up to 200 mutes.
 
 ### Images and Volumes tabs
 

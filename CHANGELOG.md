@@ -9,7 +9,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Added
 
 - Restart-loop alert. A container that exits 3 times in 5 minutes sends one "keeps restarting" notification. It then sends no crash alerts until it runs 10 minutes without an exit, or becomes healthy. In a loop, out-of-memory and unhealthy alerts are silent for 5 minutes after the last exit.
-- **Mute Alerts** for a Compose project (right-click its header). The banner stops. The dashboard still lists the alerts.
+- **Mute alerts** for a Compose project with the bell icon in its header, or right-click the header. The banner stops. The dashboard still lists the alerts.
 - Optional notification when a container is healthy again (off by default). The settings file has it.
 - Cleanup page. On the System tab, click **Clean Up…** in **Disk usage**. The page lists the largest images, unused volumes, stopped containers, build cache entries and container log files, each with its size. Remove an item, or empty a log, with one click. ColimaBar asks first. See [Clean up disk space](docs/usage.md#clean-up-disk-space).
 - **Return Free Space** runs fstrim in the VM, so the disk image on the Mac gets smaller. The notification gives the size before and after.
