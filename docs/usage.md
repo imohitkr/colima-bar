@@ -92,6 +92,10 @@ For a container that docker compose started, ColimaBar reads the project folder 
 
 A spinner shows while docker compose runs for the project. If it fails, a notification gives the exit code. It shows no output, because the output can hold secrets. Use **Copy Last Output** to read it. After 15 minutes, ColimaBar stops docker compose and says so. The buttons are off if the docker CLI is missing, if the Compose files are gone (the folder moved or was deleted), and in a debug run. Doctor checks the docker CLI and the compose plugin (**Docker plugins**).
 
+#### Mute a Compose project
+
+To stop the banners of one project, click the bell icon in its header. You can also right-click the header and choose **Mute Alerts**. The bell then shows a slash. Click it again, or choose **Unmute Alerts**, to send banners again. The mute stops only the banner and the sound. The Containers tab still lists the alerts of the project. ColimaBar keeps the mute for each profile and project on this Mac. The settings file does not hold it. ColimaBar keeps up to 200 mutes.
+
 ### Images and Volumes tabs
 
 These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, remove unused volumes, and back up and restore volumes. See [Back up and restore volumes](#back-up-and-restore-volumes). ColimaBar asks before it deletes volume data.
@@ -141,7 +145,7 @@ If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-res
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
 - **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Profiles**: shown only when you have more than one profile.
-- **App**: the daily update check, crash notifications, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
+- **App**: the daily update check, crash notifications, **Notify when a container is healthy again after an alert**, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
 
 ### VM settings
 
@@ -282,7 +286,7 @@ If the VM was stopped, Colima must start it once to create the new disk. Thus Co
 
 Use these buttons to copy your ColimaBar settings to a different Mac.
 
-**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup and the keyboard shortcut. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup and the keyboard shortcut. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 
@@ -412,6 +416,8 @@ To show the icon while Colima is stopped, press the dashboard shortcut, open Col
 ColimaBar sends few notifications. It sends one in these cases:
 
 - A container exits with an error code, gets OOM-killed or becomes unhealthy. The notification has **View logs** and **Restart** buttons.
+- A container keeps restarting (see below).
+- A container is healthy again, if you turn on the option (see below).
 - An action fails.
 - Auto-start started a profile after a Colima or Lima upgrade. A click opens the release notes. See [Upgrade warning](#upgrade-warning).
 - A Doctor fix of the docker context, the routes or the docker config file ends. The notification gives the result. The Doctor checks send none.
@@ -426,7 +432,23 @@ ColimaBar sends few notifications. It sends one in these cases:
 - A docker compose command fails, or ColimaBar stops it after 15 minutes. The notification gives the exit code, not the output. See [Compose projects](#compose-projects).
 - A published port answers in the VM but not on the Mac, or the VM cannot resolve host names while the Mac can. The notification has a **Restart** button. See [When the network changes](#when-the-network-changes).
 
-ColimaBar sends no notification for a normal start or stop. Exit codes 130, 137 and 143 (SIGINT, SIGKILL and SIGTERM) count as a normal stop, so they send no crash alert. ColimaBar also ignores testcontainers containers. For one container and one kind of failure, it sends at most one notification each 10 minutes.
+ColimaBar sends no notification for a normal start or stop. These count as a normal stop and send no crash alert:
+
+- Exit codes 130, 137 and 143 (SIGINT, SIGKILL and SIGTERM).
+- Any exit in the 2 minutes after a stop signal (SIGHUP, SIGINT, SIGQUIT, SIGKILL or SIGTERM), and any exit in the 15 seconds after another signal. This includes a stop from a terminal or from Compose.
+- Any exit while an action of the selected profile stops the containers (stop, restart, a change of VM settings or disk, or a repair), and in the 30 seconds after it. ColimaBar checks an unhealthy alert from this time again when the time ends.
+
+ColimaBar also ignores testcontainers containers. For one container and one kind of failure, it sends at most one notification each 10 minutes.
+
+A container that keeps restarting sends one alert: **Keeps restarting**. The first error exit sends a crash alert as usual. A second error exit sends none if the first one did. The third exit in 5 minutes sends the **Keeps restarting** alert. After that, the container sends no crash alerts until it runs 10 minutes without an exit, or until it becomes healthy. While a container is in a restart loop, ColimaBar sends no out-of-memory or unhealthy alert in the 5 minutes after its last exit. An out-of-memory alert right before the loop starts (after two exits in 5 minutes) is also silent, because the **Keeps restarting** alert follows. Every exit counts, even exit code 0 or 137. An exit in a stop window or during a VM action does not count.
+
+The unhealthy alert waits up to 3 minutes after a start. If the container is healthy by then, ColimaBar sends nothing.
+
+If ColimaBar shows no unhealthy banner (the project is muted, or the 10-minute limit applies), it shows no **Healthy again** banner either.
+
+To stop the banners of one Compose project, see [Mute a Compose project](#mute-a-compose-project).
+
+To get a notification when a container is healthy again after an unhealthy alert, turn on **Notify when a container is healthy again after an alert** on the System tab. It is off by default. It works only while crash notifications are on.
 
 The Containers tab also lists recent alerts. If notifications are off for ColimaBar, the alerts show only there. To turn them on, click **Enable…**, or open **System Settings > Notifications > ColimaBar** and turn on **Allow Notifications**.
 

@@ -84,6 +84,15 @@ import Testing
         #expect(ColimaModel.reaction(type: "network", action: "prune").isEmpty)
     }
 
+    /// The alert gate reads a stop from the `kill` event and a start from
+    /// the `start` event. Both must pass the filter.
+    @Test func stopSignalAndStartEventsPassTheFilter() throws {
+        for a in ["kill", "start", "die", "destroy", "oom", "health_status: unhealthy", "health_status: healthy"] {
+            #expect(!ColimaModel.reaction(type: "container", action: a).isEmpty, "\(a)")
+            #expect(try filterPasses("container", a), "\(a)")
+        }
+    }
+
     @Test func streamThreadDropsExecAndTop() {
         #expect(ColimaModel.ignores(action: "exec_start: /bin/sh -c curl"))
         #expect(ColimaModel.ignores(action: "top"))
@@ -102,5 +111,33 @@ import Testing
             #expect(!ColimaModel.reaction(type: "container", action: a).contains(.savedLogs), "\(a)")
         }
         #expect(!ColimaModel.reaction(type: "image", action: "delete").contains(.savedLogs))
+    }
+
+    @MainActor @Test func muteUsesTheCurrentProfile() {
+        let saved = Defaults.strings(.mutedProjects)
+        defer {
+            if let saved { Defaults.set(saved, .mutedProjects) } else { Defaults.remove(.mutedProjects) }
+        }
+        let model = ColimaModel(profile: "mute-test-a", readOnly: true)
+        model.mutedProjects = []
+        #expect(model.muteKey(project: "web") == "mute-test-a/web")
+        #expect(model.muteKey(project: nil) == nil)
+        #expect(model.muteKey(project: "") == nil)
+        model.setMuted(true, project: "web")
+        #expect(model.isMuted(project: "web"))
+        #expect(!model.isMuted(project: "api"))
+        #expect(model.mutedProjects == ["mute-test-a/web"])
+        model.setMuted(false, project: "web")
+        #expect(!model.isMuted(project: "web"))
+    }
+
+    @MainActor @Test func destroyEndsAWaitingUnhealthyCheck() {
+        let model = ColimaModel(profile: "destroy-test", readOnly: true)
+        model.deferredUnhealthy["a"] = UUID()
+        model.deferredUnhealthy["b"] = UUID()
+        let ev = DockerEvent(Type: "container", Action: "destroy", Actor: .init(ID: "a", Attributes: nil))
+        model.reactToContainerEvent(ev, attrs: [:], notify: true)
+        #expect(model.deferredUnhealthy["a"] == nil)
+        #expect(model.deferredUnhealthy["b"] != nil)
     }
 }

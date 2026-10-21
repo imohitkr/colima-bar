@@ -274,7 +274,14 @@ enum Help {
     static let updateInProgress =
         "ColimaBar is installing an update. Wait until it ends, or click the cross at the bottom of the dashboard to stop it."
     static let notify =
-        "Send an alert when a container exits with an error, runs out of memory or fails its healthcheck. ColimaBar ignores testcontainers containers. Failed actions always send an alert."
+        "Send an alert when a container exits with an error, runs out of memory or fails its healthcheck. A container that keeps restarting gives one alert, not one for each restart. ColimaBar sends no alert for a stop that you or Compose ask for. An unhealthy alert waits up to 3 minutes after a start. ColimaBar ignores testcontainers containers. Failed actions always send an alert."
+    static let notifyRecovery =
+        "Send an alert when a container that sent an unhealthy alert is healthy again. Off by default. It works only while crash notifications are on."
+    static let muteProject =
+        "Click to stop the banners for this Compose project. The dashboard still lists its alerts."
+    static let unmuteProject = "Send banners for this Compose project again."
+    static let projectMuted =
+        "Alerts for this project are muted. The dashboard still lists them. Click to send banners again."
     static let keepRemovedLogs =
         "Docker deletes a container started with --rm and its logs when it exits. With this on, ColimaBar keeps the last 500 lines of such a container in memory. If the container fails, View logs on its alert shows them for 5 minutes. It works only while crash notifications are on."
     static let savedLogs =

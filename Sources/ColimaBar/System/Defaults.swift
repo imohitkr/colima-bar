@@ -53,9 +53,16 @@ enum Defaults {
         /// The last weekly cleanup of each profile, as profile to seconds
         /// since 1970 (`PruneSchedule`). It is machine state, not a setting.
         case scheduledPruneLastRun
+        /// Send "Healthy again" after an unhealthy alert. Off by default.
+        case notifyOnRecovery
+        /// The Compose projects with no banners, as a sorted list of
+        /// `profile/project` (`MutedProjects`). It is per Mac, so it is not in
+        /// the settings file.
+        case mutedProjects
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }
+    static func strings(_ k: Key) -> [String]? { UserDefaults.standard.stringArray(forKey: k.rawValue) }
     static func bool(_ k: Key) -> Bool? { UserDefaults.standard.object(forKey: k.rawValue) as? Bool }
     static func int(_ k: Key) -> Int? { UserDefaults.standard.object(forKey: k.rawValue) as? Int }
     static func dictionary(_ k: Key) -> [String: Any]? { UserDefaults.standard.dictionary(forKey: k.rawValue) }

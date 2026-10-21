@@ -21,6 +21,11 @@ struct ContainersTab: View {
                     title: g.title, collapsed: isCollapsed, hint: g.project == nil ? Help.standalone : Help.projectGroup
                 ) {
                     if let project = g.project {
+                        if model.isMuted(project: project) {
+                            IconButton("bell.slash", Help.projectMuted) { model.setMuted(false, project: project) }
+                        } else {
+                            IconButton("bell", Help.muteProject) { model.setMuted(true, project: project) }
+                        }
                         IconButton("play.fill", "Start all in \(project)") { model.project(project, .start) }
                         IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, .restart) }
                         IconButton("stop.fill", "Stop all in \(project)") { model.project(project, .stop) }
@@ -28,6 +33,17 @@ struct ContainersTab: View {
                     } else if g.key == "~standalone", model.running.count > 1 {
                         Button("Stop all") { model.run(.stopAll) }.buttonStyle(.borderless).font(.caption)
                             .hint(Help.stopAll)
+                    }
+                }
+                .contextMenu {
+                    if let project = g.project {
+                        if model.isMuted(project: project) {
+                            Button("Unmute Alerts") { model.setMuted(false, project: project) }
+                                .hint(Help.unmuteProject)
+                        } else {
+                            Button("Mute Alerts") { model.setMuted(true, project: project) }
+                                .hint(Help.muteProject)
+                        }
                     }
                 }
                 if !isCollapsed.wrappedValue {
