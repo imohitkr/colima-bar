@@ -143,6 +143,7 @@ If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-res
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons. **Clean Up…** opens the cleanup page. See [Clean up disk space](#clean-up-disk-space). **Clean up dangling images and build cache weekly** runs the safe cleanup once a week.
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md). **Stop sooner on battery or in Low Power Mode** shortens the idle time. See [On battery and in Low Power Mode](auto-stop.md#on-battery-and-in-low-power-mode).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
+- **Domains**: the switch for container domains. See [Container domains](#container-domains).
 - **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Profiles**: shown only when you have more than one profile.
 - **App**: the daily update check, crash notifications, **Notify when a container is healthy again after an alert**, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
@@ -286,7 +287,7 @@ If the VM was stopped, Colima must start it once to create the new disk. Thus Co
 
 Use these buttons to copy your ColimaBar settings to a different Mac.
 
-**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup and the keyboard shortcut. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup, the keyboard shortcut and container domains. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 
@@ -478,6 +479,89 @@ The option has these limits:
 - It ignores testcontainers containers, because they send no alert.
 
 When you turn the option off, ColimaBar closes the log streams and drops all saved lines.
+
+## Container domains
+
+ColimaBar can open a container at a name such as `web.shop.localhost`, not at `localhost:49153`. The feature is off by default.
+
+To turn it on, set **Open containers at .localhost names** on the System tab. A globe button then appears in each container row that has a name. A Compose project also gets a globe menu in its header. The ••• menu of a container lists its names and has **Copy Address**.
+
+### How it works
+
+ColimaBar runs a small web proxy on this Mac only. It listens on `127.0.0.1` and `::1`, never on the network. The proxy reads the `Host` header of a request and sends the request to the published port of the container. Your browser resolves every `.localhost` name to the Mac itself, so no DNS setup is needed.
+
+The proxy never starts the VM. If the VM is stopped, the proxy answers with a page that says so. This stops a web page from starting your VM with a link to a `.localhost` name.
+
+### Names
+
+- A Compose service gets `SERVICE.PROJECT.localhost`, for example `web.shop.localhost`.
+- A container that Compose did not start gets `NAME.localhost`.
+- If a service has two or more containers, each one gets `SERVICE-N.PROJECT.localhost`, where N is the container number. The lowest number also gets the plain name.
+- A subdomain goes to its parent. `api.web.shop.localhost` reaches `web.shop.localhost`.
+- ColimaBar turns each name into a valid host name: lower case letters, digits and `-`. It changes `_`, `.` and spaces to `-`. It leaves out other characters. If it leaves out a non-ASCII character, or nothing is left, the container shows a warning. Use the label `dev.colimabar.domains` to set the name then.
+- If two containers want one name, the order is: a name from a label, the derived name of a container, the plain name of the lowest replica, then the older container. The container that loses shows a warning icon in its row. Its hint names the owner. The hint also lists any other note about the names of the container.
+- A name that is longer than 63 characters is cut. For a replica, ColimaBar cuts the service part, so that `SERVICE-N` still fits.
+
+### The port
+
+A container gets a name only if it publishes a TCP port on this Mac. ColimaBar picks the container port in this order:
+
+1. The label `dev.colimabar.port`. The label `dev.orbstack.http-port` works too. If the container does not publish that port, it gets no name. If the label value is not a port, the container shows a warning, and ColimaBar picks the port with steps 2 and 3. The first of the two labels that is set decides.
+2. The first published port from this list: 80, 8080, 3000, 8000, 5000, 5173, 4200, 8888, 443, 8443.
+3. The lowest published port that is not a database or another known non-web port. Steps 2 and 3 skip a port that is published at a database port of the Mac, for example container port 80 at host port 5432.
+
+The proxy connects to ports 443 and 8443 with TLS and accepts any certificate. Your browser still uses plain HTTP to the proxy. If a container publishes a port only on `::1` or only on `::`, the proxy connects to `::1`. Else it connects to `127.0.0.1`.
+
+The proxy ignores a label port that is a database or another known non-web port, for example 5432, so that a web page cannot send HTTP to a database. The container shows a warning, and ColimaBar picks the port with steps 2 and 3.
+
+### Labels
+
+Set these labels on a container or in a Compose file:
+
+```yaml
+services:
+  web:
+    labels:
+      dev.colimabar.port: "3000"
+      dev.colimabar.domains: "admin.shop.localhost@8081, api.localhost"
+```
+
+- `dev.colimabar.port` picks the container port. A port that is not a web port is ignored (see above).
+- `dev.colimabar.domains` adds names. Write a comma list of names. Add `@PORT` to send a name to another container port. The container must publish that port, else the name gets no route. A port that is not a web port is ignored. Each name must end in `.localhost` and use ASCII letters, digits and `-`. An entry that does not follow these rules, for example a name with `*`, is dropped, and the container shows a warning. The list has at most 16 names.
+- `dev.colimabar.domains: "off"` gives the container no name.
+- ColimaBar ignores the label `dev.orbstack.domains`.
+
+### Port 80 and 8080
+
+The proxy listens on port 80. If port 80 is busy, or a running container publishes it, the proxy listens on port 8080. The caption under the switch says so, and the links then have `:8080`. At the launch, ColimaBar tries port 80 twice, 1 second apart, before it takes 8080, because the old copy of the app may still be quitting.
+
+If a container starts to publish the port of the proxy, the proxy moves to the other port. It moves at most once in 30 seconds. A move that the limit holds back happens when the 30 seconds end. A container whose port forward failed in the meantime may need a restart.
+
+If the proxy listens on 8080, ColimaBar goes back to port 80 when port 80 is free and no container publishes it. It checks after a change of the containers and after a wake. If no port is free, the caption says so. ColimaBar tries again when the published ports of the containers change, after a wake, and from time to time: 5 seconds, 15 seconds and 60 seconds after the failure, then every 5 minutes. While the proxy listens on 8080, ColimaBar also checks port 80 about every 30 seconds. A link shows only while the proxy listens, so a link never points to another program on port 80.
+
+ColimaBar remembers the host ports of the containers of the profile, also of stopped containers. If any of them publishes port 80, the proxy stays on 8080 and does not go back to port 80. It goes back when no container uses port 80 any more, for example after you remove the container.
+
+Colima forwards a published port once, when the container starts. If the proxy held port 80 at that moment, Colima could not forward port 80 of the container, and it does not try again. ColimaBar then moves the proxy to 8080 and shows a line under the switch: "web uses port 80. Restart web so its port 80 works on the Mac." It also adds an entry to the alerts list. Restart the container once. The line goes away when the container stops. To avoid the problem, publish the container on another host port, for example `-p 8000:80`.
+
+### Error pages
+
+- **404**: no running container of the selected profile has this name. The page lists the names that work. For a host that does not end in `.localhost`, the page shows no list.
+- **502**: the name exists, but nothing answers on the published port. Check the logs of the container.
+- **503**: the VM of the profile is not running, or the proxy has too many open connections.
+- **502** also shows when a name points to the port of the proxy itself.
+- **400**: the request is not valid HTTP/1.1 or HTTP/1.0 (this includes HTTP/2), has no `Host` header or two of them, or has a full address in the request line whose host differs from the `Host` header.
+- **408**: the request head did not arrive in 10 seconds.
+- **431**: the request head is larger than 64 KB.
+
+### Limits
+
+- The names work on the Mac only. They do not resolve inside containers or in the VM.
+- Only the selected profile has names. When you switch the profile, the names change.
+- The proxy speaks HTTP/1.1 and splices the bytes, so WebSockets and server-sent events work. It does not speak HTTP/2.
+- The proxy reads the `Host` header of the first request on a connection only. Later requests on the same connection go to the same container, whatever their `Host`. A browser opens a new connection for each name, so this is rarely visible. A tool that reuses one connection for several names gets the container of the first name.
+- The proxy has no idle timeout after the request head. An open connection stays until one side closes it.
+- A debug run (screenshots) starts no proxy.
+- Other users of this Mac can reach the proxy on the loopback address, as they can reach a published port.
 
 ## Profiles
 

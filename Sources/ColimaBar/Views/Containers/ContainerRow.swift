@@ -27,6 +27,7 @@ struct ContainerRow: View {
                         .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle))
             }
             Spacer(minLength: 4)
+            domainBadge
             // One port inline leaves room for the name; all ports are in the ••• menu.
             ForEach(c.ports.prefix(1), id: \.self) { p in
                 Button(String(p)) { model.open(port: p) }
@@ -44,6 +45,19 @@ struct ContainerRow: View {
         .padding(.vertical, 4).padding(.horizontal, 6)
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))
         .opacity(c.isRunning ? 1 : 0.75)
+    }
+
+    /// The globe that opens the container at its domain name. A warning shows
+    /// every note about the names of the container, also when it has a name.
+    @ViewBuilder private var domainBadge: some View {
+        if let rel = model.domainRoutes.primaryName(c.id), let url = model.domainURL(rel) {
+            IconButton("globe", Help.domainLink(url.absoluteString)) { model.openDomain(rel) }
+        }
+        if let notes = model.domainRoutes.notes[c.id], !notes.isEmpty {
+            Image(systemName: "exclamationmark.triangle")
+                .font(.system(size: 11)).foregroundStyle(.orange)
+                .hint(Help.domainNotes(notes, suffix: model.primaryDomainSuffix))
+        }
     }
 
     /// The name and the image open the Inspect page. The health badge is
@@ -88,6 +102,18 @@ struct ContainerRow: View {
                 if !c.ports.isEmpty {
                     Divider()
                     ForEach(c.ports, id: \.self) { p in Button("Open localhost:\(p)") { model.open(port: p) } }
+                }
+                if let names = model.domainRoutes.names[c.id], !names.isEmpty {
+                    Divider()
+                    ForEach(names, id: \.self) { rel in
+                        Button("Open \(DomainLink.host(relative: rel, suffix: model.primaryDomainSuffix))") {
+                            model.openDomain(rel)
+                        }
+                        .disabled(model.domainURL(rel) == nil)
+                    }
+                    if let url = names.first.flatMap({ model.domainURL($0) }) {
+                        Button("Copy Address") { Pasteboard.copy(url.absoluteString) }
+                    }
                 }
                 if c.isRunning {
                     Divider()

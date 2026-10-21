@@ -29,6 +29,9 @@ struct ContainersTab: View {
                         IconButton("play.fill", "Start all in \(project)") { model.project(project, .start) }
                         IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, .restart) }
                         IconButton("stop.fill", "Stop all in \(project)") { model.project(project, .stop) }
+                        if let names = model.domainRoutes.projects[project], !names.isEmpty {
+                            DomainMenu(model: model, names: names)
+                        }
                         if let compose = g.compose { ComposeMenu(model: model, project: compose) }
                     } else if g.key == "~standalone", model.running.count > 1 {
                         Button("Stop all") { model.run(.stopAll) }.buttonStyle(.borderless).font(.caption)

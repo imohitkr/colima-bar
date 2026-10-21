@@ -165,6 +165,7 @@ extension ColimaModel {
         if !isDebug, snapshot[.hotKey] != .string("") {
             lines.append("Keyboard shortcut active: \(HotKey.shared.isActive ? "yes" : "no")")
         }
+        lines.append("Domain proxy: \(domainStatusText)")
         lines.append("Colima folder: \(Paths.colimaDir)")
         lines.append("Lima folder: \(Paths.limaDir)")
         lines += DiagnosticsProbe.environmentNames(ProcessInfo.processInfo.environment)

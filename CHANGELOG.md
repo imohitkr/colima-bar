@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Container domains (off by default). On the System tab, turn on **Open containers at .localhost names**. Containers then open at names like `web.shop.localhost`. ColimaBar runs a proxy on port 80 of this Mac only, or on 8080 when 80 is busy. Labels pick the port or add names. See [Container domains](docs/usage.md#container-domains).
+
 ## [0.13.0] - 2026-10-21
 
 ### Added

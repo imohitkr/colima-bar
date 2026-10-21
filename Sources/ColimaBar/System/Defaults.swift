@@ -59,6 +59,8 @@ enum Defaults {
         /// `profile/project` (`MutedProjects`). It is per Mac, so it is not in
         /// the settings file.
         case mutedProjects
+        /// Container domains (`ColimaModel+Domains`). Off by default.
+        case domains
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

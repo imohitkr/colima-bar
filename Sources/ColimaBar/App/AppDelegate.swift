@@ -233,6 +233,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             // COLIMABAR_RUNNING_ONLY=1: turn the filter on in memory only.
             // It is not a saved setting, so a debug run changes no Defaults.
             if ProcessInfo.processInfo.environment["COLIMABAR_RUNNING_ONLY"] == "1" { ui.runningOnly = true }
+            // COLIMABAR_DOMAINS=1: show the container names in a debug run. Nothing listens.
+            if ProcessInfo.processInfo.environment["COLIMABAR_DOMAINS"] == "1" {
+                model.domainsShownInDebug = true
+                model.rebuildDomainRoutes()
+            }
             // COLIMABAR_INSPECT=<name>: show the Inspect page of that container
             // after the first refresh. If there is no such container, the tab stays.
             if let name = ProcessInfo.processInfo.environment["COLIMABAR_INSPECT"] {

@@ -16,7 +16,12 @@ import os
 @MainActor @Observable
 final class ColimaModel {
     private(set) var state: VMState = .unknown {
-        didSet { if state != oldValue { wakeHeartbeat() } }
+        didSet {
+            if state != oldValue {
+                wakeHeartbeat()
+                rebuildDomainRoutes()
+            }
+        }
     }
     private(set) var busy: String?
     private(set) var vm = VMInfo()
@@ -164,6 +169,19 @@ final class ColimaModel {
             syncKeeper()
         }
     }
+    /// Open containers at .localhost names (`ColimaModel+Domains`). Off by default.
+    var domainsEnabled = false {
+        didSet {
+            guard domainsEnabled != oldValue else { return }
+            // A debug run never writes a setting.
+            if !isDebug { domainsStore.set(domainsEnabled, forKey: Defaults.Key.domains.rawValue) }
+            domainsSettingChanged()
+        }
+    }
+    private(set) var domainRoutes = DomainRoutes.empty
+    private(set) var domainStatus = DomainStatus()
+    /// The containers whose port the proxy held when they started. They need a restart.
+    private(set) var domainRestartHints: [DomainRestartHint] = []
     /// The removed containers whose last lines `keeper` holds. The alerts
     /// strip reads it. It changes only when a buffer is kept or dropped.
     private(set) var savedLogIDs: Set<String> = []
@@ -319,6 +337,30 @@ final class ColimaModel {
     @ObservationIgnored private var lastPing = Date()
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
     @ObservationIgnored private(set) var isDebug = false
+    /// The proxy of container domains. It listens only while the setting is on.
+    @ObservationIgnored let domainProxy: any DomainProxying
+    /// Where the setting is saved. A test process gets its own empty store, so no test reads or writes the real one.
+    @ObservationIgnored let domainsStore: UserDefaults
+    @ObservationIgnored var domainCandidates: [DomainCandidate] = []
+    /// The host ports of every running container, internal ones too.
+    @ObservationIgnored var domainPublished: Set<Int> = []
+    /// The ports of all known containers of this profile, stopped ones too.
+    @ObservationIgnored var domainClaims = DomainPortClaims()
+    @ObservationIgnored var domainStartToken = 0
+    @ObservationIgnored var domainRebindAt: Date?
+    /// The published ports at the last start. A change gives a failed proxy a new try.
+    @ObservationIgnored var domainStartPublished: Set<Int> = []
+    @ObservationIgnored var domainRecheck: Task<Void, Never>?
+    /// The wait before the next try of a failed proxy.
+    @ObservationIgnored var domainRetry: Task<Void, Never>?
+    /// The tries since the proxy failed. It sets the wait (`DomainTimings.failureDelay`).
+    @ObservationIgnored var domainRetryCount = 0
+    /// The last time that a tick moved the proxy back to port 80, or tried it.
+    @ObservationIgnored var domainMoveBackAt = Date.distantPast
+    @ObservationIgnored var domainMoveBackProbing = false
+    @ObservationIgnored var domainTimings = DomainTimings()
+    /// COLIMABAR_DOMAINS=1 in a debug run: show the names, start nothing.
+    @ObservationIgnored var domainsShownInDebug = false
     /// The runner of the volume transfer that runs now.
     @ObservationIgnored var volumeRunner: VolumeBackupRunner?
     /// The profile of that transfer, and why it stopped if the VM or the profile changed.
@@ -403,7 +445,20 @@ final class ColimaModel {
     /// changes a route or a context, or writes a setting. The command never
     /// calls `start()`. Assigning `profile` here runs no `didSet`.
     /// `dockerAPI` is for tests: a fake daemon instead of the socket of the profile.
-    init(profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil) {
+    /// `domainProxy`, `domainsEnabled` and `domainsStore` are for tests too: a
+    /// fake proxy, a start value of the setting, and a store for it. A test
+    /// process that passes none gets an inert proxy and an empty store, so a
+    /// model never binds a port or touches the saved setting by accident.
+    init(
+        profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil,
+        domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil, domainsStore: UserDefaults? = nil
+    ) {
+        let inTest = TestProcess.isRunning
+        self.domainProxy = domainProxy ?? (inTest ? InertDomainProxy() : DomainProxy())
+        let store = domainsStore ?? (inTest ? TestProcess.emptyStore() : .standard)
+        self.domainsStore = store
+        self.domainsEnabled =
+            domainsEnabled ?? (store.object(forKey: Defaults.Key.domains.rawValue) as? Bool) ?? false
         let p = named ?? Defaults.string(.profile) ?? "default"
         profile = p
         isDebug = readOnly
@@ -450,6 +505,9 @@ final class ColimaModel {
             powerObserver = observer
             startNetworkObserver()
             publishAppStatus()
+            if domainsEnabled { startDomainProxy(retryFirst: true) }
+        } else {
+            setDomainStatus(DomainStatus(phase: .debugRun))
         }
         Task { await refreshAll() }
         lastPing = Date()
@@ -537,6 +595,8 @@ final class ColimaModel {
     func shutdown() {
         proxy.stop()
         if !isDebug {
+            invalidateDomainTasks()
+            domainProxy.stop()
             profileProxies.shutdown()
             AppStatusFile.removeIfOwned()
         }
@@ -556,6 +616,7 @@ final class ColimaModel {
             contextRetryAt = nil
             checkDockerContext()
         }
+        domainsHeartbeat()
         let b = readBusy()
         if b != busy {
             let finished = busy != nil && b == nil
@@ -779,6 +840,10 @@ final class ColimaModel {
         resetDF()
         syncStatStreams()
         set(\.containers, [])
+        // A stopped VM keeps the ports that its containers claim. A profile switch forgets them.
+        if because == .profileChanged { domainClaims.reset() }
+        setDomainRestartHints([])
+        updateDomainRoutes([], authoritative: false)
         set(\.stats, [:])
         set(\.images, [])
         set(\.volumes, [])
@@ -848,7 +913,8 @@ final class ColimaModel {
             let list = try? JSONDecoder().decode([APIContainer].self, from: r.body)
         else { return false }
         // The helper containers of a volume backup are not the user's containers.
-        let mapped = Self.visibleContainers(list).map { c in
+        let visible = Self.visibleContainers(list)
+        let mapped = visible.map { c in
             Container(
                 id: c.Id, name: c.Names.first.map { String($0.drop { $0 == "/" }) } ?? String(c.Id.prefix(12)),
                 image: c.Image, state: c.State, status: c.Status,
@@ -858,6 +924,7 @@ final class ColimaModel {
         }
         // Stable order by name: rows never reorder because a number changed.
         set(\.containers, mapped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
+        updateDomainRoutes(visible)
         syncStatStreams()
         await refreshComposeIssues()
         sweepHelperLeftoversOnce()
@@ -1371,6 +1438,7 @@ final class ColimaModel {
     /// again, refresh at once, and check each running VM.
     private func recoverAfterSleep() async {
         restartStreams()
+        domainsAfterWake()
         await refreshAll()
         let blocked = Set(profiles.map(\.name).filter { isBlockedForSleepCheck($0) })
         let names = AfterSleepCheck.profiles(profiles, blocked: blocked)
@@ -1797,6 +1865,11 @@ final class ColimaModel {
         updateLogItems()
     }
     func setState(_ s: VMState) { set(\.state, s) }
+
+    /// `ColimaModel+Domains` stores its state through these two.
+    func setDomainRoutes(_ routes: DomainRoutes) { set(\.domainRoutes, routes) }
+    func setDomainStatus(_ status: DomainStatus) { set(\.domainStatus, status) }
+    func setDomainRestartHints(_ hints: [DomainRestartHint]) { set(\.domainRestartHints, hints) }
     func setLogSizesChecking(_ on: Bool) { set(\.logSizesChecking, on) }
     func setDiskImage(_ size: DiskImageSize?) { set(\.diskImage, size) }
     func setTrimming(_ on: Bool) { set(\.isTrimming, on) }

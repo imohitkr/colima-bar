@@ -139,6 +139,8 @@ struct SystemTab: View {
             .toggleStyle(.checkbox)
             .hint(Help.hideIcon)
 
+            DomainsSection(model: model)
+
             Divider()
             SectionHeader(title: "Doctor")
             HStack(spacing: 8) {

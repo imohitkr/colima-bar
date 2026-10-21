@@ -356,6 +356,54 @@ enum Help {
         }
     }
 
+    // Domains
+    static let domains =
+        "Open containers at names such as web.shop.localhost: the service and project for Compose, the container name for others. ColimaBar runs a proxy on this Mac only. It never starts the VM."
+    static let domainLabels =
+        "Set the label dev.colimabar.port to pick the container port. Set dev.colimabar.domains to add names, for example admin.shop.localhost@8081, or to off for no name."
+    static func domainLink(_ url: String) -> String {
+        "Open \(url) in your browser. The ColimaBar proxy forwards it to the container."
+    }
+    static func domainRestart(name: String, port: Int) -> String {
+        "\(name) uses port \(port). Restart \(name) so its port \(port) works on the Mac."
+    }
+    static let domainMenu = "Open a service of this project at its .localhost name."
+    static func domainTaken(_ name: String, by: String) -> String {
+        "\(name) already points to \(by). Use the label dev.colimabar.domains to give this container another name."
+    }
+    static func domainPortNotPublished(_ p: Int) -> String {
+        "The label dev.colimabar.port names port \(p), but the container does not publish it."
+    }
+    static func domainPortInvalid(_ value: String) -> String {
+        "The label dev.colimabar.port is \"\(value)\", which is not a port. ColimaBar picks a web port instead, if there is one."
+    }
+    static func domainPortNotWeb(_ p: Int) -> String {
+        "The proxy ignores port \(p) in a label: it is not a web port. ColimaBar picks a web port instead, if there is one."
+    }
+    static func domainNameDropped(_ entry: String) -> String {
+        "The label dev.colimabar.domains has the entry \"\(entry)\", which gives no name. Use ASCII names that end in .localhost."
+    }
+    static func domainNameNotASCII(_ name: String) -> String {
+        "The name \"\(name)\" has characters that are not ASCII. ColimaBar leaves them out. Use the label dev.colimabar.domains to set the name."
+    }
+    static let domainNameEmpty =
+        "The name of this container has no ASCII letters or digits, so it gets no name. Use the label dev.colimabar.domains to set one."
+    /// The hint for all notes of one container.
+    static func domainNotes(_ notes: [DomainRoutes.Note], suffix: String) -> String {
+        notes.map { note -> String in
+            switch note {
+            case .taken(let name, let by): domainTaken(DomainLink.host(relative: name, suffix: suffix), by: by)
+            case .labelPortNotPublished(let port): domainPortNotPublished(port)
+            case .labelPortInvalid(let value): domainPortInvalid(value)
+            case .labelPortNotWeb(let port): domainPortNotWeb(port)
+            case .nameDropped(let entry): domainNameDropped(entry)
+            case .nameNotASCII(let name): domainNameNotASCII(name)
+            case .nameEmpty: domainNameEmpty
+            }
+        }.joined(separator: " ")
+    }
+    static let domainsDebug = "A debug run does not start the proxy."
+
     // Network notice
     static let networkPorts =
         "Published ports answer in the VM but not on the Mac. Port forwarding is broken, for example after a network change or a sleep."

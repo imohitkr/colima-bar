@@ -6,7 +6,7 @@ These milestones are planned next. Each milestone gets its own release. Features
 
 ## Container domains (0.14.0)
 
-- Open containers at names like `web.shop.colima.local`, with HTTPS from a local certificate authority. ColimaBar asks for an administrator password once to add the resolver, and it can remove everything again.
+- Open containers at names like `web.shop.localhost`, with optional HTTPS from a local certificate authority and an optional custom suffix such as `colima.internal`. `.local` names do not work: macOS sends them to multicast DNS, which waits 5 seconds.
 
 ## VM recreate (0.15.0)
 
@@ -27,6 +27,7 @@ These milestones are planned next. Each milestone gets its own release. Features
 These features have no target version and no fixed order.
 
 - A build history view.
+- mkcert support for container domains. mkcert has a root that is not limited to a few names, so ColimaBar does not sign with it.
 - VM snapshots.
 
 To suggest a feature, open a [feature request](https://github.com/imohitkr/colima-bar/issues/new?template=feature_request.yml).
