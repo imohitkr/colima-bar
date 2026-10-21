@@ -180,6 +180,8 @@ final class ColimaModel {
     }
     private(set) var domainRoutes = DomainRoutes.empty
     private(set) var domainStatus = DomainStatus()
+    /// The containers whose port the proxy held when they started. They need a restart.
+    private(set) var domainRestartHints: [DomainRestartHint] = []
     /// The removed containers whose last lines `keeper` holds. The alerts
     /// strip reads it. It changes only when a buffer is kept or dropped.
     private(set) var savedLogIDs: Set<String> = []
@@ -342,6 +344,8 @@ final class ColimaModel {
     @ObservationIgnored var domainCandidates: [DomainCandidate] = []
     /// The host ports of every running container, internal ones too.
     @ObservationIgnored var domainPublished: Set<Int> = []
+    /// The ports of all known containers of this profile, stopped ones too.
+    @ObservationIgnored var domainClaims = DomainPortClaims()
     @ObservationIgnored var domainStartToken = 0
     @ObservationIgnored var domainRebindAt: Date?
     /// The published ports at the last start. A change gives a failed proxy a new try.
@@ -836,7 +840,10 @@ final class ColimaModel {
         resetDF()
         syncStatStreams()
         set(\.containers, [])
-        updateDomainRoutes([])
+        // A stopped VM keeps the ports that its containers claim. A profile switch forgets them.
+        if because == .profileChanged { domainClaims.reset() }
+        setDomainRestartHints([])
+        updateDomainRoutes([], authoritative: false)
         set(\.stats, [:])
         set(\.images, [])
         set(\.volumes, [])
@@ -1862,6 +1869,7 @@ final class ColimaModel {
     /// `ColimaModel+Domains` stores its state through these two.
     func setDomainRoutes(_ routes: DomainRoutes) { set(\.domainRoutes, routes) }
     func setDomainStatus(_ status: DomainStatus) { set(\.domainStatus, status) }
+    func setDomainRestartHints(_ hints: [DomainRestartHint]) { set(\.domainRestartHints, hints) }
     func setLogSizesChecking(_ on: Bool) { set(\.logSizesChecking, on) }
     func setDiskImage(_ size: DiskImageSize?) { set(\.diskImage, size) }
     func setTrimming(_ on: Bool) { set(\.isTrimming, on) }

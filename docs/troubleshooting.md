@@ -77,6 +77,12 @@ The name exists, but nothing answers on the published port. Do these steps:
 
 Port 80 is busy, or a running container publishes it. The proxy of container domains then listens on port 8080. The caption under **Open containers at .localhost names** says so. To use port 80, stop the app or the container that uses it. ColimaBar goes back to port 80 by itself when the port is free, after a change of the containers or a wake.
 
+## A container port 80 does not open on the Mac
+
+You started a container with `-p 80:8000` while the proxy of container domains listened on port 80. Colima forwards a port only when the container starts. It could not forward port 80, because the proxy used it, and it does not try again. ColimaBar moved the proxy to 8080, but the port of the container stays closed. The System tab shows "Restart <container> so its port 80 works on the Mac."
+
+Restart the container once. The proxy stays on 8080 while a container, running or stopped, publishes port 80, so the next start works. To keep port 80 for your containers, turn off **Open containers at .localhost names**, or publish the container on another host port.
+
 ## Names do not resolve in containers
 
 If containers cannot resolve names, for example after you connect to a VPN, set the DNS servers of the VM. Open **More VM settings…**, type the IP addresses of your DNS servers in **DNS servers** and click **Apply**. The VM restarts. If the field is empty, the VM uses the DNS of your Mac. A VPN can change that DNS.

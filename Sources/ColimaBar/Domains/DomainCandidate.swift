@@ -129,6 +129,9 @@ struct DomainCandidate: Equatable, Sendable {
         Set(list.filter { $0.State == "running" }.flatMap { tcpPorts($0).map(\.host) })
     }
 
+    /// The host ports that one container publishes in the list.
+    static func hostPorts(_ c: APIContainer) -> Set<Int> { Set(tcpPorts(c).map(\.host)) }
+
     /// "off" (any case, trimmed) gives `.off`. Else a comma list of `name` or
     /// `name@port`. An entry with `*`, an invalid name or a bad port drops.
     /// At most 16 entries.

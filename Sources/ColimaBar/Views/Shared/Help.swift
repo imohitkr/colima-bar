@@ -364,6 +364,9 @@ enum Help {
     static func domainLink(_ url: String) -> String {
         "Open \(url) in your browser. The ColimaBar proxy forwards it to the container."
     }
+    static func domainRestart(name: String, port: Int) -> String {
+        "\(name) uses port \(port). Restart \(name) so its port \(port) works on the Mac."
+    }
     static let domainMenu = "Open a service of this project at its .localhost name."
     static func domainTaken(_ name: String, by: String) -> String {
         "\(name) already points to \(by). Use the label dev.colimabar.domains to give this container another name."

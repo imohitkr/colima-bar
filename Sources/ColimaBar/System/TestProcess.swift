@@ -16,11 +16,23 @@ enum TestProcess {
             || Bundle.main.bundlePath.hasSuffix(".xctest")
     }()
 
-    /// A store that holds nothing and that no other process reads.
-    static func emptyStore() -> UserDefaults {
-        let name = "colimabar.test.\(UUID().uuidString)"
-        let store = UserDefaults(suiteName: name) ?? .standard
-        store.removePersistentDomain(forName: name)
-        return store
-    }
+    /// A store that holds nothing and that no other process reads. It keeps
+    /// its values in memory and writes no preferences file.
+    static func emptyStore() -> UserDefaults { MemoryDefaults() }
+}
+
+/// A `UserDefaults` that never persists. It covers the calls that the model
+/// and the tests use. A test must not create a preferences file.
+private final class MemoryDefaults: UserDefaults {
+    private let lock = NSLock()
+    private var values: [String: Any] = [:]
+
+    init() { super.init(suiteName: nil)! }
+
+    override func object(forKey key: String) -> Any? { lock.withLock { values[key] } }
+    override func set(_ value: Any?, forKey key: String) { lock.withLock { values[key] = value } }
+    override func set(_ value: Bool, forKey key: String) { lock.withLock { values[key] = value } }
+    override func removeObject(forKey key: String) { lock.withLock { values[key] = nil } }
+    override func bool(forKey key: String) -> Bool { (object(forKey: key) as? Bool) ?? false }
+    override func string(forKey key: String) -> String? { object(forKey: key) as? String }
 }

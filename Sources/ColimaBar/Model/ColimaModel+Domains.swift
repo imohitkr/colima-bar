@@ -62,12 +62,20 @@ extension ColimaModel {
     // MARK: - Routes
 
     /// Keeps the candidates of the Docker list and rebuilds the routes if they changed.
-    func updateDomainRoutes(_ list: [APIContainer]) {
+    /// `authoritative` is false for the empty list of a stopped VM: it does not
+    /// mean that the containers are gone, so the claimed ports stay.
+    func updateDomainRoutes(_ list: [APIContainer], authoritative: Bool = true) {
         let candidates = list.compactMap(DomainCandidate.init)
         let published = DomainCandidate.publishedHostPorts(list)
+        let oldClaims = domainClaims
+        if authoritative {
+            domainClaims.update(list)
+            // A container that stopped or was removed has restarted or gone: the hint ends.
+            setDomainRestartHints(domainRestartHints.filter { domainClaims.isRunning($0.id) })
+        }
         // A profile switch changes the name on the 503 page, even if the list stays empty.
         guard
-            candidates != domainCandidates || published != domainPublished
+            candidates != domainCandidates || published != domainPublished || domainClaims != oldClaims
                 || (domainsActive && domainRoutes.profile != profile)
         else { return }
         domainCandidates = candidates
@@ -88,18 +96,36 @@ extension ColimaModel {
         reviewDomainProxy(published: table.publishedHostPorts)
     }
 
+    /// The ports that the proxy must not use: the ports of the running containers,
+    /// and the ports that a stopped container claims for its next start.
+    var domainBlockedPorts: Set<Int> { domainRoutes.publishedHostPorts.union(domainClaims.ports) }
+
+    /// The proxy holds a port that a running container publishes. Lima did not
+    /// forward that port. Tell the user to restart the container, once for each container.
+    private func noteDomainConflict(port: Int) {
+        let known = Set(domainRestartHints.map(\.id))
+        let fresh = domainClaims.runningHolders(of: port).filter { !known.contains($0.id) }
+        guard !fresh.isEmpty else { return }
+        setDomainRestartHints(
+            domainRestartHints + fresh.map { DomainRestartHint(id: $0.id, name: $0.name, port: port) })
+        for c in fresh {
+            record(c.name, "Port \(port) may not work on the Mac until the container restarts.", containerID: c.id)
+        }
+    }
+
     /// The routes changed. Fix a conflict, give a failed proxy a new try, or go back to port 80.
     private func reviewDomainProxy(published: Set<Int>) {
         guard domainsEnabled else { return }
         switch domainStatus.phase {
         case .running:
             if Self.domainConflictPort(status: domainStatus, published: published) {
+                if let port = domainStatus.httpPort { noteDomainConflict(port: Int(port)) }
                 rebindDomainProxy()
             } else {
-                moveDomainProxyBackToFirstPort(published: published)
+                moveDomainProxyBackToFirstPort()
             }
         case .failed:
-            if published != domainStartPublished { startDomainProxy() }
+            if domainBlockedPorts != domainStartPublished { startDomainProxy() }
         default:
             break
         }
@@ -129,7 +155,7 @@ extension ColimaModel {
         guard !isDebug, domainsEnabled else { return }
         domainStartToken += 1
         let token = domainStartToken
-        domainStartPublished = domainRoutes.publishedHostPorts
+        domainStartPublished = domainBlockedPorts
         setDomainStatus(DomainStatus(phase: .starting))
         let candidates = DomainPorts.candidates(DomainPorts.http, published: domainStartPublished)
         guard !candidates.isEmpty else {
@@ -166,6 +192,7 @@ extension ColimaModel {
                 setDomainStatus(DomainStatus(phase: .running, httpPort: port))
                 // A container may have published the port while the proxy started.
                 if Self.domainConflictPort(status: domainStatus, published: domainRoutes.publishedHostPorts) {
+                    if let port = domainStatus.httpPort { noteDomainConflict(port: Int(port)) }
                     rebindDomainProxy()
                 }
             } else {
@@ -229,12 +256,12 @@ extension ColimaModel {
     }
 
     /// The proxy runs on the fallback port. If port 80 is free now, move back to it.
-    func moveDomainProxyBackToFirstPort(published: Set<Int>? = nil) {
+    func moveDomainProxyBackToFirstPort() {
         guard !isDebug, domainsEnabled, domainStatus.phase == .running, domainStatus.usesFallback,
             !domainMoveBackProbing
         else { return }
         let first = DomainPorts.http[0]
-        guard !(published ?? domainRoutes.publishedHostPorts).contains(Int(first)) else { return }
+        guard !domainBlockedPorts.contains(Int(first)) else { return }
         domainMoveBackProbing = true
         domainMoveBackAt = Date()
         let token = domainStartToken

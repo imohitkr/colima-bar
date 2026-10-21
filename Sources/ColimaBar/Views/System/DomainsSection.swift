@@ -18,5 +18,11 @@ struct DomainsSection: View {
                 .foregroundStyle(model.domainStatus.phase == .failed ? Color.orange : .secondary)
                 .padding(.leading, 22)
         }
+        ForEach(model.domainRestartHints) { hint in
+            Text(hint.text)
+                .font(.caption2)
+                .foregroundStyle(Color.orange)
+                .padding(.leading, 22)
+        }
     }
 }

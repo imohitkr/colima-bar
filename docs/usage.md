@@ -539,6 +539,10 @@ If a container starts to publish the port of the proxy, the proxy moves to the o
 
 If the proxy listens on 8080, ColimaBar goes back to port 80 when port 80 is free and no container publishes it. It checks after a change of the containers and after a wake. If no port is free, the caption says so. ColimaBar tries again when the published ports of the containers change, after a wake, and from time to time: 5 seconds, 15 seconds and 60 seconds after the failure, then every 5 minutes. While the proxy listens on 8080, ColimaBar also checks port 80 about every 30 seconds. A link shows only while the proxy listens, so a link never points to another program on port 80.
 
+ColimaBar remembers the host ports of the containers of the profile, also of stopped containers. If any of them publishes port 80, the proxy stays on 8080 and does not go back to port 80. It goes back when no container uses port 80 any more, for example after you remove the container.
+
+Colima forwards a published port once, when the container starts. If the proxy held port 80 at that moment, Colima could not forward port 80 of the container, and it does not try again. ColimaBar then moves the proxy to 8080 and shows a line under the switch: "web uses port 80. Restart web so its port 80 works on the Mac." It also adds an entry to the alerts list. Restart the container once. The line goes away when the container stops. To avoid the problem, publish the container on another host port, for example `-p 8000:80`.
+
 ### Error pages
 
 - **404**: no running container of the selected profile has this name. The page lists the names that work. For a host that does not end in `.localhost`, the page shows no list.
