@@ -72,6 +72,17 @@ enum CtlAction: String, CaseIterable, Sendable {
         }
     }
 
+    /// Stops the containers of the VM, or the VM itself, with no `kill` event
+    /// for each container. Container alerts wait while it runs.
+    var stopsContainers: Bool {
+        switch self {
+        case .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .autoStop, .repair, .stopAll,
+            .profileDelete:
+            true
+        default: false
+        }
+    }
+
     /// Changes disk use. When it ends, df runs at once, so a removed image
     /// or volume leaves its row and a second Remove can't fail.
     var changesDisk: Bool {

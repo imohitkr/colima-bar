@@ -139,6 +139,22 @@ final class ColimaModel {
             syncKeeper()
         }
     }
+    /// Send "Healthy again" after an unhealthy alert. It works only while
+    /// crash alerts are on.
+    var notifyOnRecovery = Defaults.bool(.notifyOnRecovery) ?? false {
+        didSet {
+            guard notifyOnRecovery != oldValue else { return }
+            Defaults.set(notifyOnRecovery, .notifyOnRecovery)
+        }
+    }
+    /// The Compose projects whose banners are off (`MutedProjects`). It is
+    /// per Mac, so it is not in the settings file.
+    var mutedProjects = MutedProjects.decode(Defaults.strings(.mutedProjects)) {
+        didSet {
+            guard mutedProjects != oldValue else { return }
+            Defaults.set(MutedProjects.encode(mutedProjects), .mutedProjects)
+        }
+    }
     /// Keep the logs of removed containers that fail. It works only while
     /// crash alerts are on, because the alert opens the saved lines.
     var keepRemovedLogs = Defaults.bool(.keepRemovedLogs) ?? false {
@@ -267,6 +283,13 @@ final class ColimaModel {
     /// The colima-ctl.sh actions that run now, for each profile. A running
     /// action (for example a prune that waits for its dialog) is not idle.
     @ObservationIgnored private var actionsInFlight: [String: Int] = [:]
+    /// The policy for container alerts. The glue in ColimaModel+ContainerAlerts
+    /// uses it. The state is per event stream, so a profile switch resets it.
+    @ObservationIgnored var alertGate = ContainerAlertGate()
+    /// The ids with an unhealthy check that waits for the end of a start grace.
+    /// The value is the token of the waiting task: a `destroy` removes the id,
+    /// and a later event can add it again for a new task.
+    @ObservationIgnored var deferredUnhealthy: [String: UUID] = [:]
     @ObservationIgnored private var events: StreamHandle?
     @ObservationIgnored private var statStreams: [String: StreamHandle] = [:]
     @ObservationIgnored private var latest: [String: Stat] = [:]  // written by stat streams, published once a second
@@ -788,6 +811,8 @@ final class ColimaModel {
     /// socket of the selected profile, and forgets the data of the old socket.
     private func retargetSocket() {
         generation += 1
+        alertGate = ContainerAlertGate()
+        deferredUnhealthy = [:]
         clearVMData(because: .profileChanged)
         set(\.diskImage, nil)
         for h in statStreams.values { h.cancel() }
@@ -1598,16 +1623,8 @@ final class ColimaModel {
         // A debug shell container ends with the exit code of its shell: that is no crash.
         // The helper container of a volume backup never runs, but it is no crash either.
         let isDebugSidecar = Self.isInternalContainer(name: attrs["name"], attributes: attrs)
-        if notifyOnCrash, ev.Type == "container", !isTestcontainer, !isDebugSidecar, let id = ev.Actor?.ID {
-            let name = attrs["name"] ?? "container"
-            let ctr = ContainerRef(id: id, name: name)
-            if action == "oom" {
-                Notifier.shared.post("Killed: out of memory", title: name, container: ctr, profile: profile)
-            } else if action == "die", let code = attrs["exitCode"], Self.isCrashExit(code) {
-                Notifier.shared.post("Exited with code \(code)", title: name, container: ctr, profile: profile)
-            } else if action == "health_status: unhealthy" {
-                Notifier.shared.post("Healthcheck is failing", title: name, container: ctr, profile: profile)
-            }
+        if ev.Type == "container", !isTestcontainer, !isDebugSidecar {
+            reactToContainerEvent(ev, attrs: attrs, notify: notifyOnCrash)
         }
         let reaction = Self.reaction(type: ev.Type ?? "", action: action)
         if reaction.contains(.savedLogs), !isDebugSidecar, let id = ev.Actor?.ID {
@@ -1679,6 +1696,13 @@ final class ColimaModel {
     ) async -> Shell.Result {
         actionsInFlight[p, default: 0] += 1
         defer { actionsInFlight[p, default: 1] -= 1 }
+        // A VM-wide stop sends no `kill` event for each container. The event
+        // stream is the one of the selected profile.
+        let holdsAlerts = action.stopsContainers && p == profile
+        if holdsAlerts { alertGate.holdAll() }
+        // A profile switch makes a new gate: it must not get this release.
+        let holdGeneration = generation
+        defer { if holdsAlerts, generation == holdGeneration { alertGate.releaseAll(now: Date()) } }
         // A start of a profile is good when the script exits with 0 and prints
         // the marker of a start. A warning action reads the versions first: a
         // risky change since the last good start makes the script ask. Another

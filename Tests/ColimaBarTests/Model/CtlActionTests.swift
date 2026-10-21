@@ -108,6 +108,15 @@ import Testing
         for a in CtlAction.allCases { #expect(a.changesDisk == disk.contains(a), "\(a.rawValue)") }
     }
 
+    @Test func actionsThatStopContainersHoldContainerAlerts() {
+        let stops: Set<CtlAction> = [
+            .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .autoStop, .repair, .stopAll,
+            .profileDelete,
+        ]
+        for a in CtlAction.allCases { #expect(a.stopsContainers == stops.contains(a), "\(a.rawValue)") }
+        for a in [CtlAction.composeUp, .imagePull, .diskTrim, .prune, .ssh] { #expect(!a.stopsContainers) }
+    }
+
     @Test func cleanupActionsAreNoVMActions() {
         for a in [CtlAction.logTruncate, .diskTrim, .autoPrune] {
             #expect(!a.isVMAction, "\(a.rawValue)")

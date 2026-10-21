@@ -13,6 +13,7 @@ import Testing
         .autoStopSooner: .bool(false),
         .hideIconWhenStopped: .bool(false),
         .notifyOnCrash: .bool(true),
+        .notifyOnRecovery: .bool(true),
         .keepRemovedLogs: .bool(false),
         .checkUpdates: .bool(true),
         .profile: .string("work"),
@@ -176,6 +177,22 @@ import Testing
         let (values, skipped) = try T.decode(file(#"{"autoStart": 1, "autoStop": "true", "notifyOnCrash": false}"#))
         #expect(values == [.notifyOnCrash: .bool(false)])
         #expect(skipped.count == 2)
+    }
+
+    @Test func recoveryNotificationsExportAndImport() throws {
+        let data = try T.encode([.notifyOnRecovery: .bool(true)], appVersion: "1")
+        #expect(try object(data)["settings"] as? [String: Bool] == ["notifyOnRecovery": true])
+        let plan = try T.plan(
+            file(#"{"notifyOnRecovery": true}"#), current: [.notifyOnRecovery: .bool(false)], profiles: [])
+        #expect(plan.changes == [T.Change(setting: .notifyOnRecovery, from: .bool(false), to: .bool(true))])
+        #expect(T.Setting.notifyOnRecovery.title == "Recovery notifications")
+    }
+
+    @Test func mutedProjectsAreNeverASetting() throws {
+        #expect(!T.Setting.allCases.map(\.rawValue).contains("mutedProjects"))
+        let (values, skipped) = try T.decode(file(#"{"mutedProjects": ["default/web"], "autoStop": true}"#))
+        #expect(values == [.autoStop: .bool(true)])
+        #expect(skipped.isEmpty)
     }
 
     @Test func ignoresUnknownAndInternalKeys() throws {

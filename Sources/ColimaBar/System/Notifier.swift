@@ -34,7 +34,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
 
     private let log = Logger(category: "notify")
-    private let center = UNUserNotificationCenter.current()
+    // Lazy: a test process has no app bundle, and `current()` fails there.
+    private lazy var center = UNUserNotificationCenter.current()
     private static let containerCategory = "CONTAINER"
     private static let profileCategory = "PROFILE"
 
@@ -74,14 +75,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// which don't belong in the dashboard's list of container alerts.
     /// `url` makes a click on the banner open that page.
     /// `restartProfile` adds a Restart button for that profile. A click on the
-    /// banner itself does nothing.
+    /// banner itself does nothing. `banner: false` (a muted project) skips the
+    /// banner and the sound. Returns true if the banner went out.
+    @discardableResult
     func post(
         _ body: String, title: String = "Colima", container: ContainerRef? = nil,
-        profile: String? = nil, record: Bool = true, url: URL? = nil, restartProfile: String? = nil
-    ) {
+        profile: String? = nil, record: Bool = true, url: URL? = nil, restartProfile: String? = nil,
+        banner: Bool = true
+    ) -> Bool {
         if record { onAlert?(title, body, container) }
         // The dashboard list above still gets every alert. Only the banner is skipped.
-        if let container, !throttle.allow(AlertThrottle.key(container: container.id, body: body)) { return }
+        guard Self.admitsBanner(banner, container: container, body: body, throttle: &throttle) else { return false }
         Task {
             guard await authorized() else { return }
             let content = UNMutableNotificationContent()
@@ -104,6 +108,17 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 log.error("notification failed: \(error.localizedDescription, privacy: .public)")
             }
         }
+        return true
+    }
+
+    /// True if the banner may go out. A muted alert does not start the
+    /// throttle window, so the first alert after an unmute still shows.
+    nonisolated static func admitsBanner(
+        _ banner: Bool, container: ContainerRef?, body: String, throttle: inout AlertThrottle
+    ) -> Bool {
+        guard banner else { return false }
+        guard let container else { return true }
+        return throttle.allow(AlertThrottle.key(container: container.id, body: body))
     }
 
     /// The profile to restart for a response, or nil. Only the Restart button

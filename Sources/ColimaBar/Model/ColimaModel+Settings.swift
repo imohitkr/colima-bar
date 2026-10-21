@@ -11,6 +11,7 @@ extension ColimaModel {
             .autoStopSooner: .bool(autoStopSooner),
             .hideIconWhenStopped: .bool(hideIconWhenStopped),
             .notifyOnCrash: .bool(notifyOnCrash),
+            .notifyOnRecovery: .bool(notifyOnRecovery),
             .keepRemovedLogs: .bool(keepRemovedLogs),
             .checkUpdates: .bool(Updater.shared.enabled),
             .profile: .string(profile),
@@ -36,6 +37,7 @@ extension ColimaModel {
         case (.autoStopSooner, .bool(let v)): autoStopSooner = v
         case (.hideIconWhenStopped, .bool(let v)): hideIconWhenStopped = v
         case (.notifyOnCrash, .bool(let v)): notifyOnCrash = v
+        case (.notifyOnRecovery, .bool(let v)): notifyOnRecovery = v
         case (.keepRemovedLogs, .bool(let v)): keepRemovedLogs = v
         case (.checkUpdates, .bool(let v)): Updater.shared.enabled = v
         case (.scheduledPrune, .bool(let v)): scheduledPrune = v
