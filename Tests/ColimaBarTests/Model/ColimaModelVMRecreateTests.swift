@@ -102,6 +102,57 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: model.recreateJournalPath(p)))
     }
 
+    @Test func restoreBackupsRunsWhileTheChangeIsPending() async throws {
+        let dir = try TempFolder()
+        let p = "recreate-resume-test"
+        let notes = Notes()
+        let model = readyModel(p, dir: dir.path, notes: notes)
+        model.setState(.running)
+        model.setPendingRecreate([p: journal(p)])
+        // A new change stays blocked, the restore of the unfinished one does not.
+        #expect(model.recreateBlockReason == Help.recreatePending)
+        #expect(model.recreateBlockReason(ignoringPending: true) == nil)
+        model.resumeRecreate(p, folder: URL(fileURLWithPath: dir.path))
+        #expect(model.recreate != nil)
+        #expect(notes.texts.isEmpty)
+        // The journal has no volumes: the run ends, drops the journal and shows the result.
+        await waitUntil { model.recreate == nil }
+        #expect(model.pendingRecreate[p] == nil)
+        #expect(!notes.texts.isEmpty && !notes.texts.contains(Help.recreatePending))
+    }
+
+    @Test func restoreBackupsStaysBlockedByABusyModel() throws {
+        let dir = try TempFolder()
+        let p = "recreate-resume-busy-test"
+        let notes = Notes()
+        let model = readyModel(p, dir: dir.path, notes: notes)
+        model.setState(.running)
+        model.setPendingRecreate([p: journal(p)])
+        model.setRecreate(VMRecreateProgress(profile: p, step: .backingUp))
+        model.resumeRecreate(p, folder: URL(fileURLWithPath: dir.path))
+        #expect(notes.texts == [Help.recreateBusy])
+    }
+
+    @Test func aTestProcessModelNeverReadsTheRealCacheFolder() throws {
+        let model = ColimaModel(profile: "recreate-default-dir-test")
+        #expect(model.recreateCacheDir != Paths.cacheDir)
+        let names = try FileManager.default.contentsOfDirectory(atPath: model.recreateCacheDir)
+        #expect(names.isEmpty)
+        #expect(model.recreateJournalPath("x").hasPrefix(NSTemporaryDirectory()))
+    }
+
+    @Test func aBackupFileThatCannotBeScannedGivesNilAndNoNotificationOnRequest() async throws {
+        let dir = try TempFolder()
+        let model = readyModel("recreate-scan-test", dir: dir.path)
+        var told: [String] = []
+        model.notifySink = { told.append($0) }
+        let missing = URL(fileURLWithPath: dir.path + "/none.tar")
+        #expect(await model.scanBackup(file: missing, notifies: false) == nil)
+        #expect(told.isEmpty)
+        #expect(await model.scanBackup(file: missing) == nil)
+        #expect(told.count == 1)
+    }
+
     @Test func theRuleRefusesAPendingChange() {
         #expect(
             !ColimaModel.mayRecreate(

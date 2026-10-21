@@ -510,6 +510,7 @@ final class ColimaModel {
     /// calls `start()`. Assigning `profile` here runs no `didSet`.
     /// `dockerAPI` is for tests: a fake daemon instead of the socket of the profile.
     /// `recreateCacheDir` is for tests: the folder of the VM type change journals.
+    /// A test process gets an empty temporary folder if it passes none.
     /// `domainProxy`, `domainsEnabled` and `domainsStore` are for tests too: a
     /// fake proxy, a start value of the setting, and a store for it. A test
     /// process that passes none gets an inert proxy and an empty store, so a
@@ -518,9 +519,10 @@ final class ColimaModel {
         profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil,
         domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil, domainsStore: UserDefaults? = nil,
         httpsEnabled: Bool? = nil, domainTLS: (any DomainTLSServicing)? = nil, domainSuffix: String? = nil,
-        recreateCacheDir: String = Paths.cacheDir
+        recreateCacheDir: String? = nil
     ) {
-        self.recreateCacheDir = recreateCacheDir
+        self.recreateCacheDir =
+            recreateCacheDir ?? (TestProcess.isRunning ? TestProcess.emptyCacheDir() : Paths.cacheDir)
         let inTest = TestProcess.isRunning
         self.domainProxy = domainProxy ?? (inTest ? InertDomainProxy() : DomainProxy())
         self.domainTLS = domainTLS ?? (inTest ? InertDomainTLS() : SystemDomainTLS())
@@ -1391,7 +1393,7 @@ final class ColimaModel {
             let fresh = await refreshContainers()
             guard fresh, gen == generation, autoStop, state == .running,
                 !Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0),
-                running.isEmpty, selectedTransfers() == 0
+                running.isEmpty, selectedTransfers() == 0, recreate == nil
             else {
                 resetSelectedIdle()
                 return
@@ -1474,6 +1476,8 @@ final class ColimaModel {
                 s.since = check.idleSince
                 otherIdle[p] = check.isDue ? nil : s
                 guard check.isDue else { return }
+                // A VM type change runs: `run` would refuse and tell the user at each idle period.
+                guard recreate == nil else { return }
                 log.notice(
                     "auto-stopping idle profile \(p, privacy: .public) after \(limit.minutes, privacy: .public) min\(limit.reason.map { " (\($0.note))" } ?? "", privacy: .public)"
                 )

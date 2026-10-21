@@ -200,6 +200,38 @@ import Testing
         #expect(f.calls.last == "dropJournal")
     }
 
+    @Test func aBackupThatStoppedBecauseTheProfileChangedIsNotAUserCancel() async {
+        let f = Fake()
+        f.summary = .init(cancelled: true, started: true)
+        // The checks before the backup pass, then the runner stops and the profile is another one.
+        f.preStops = [nil, nil, .profileChanged]
+        #expect(
+            await run(f, backUp: rows("a"))
+                == .nothingChanged("ColimaBar stopped because you chose another profile. Nothing changed."))
+        #expect(!f.changedVM)
+        #expect(f.calls.last == "dropJournal")
+    }
+
+    @Test func anImageSaveThatStoppedBecauseTheVMStoppedIsNotAUserCancel() async {
+        let f = Fake()
+        f.imageSave = .failure(.cancel)
+        f.preStops = [nil, nil, nil, .vmStopped]
+        #expect(
+            await run(f, backUp: rows("a"), images: ["x:1"])
+                == .nothingChanged(
+                    "ColimaBar stopped because the VM stopped. Nothing changed. The backups so far are in ColimaBar-work-1."
+                ))
+        #expect(!f.changedVM)
+    }
+
+    @Test func aCancelWinsOverAStopReason() async {
+        let f = Fake()
+        f.summary = .init(cancelled: true, started: true)
+        f.cancelAfter = "backUp"
+        f.preStops = [nil, nil, .profileChanged]
+        #expect(await run(f, backUp: rows("a")) == .cancelledBeforeChange)
+    }
+
     @Test func aCancelledImageSaveGivesCancelledBeforeChange() async {
         let f = Fake()
         f.imageSave = .failure(.cancel)

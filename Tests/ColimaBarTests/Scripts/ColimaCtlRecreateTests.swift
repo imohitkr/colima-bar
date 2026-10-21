@@ -155,12 +155,12 @@ import Testing
         try sb.stub("uname", "echo \(arch)")
     }
 
-    private func writeDisk(_ sb: ScriptSandbox, magic: [UInt8]) throws {
+    private func writeDisk(_ sb: ScriptSandbox, magic: [UInt8], formatted: Bool = true) throws {
         let path = "\(sb.home)/.config/colima/_lima/_disks/colima-work/datadisk"
         try FileManager.default.createDirectory(
             atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         try Data(magic + [0, 0, 0, 3] + Array(repeating: 0, count: 64)).write(to: URL(fileURLWithPath: path))
-        try sb.write(".config/colima/_store/colima-work.json", "{\"disk_formatted\": true}")
+        if formatted { try sb.write(".config/colima/_store/colima-work.json", "{\"disk_formatted\": true}") }
     }
 
     @Test func vzIsRefusedForAnX86VM() async throws {
@@ -486,6 +486,16 @@ import Testing
         #expect(yaml(sb) == old)
     }
 
+    @Test func aQcow2DataDiskRefusesVZEvenIfTheStoreDoesNotSayFormatted() async throws {
+        let old = config.replacingOccurrences(of: "vmType: vz", with: "vmType: qemu")
+        let sb = try sandbox(old)
+        try writeDisk(sb, magic: [0x51, 0x46, 0x49, 0xfb], formatted: false)
+        let r = try await recreate(sb, "vz", "virtiofs")
+        #expect(r.status == 1)
+        #expect(notices(r).first?.contains("is a qcow2 file") == true)
+        #expect(sb.calls.isEmpty)
+    }
+
     @Test func aQcow2DataDiskStillAllowsQEMU() async throws {
         let sb = try sandbox()
         try writeDisk(sb, magic: [0x51, 0x46, 0x49, 0xfb])
@@ -513,6 +523,41 @@ import Testing
         let r = try await recreate(sb)
         #expect(r.status == 1)
         #expect(notices(r).first?.hasPrefix("Bridged networking with qemu needs socket_vmnet.") == true)
+    }
+
+    @Test func aTabBeforeAnInlineCommentAndAFourSpaceIndentAreRead() async throws {
+        let sb = try sandbox(config + "network:\n    address: true\t# reachable\n    dns: []\n")
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(notices(r).first?.contains("has a reachable IP address.") == true)
+        #expect(sb.calls.isEmpty)
+    }
+
+    @Test func aTabIndentedBridgedModeIsRefused() async throws {
+        let sb = try sandbox(config + "network:\n\taddress: false\n\tmode: bridged\t# fast\n")
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(notices(r).first?.hasPrefix("Bridged networking with qemu needs socket_vmnet.") == true)
+    }
+
+    @Test func aKeyOfADeeperLevelIsNotTheKeyOfTheSection() async throws {
+        let sb = try sandbox(config + "network:\n  address: false\n  dns:\n    address: true\n")
+        let r = try await recreate(sb)
+        #expect(r.status == 0, "\(r.out)")
+    }
+
+    @Test func qemuIsRefusedForANetworkSectionInTheFlowStyle() async throws {
+        let sb = try sandbox(config + "network: { address: true }\n")
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(notices(r).first?.hasPrefix("ColimaBar cannot read the network settings of profile 'work'") == true)
+        #expect(sb.calls.isEmpty)
+    }
+
+    @Test func anEmptyFlowNetworkSectionPasses() async throws {
+        let sb = try sandbox(config + "network: {}\n")
+        let r = try await recreate(sb)
+        #expect(r.status == 0, "\(r.out)")
     }
 
     // MARK: The live instance
@@ -679,8 +724,101 @@ import Testing
                 $0.hasPrefix("The VM type change of profile 'work' did not finish. colima.yaml has the old values")
             })
         #expect(yaml(sb) == config)
-        #expect(!exists(sb, "\(state)/colima.work.yaml.recreate"))
+        // The copy is the only file with the new values: it stays, and the notice names it.
+        #expect(exists(sb, "\(state)/colima.work.yaml.recreate"))
+        #expect(
+            notices((r.status, r.out)).contains {
+                $0.contains("A copy with the new values is in")
+                    && $0.contains("\(sb.home)/\(state)/colima.work.yaml.recreate")
+            })
         #expect(!sb.calls.contains { $0.hasPrefix("colima delete") })
+    }
+
+    @Test func aTermDuringTheStartAfterColimaRewroteTheFileStillSaysNewValues() async throws {
+        // Colima rewrites colima.yaml in its own format and drops the comments.
+        let sb = try sandbox("# my notes\n" + config + "# more\n")
+        let marker = sb.root + "/starting"
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && exit 1
+            [ "$1" = delete ] && rm -rf "$STUB_DELETE_DIR"
+            if [ "$1" = start ]; then
+              printf 'vmType: "qemu"\\nmountType: "sshfs"\\ncpu: 2\\n' > "$COLIMA_HOME/work/colima.yaml"
+              : > "\(marker)"
+              exec sleep 30
+            fi
+            exit 0
+            """)
+        let r = try await termAt(sb, marker: marker)
+        #expect(r.status == 143, "\(r.out)")
+        let text = notices((r.status, r.out))
+        #expect(text.contains { $0.contains("colima.yaml has the new values") })
+        #expect(!text.contains { $0.contains("colima.yaml has the old values") })
+        #expect(!exists(sb, "\(state)/colima.work.yaml.recreate"))
+        #expect(exists(sb, "\(state)/colima.work.yaml.before-recreate"))
+    }
+
+    @Test func aRewrittenFileWithTheOldValuesKeepsTheCopy() async throws {
+        let sb = try sandbox("# my notes\n" + config)
+        let marker = sb.root + "/starting"
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && exit 1
+            [ "$1" = delete ] && rm -rf "$STUB_DELETE_DIR"
+            if [ "$1" = start ]; then
+              mkdir -p "$COLIMA_HOME/work"
+              printf 'cpu: 2\\nvmType: vz\\n' > "$COLIMA_HOME/work/colima.yaml"
+              : > "\(marker)"
+              exec sleep 30
+            fi
+            exit 0
+            """)
+        let r = try await termAt(sb, marker: marker)
+        #expect(r.status == 143, "\(r.out)")
+        #expect(notices((r.status, r.out)).contains { $0.contains("colima.yaml has the old values") })
+        #expect(exists(sb, "\(state)/colima.work.yaml.recreate"))
+    }
+
+    @Test func anEarlierBeforeRecreateFileIsNeverOverwritten() async throws {
+        let sb = try sandbox()
+        try sb.write("\(state)/colima.work.yaml.before-recreate", "# the oldest original\n")
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && exit 1
+            [ "$1" = delete ] && rm -rf "$STUB_DELETE_DIR"
+            [ "$1" = start ] && exit 1
+            exit 0
+            """)
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(yaml(sb, "\(state)/colima.work.yaml.before-recreate") == "# the oldest original\n")
+        let names = try FileManager.default.contentsOfDirectory(atPath: "\(sb.home)/\(state)")
+            .filter { $0.hasPrefix("colima.work.yaml.before-recreate.") }
+        let newest = try #require(names.first)
+        #expect(names.count == 1)
+        #expect(yaml(sb, "\(state)/\(newest)") == config)
+        #expect(try #require(notices(r).first).contains("\(sb.home)/\(state)/\(newest)"))
+    }
+
+    @Test func aFailedDeleteRemovesTheCopy() async throws {
+        let sb = try sandbox()
+        try sb.stub(
+            "colima",
+            """
+            printf 'colima %s\\n' "$*" >> "\(sb.log)"
+            [ "$1" = status ] && exit 1
+            [ "$1" = delete ] && { rm -rf "$STUB_DELETE_DIR"; exit 1; }
+            exit 0
+            """)
+        let r = try await recreate(sb)
+        #expect(r.status == 1)
+        #expect(!exists(sb, "\(state)/colima.work.yaml.recreate"))
     }
 
     // MARK: Lock and folders

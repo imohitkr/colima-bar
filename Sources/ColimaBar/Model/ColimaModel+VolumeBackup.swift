@@ -34,7 +34,7 @@ extension ColimaModel {
 
     /// Checks a backup file before a restore. A problem goes to a
     /// notification and gives nil.
-    func scanBackup(file: URL) async -> TarFileScan.Summary? {
+    func scanBackup(file: URL, notifies: Bool = true) async -> TarFileScan.Summary? {
         let path = file.path
         let result: Result<TarFileScan.Summary, TarFileScan.Failure> = await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -46,7 +46,7 @@ extension ColimaModel {
         switch result {
         case .success(let summary): return summary
         case .failure(let failure):
-            notify(Self.restoreMessage(scan: failure))
+            if notifies { notify(Self.restoreMessage(scan: failure)) }
             return nil
         }
     }
@@ -82,9 +82,11 @@ extension ColimaModel {
     /// no notification.
     func performBackup(
         volumes rows: [VolumeRow], destinations: [URL], replace: Bool, folder: String?, notifies: Bool,
-        fromRecreate: Bool = false
+        fromRecreate: Bool = false, api: DockerAPI? = nil
     ) async -> VolumeBackupBatch.Summary? {
-        guard let job = beginBackup(rows, destinations: destinations, notifies: notifies, fromRecreate: fromRecreate)
+        guard
+            let job = beginBackup(
+                rows, destinations: destinations, notifies: notifies, fromRecreate: fromRecreate, api: api)
         else { return nil }
         return await runBackup(job, replace: replace, folder: folder, notifies: notifies)
     }
@@ -96,12 +98,12 @@ extension ColimaModel {
     }
 
     private func beginBackup(
-        _ rows: [VolumeRow], destinations: [URL], notifies: Bool, fromRecreate: Bool
+        _ rows: [VolumeRow], destinations: [URL], notifies: Bool, fromRecreate: Bool, api: DockerAPI? = nil
     ) -> BackupJob? {
         guard !rows.isEmpty, mayStartTransfer(fromRecreate: fromRecreate, tell: notifies ? nil : { _ in }) else {
             return nil
         }
-        let runner = VolumeBackupRunner(api: api)
+        let runner = VolumeBackupRunner(api: api ?? self.api)
         // A Cancel of a VM type change that came before this step must stop it at once.
         if fromRecreate, recreate?.isCancelling == true { runner.cancel() }
         volumeRunner = runner
@@ -170,9 +172,12 @@ extension ColimaModel {
     /// posts the result. The VM type change runs it with `fromRecreate`.
     func performRestore(
         file: URL, scan: TarFileScan.Summary, target: String, isNew: Bool,
-        confirmReplace: @escaping @MainActor (String) -> Bool, notifies: Bool, fromRecreate: Bool = false
+        confirmReplace: @escaping @MainActor (String) -> Bool, notifies: Bool, fromRecreate: Bool = false,
+        api: DockerAPI? = nil
     ) async -> VolumeRestoreFlow.Outcome? {
-        guard let job = beginRestore(target, notifies: notifies, fromRecreate: fromRecreate) else { return nil }
+        guard let job = beginRestore(target, notifies: notifies, fromRecreate: fromRecreate, api: api) else {
+            return nil
+        }
         return await runRestore(
             job, file: file, scan: scan, isNew: isNew, confirmReplace: confirmReplace, notifies: notifies)
     }
@@ -183,9 +188,11 @@ extension ColimaModel {
         let target: String
     }
 
-    private func beginRestore(_ target: String, notifies: Bool, fromRecreate: Bool) -> RestoreJob? {
+    private func beginRestore(_ target: String, notifies: Bool, fromRecreate: Bool, api: DockerAPI? = nil)
+        -> RestoreJob?
+    {
         guard mayStartTransfer(fromRecreate: fromRecreate, tell: notifies ? nil : { _ in }) else { return nil }
-        let runner = VolumeBackupRunner(api: api)
+        let runner = VolumeBackupRunner(api: api ?? self.api)
         // A Cancel of a VM type change that came before this step must stop it at once.
         if fromRecreate, recreate?.isCancelling == true { runner.cancel() }
         volumeRunner = runner

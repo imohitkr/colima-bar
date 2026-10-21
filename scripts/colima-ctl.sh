@@ -279,6 +279,9 @@ VM_BACKUP=""
 # RECREATE_COPY is set from the first change until the script knows the end.
 RECREATE_COPY=""
 RECREATE_ORIG=""
+# The VM type and mount type of the change, for cleanup.
+RECREATE_VMTYPE=""
+RECREATE_MOUNTTYPE=""
 cleanup() {
   compose_show
   if [ -n "$INSTALLED" ]; then
@@ -300,12 +303,13 @@ cleanup() {
       else
         notify "The VM type change of $NAMED did not finish. A copy of colima.yaml is in $copy."
       fi
-    elif cmp -s "$copy" "$CONFIG"; then
+    elif [ "$(effective_types "$CONFIG")" = "$RECREATE_VMTYPE $RECREATE_MOUNTTYPE" ]; then
+      # Colima can rewrite colima.yaml in its own format, so compare the values, not the bytes.
       rm -f "$copy"
       notify "The VM type change of $NAMED did not finish. colima.yaml has the new values, and the VM may be stopped. Start the VM to finish. The old colima.yaml is in $RECREATE_ORIG."
     else
-      rm -f "$copy"
-      notify "The VM type change of $NAMED did not finish. colima.yaml has the old values, and the VM may be stopped. Check the VM. The old colima.yaml is in $RECREATE_ORIG."
+      # The copy is the only file with the new values: keep it.
+      notify "The VM type change of $NAMED did not finish. colima.yaml has the old values, and the VM may be stopped. Check the VM. The old colima.yaml is in $RECREATE_ORIG. A copy with the new values is in $copy."
     fi
   fi
   if [ -e "$FOLDER_CHANGED" ]; then
@@ -456,18 +460,38 @@ put_key() {
 }
 
 # section_value SECTION KEY -> the value of a key in the top-level SECTION of
-# colima.yaml (two-space indent). It reads an inline comment, quotes and
-# spaces like yaml_value.
+# colima.yaml. The keys of the section have the indent of its first key (any
+# number of spaces or tabs). It reads an inline comment (after a space or a
+# tab), quotes and spaces like yaml_value. It does not read the flow style
+# (SECTION: { ... }): see section_is_flow.
 section_value() {
   local v
-  v=$(tr -d '\r' <"$CONFIG" | sed -n "/^$1:/,/^[a-z]/p" | sed -n "/^  $2:/{p;q;}")
+  v=$(tr -d '\r' <"$CONFIG" | awk -v sec="$1" -v key="$2" '
+    $0 ~ "^" sec ":" { inside = 1; next }
+    inside && /^[^[:space:]#]/ { exit }
+    inside && /^[[:space:]]*(#|$)/ { next }
+    inside {
+      match($0, /^[[:space:]]+/)
+      if (indent == "") indent = RLENGTH
+      if (RLENGTH == indent && substr($0, RLENGTH + 1, length(key) + 1) == key ":") { print; exit }
+    }')
   [ -n "$v" ] || return 0
   v=${v#*"$2":}
-  v=${v%% \#*}
+  v=$(printf '%s\n' "$v" | sed -E 's/[[:space:]]+#.*$//')
   v=${v#"${v%%[![:space:]]*}"}
   v=${v%"${v##*[![:space:]]}"}
   case "$v" in \"*\"|\'*\') v=${v:1:${#v}-2} ;; esac
   printf '%s\n' "$v"
+}
+
+# section_is_flow SECTION -> true if the top-level SECTION is in the flow
+# style ("SECTION: {...}"), which section_value cannot read. An empty one
+# ("SECTION: {}") has no keys, so it does not count.
+section_is_flow() {
+  local v
+  v=$(yaml_value "$1")
+  case "$v" in "{}") return 1 ;; "{"*) return 0 ;; esac
+  return 1
 }
 
 # is_true VALUE -> true for the YAML forms of true.
@@ -692,6 +716,19 @@ yaml_value() {
   v=${v%"${v##*[![:space:]]}"}
   case "$v" in \"*\"|\'*\') v=${v:1:${#v}-2} ;; esac
   printf '%s\n' "$v"
+}
+
+# effective_types FILE -> "VMTYPE MOUNTTYPE" as Colima reads FILE: vz if the
+# file has no VM type, and the default mount type of the VM type if it has no
+# mount type (VMTypeRules.effective in ColimaBar).
+effective_types() {
+  local t m
+  t=$(yaml_value vmType "$1"); t="${t:-vz}"
+  m=$(yaml_value mountType "$1")
+  if [ -z "$m" ]; then
+    case "$t" in vz) m=virtiofs ;; qemu) m=sshfs ;; esac
+  fi
+  echo "$t $m"
 }
 
 # whole VALUE -> the whole part of a number such as 2 or 2.5, or nothing for
@@ -1188,6 +1225,9 @@ $after" || exit 2
     fi
     if [ "$vmtype" = qemu ]; then
       qemu_ok "$arch" || { notify "The qemu VM type needs QEMU. Install it with brew install qemu, then try again."; exit 1; }
+      if section_is_flow network; then
+        notify "ColimaBar cannot read the network settings of $NAMED. Change the VM type by hand."; exit 1
+      fi
       if is_true "$(section_value network address)"; then
         notify "The VM of $NAMED has a reachable IP address. It needs the vz VM type."; exit 1
       fi
@@ -1197,7 +1237,7 @@ $after" || exit 2
     fi
     # Colima keeps the data disk. vz mounts only a raw disk, and a disk that
     # an older qemu VM made can be qcow2. Then the new VM could not start.
-    if [ "$vmtype" = vz ] && data_disk_kept && data_disk_qcow2; then
+    if [ "$vmtype" = vz ] && data_disk_qcow2; then
       notify "The Docker data disk of $NAMED is a qcow2 file. The vz VM type needs a raw disk, so ColimaBar changed nothing. Back up your data, then delete the VM with its data and create it again."
       exit 1
     fi
@@ -1247,6 +1287,8 @@ Colima deletes the VM and creates it again. $data$rosetta_note
 $after" || exit 2
     same_state "$was_up" || state_changed
     orig="$STATE_DIR/colima.$PROFILE.yaml.before-recreate"
+    # An earlier run can have left its file: it can hold the oldest original. Keep it.
+    [ ! -e "$orig" ] || orig="$orig.$(date +%Y%m%d-%H%M%S).$$"
     copy="$STATE_DIR/colima.$PROFILE.yaml.recreate"
     cp -p "$CONFIG" "$orig" || { notify "Couldn't copy colima.yaml to $orig."; exit 1; }
     cp -p "$CONFIG" "$copy" || { notify "Couldn't copy colima.yaml to $copy."; exit 1; }
@@ -1259,6 +1301,8 @@ $after" || exit 2
     # end the script between the delete and the start.
     trap '' PIPE
     RECREATE_ORIG="$orig"
+    RECREATE_VMTYPE="$vmtype"
+    RECREATE_MOUNTTYPE="$mounttype"
     RECREATE_COPY="$copy"
     with_busy "Changing VM type" recreate_vm "$copy" "$restop"
     rc=$?
@@ -1273,7 +1317,7 @@ $after" || exit 2
         notify "ColimaBar could not stop the VM of $NAMED, so nothing changed - $SEE_LOG"
         exit 1 ;;
       "$RECREATE_DELETE_FAILED")
-        RECREATE_COPY=""
+        RECREATE_COPY=""; rm -f "$copy"
         [ -f "$CONFIG" ] || put_config "$orig" || echo "couldn't put colima.yaml back" >&2
         notify "Colima could not delete the VM of $NAMED - $SEE_LOG. The old colima.yaml is in $orig."
         exit 1 ;;

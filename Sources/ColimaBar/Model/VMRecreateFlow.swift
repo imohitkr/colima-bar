@@ -80,6 +80,16 @@ enum VMRecreateFlow {
             }
             return nil
         }
+        /// A runner that stopped: the user clicked Cancel, or ColimaBar stopped it
+        /// because the profile or the VM changed.
+        func stoppedRunner() -> Outcome {
+            steps.dropJournal()
+            if !steps.isCancelled(), let why = steps.stopReason() {
+                return .nothingChanged(
+                    "ColimaBar stopped because \(why.because). Nothing changed." + soFar("The backups so far are in"))
+            }
+            return .cancelledBeforeChange
+        }
         func journalFailed() -> Outcome {
             steps.dropJournal()
             return .nothingChanged(
@@ -98,10 +108,7 @@ enum VMRecreateFlow {
                 return .nothingChanged("ColimaBar could not start the backup.")
             }
             j.volumes = summary.done.map { .init(name: $0.name, file: $0.file) }
-            if summary.cancelled {
-                steps.dropJournal()
-                return .cancelledBeforeChange
-            }
+            if summary.cancelled { return stoppedRunner() }
             if let reason = summary.prepareFailure ?? summary.failed.first.map({ "\($0.name): \($0.reason)" })
                 ?? (summary.diskFull ? VolumeBackupRunner.Failure.diskFull.reason : nil)
             {
@@ -117,8 +124,7 @@ enum VMRecreateFlow {
                 j.imagesSHA256 = saved.sha256
                 j.images = saveImages
             case .failure(let f) where f.cancelled:
-                steps.dropJournal()
-                return .cancelledBeforeChange
+                return stoppedRunner()
             case .failure(let f):
                 return stopBefore(f.reason)
             }

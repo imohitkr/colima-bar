@@ -18,18 +18,27 @@ extension ColimaModel {
         !isDebug && !busy && !transferring && !recreating && hasConfig && !hasPending
     }
 
-    var canRecreate: Bool {
+    var canRecreate: Bool { canRecreate(ignoringPending: false) }
+
+    /// `ignoringPending` is for the restore of an unfinished change: the
+    /// unfinished change itself must not block it.
+    func canRecreate(ignoringPending: Bool) -> Bool {
         Self.mayRecreate(
             isDebug: isDebug, busy: busy != nil || hasActionInFlight, transferring: volumeTransfer != nil,
-            recreating: recreate != nil, hasConfig: vmSettings != nil, hasPending: pendingRecreate[profile] != nil)
+            recreating: recreate != nil, hasConfig: vmSettings != nil,
+            hasPending: !ignoringPending && pendingRecreate[profile] != nil)
     }
 
     /// Why a VM type change cannot start now, or nil. A hint uses it.
-    var recreateBlockReason: String? {
-        if canRecreate { return nil }
+    var recreateBlockReason: String? { recreateBlockReason(ignoringPending: false) }
+
+    func recreateBlockReason(ignoringPending: Bool) -> String? {
+        if canRecreate(ignoringPending: ignoringPending) { return nil }
         if isDebug { return Help.doctorDebug }
         if vmSettings == nil { return Help.recreateNoConfig }
-        if recreate == nil, busy == nil, !hasActionInFlight, volumeTransfer == nil, pendingRecreate[profile] != nil {
+        if !ignoringPending, recreate == nil, busy == nil, !hasActionInFlight, volumeTransfer == nil,
+            pendingRecreate[profile] != nil
+        {
             return Help.recreatePending
         }
         return Help.recreateBusy
@@ -121,7 +130,7 @@ extension ColimaModel {
         guard !isDebug, p == profile, state == .running, let journal = pendingRecreate[p] else { return }
         let read = (try? String(contentsOfFile: Paths.config(p), encoding: .utf8)).map(VMSettings.read)
         guard VMRecreateJournal.recovery(journal, now: read, busy: false) == .restorePending else { return }
-        if let reason = recreateBlockReason {
+        if let reason = recreateBlockReason(ignoringPending: true) {
             notify(reason)
             return
         }
@@ -161,6 +170,11 @@ extension ColimaModel {
             if recreate?.isCancelling == true { cancel(runner) }
             return runner
         }
+        func stopReason() -> VolumeTransferStop? {
+            if profile != p { return .profileChanged }
+            // A VM that did not run before the change has nothing to wait for.
+            return !running || state == .running ? nil : .vmStopped
+        }
         func progress(_ update: @MainActor (inout VMRecreateProgress) -> Void) {
             guard var r = recreate else { return }
             update(&r)
@@ -171,7 +185,7 @@ extension ColimaModel {
                 let names = VolumeBackupName.fileNames(for: rows.map { ($0.name, $0.isAnonymous) }, date: Date())
                 return await performBackup(
                     volumes: rows, destinations: names.map { folder.appendingPathComponent($0) }, replace: false,
-                    folder: folder.lastPathComponent, notifies: false, fromRecreate: true)
+                    folder: folder.lastPathComponent, notifies: false, fromRecreate: true, api: profileAPI())
             },
             saveImages: { [self] refs, folder in
                 let runner = armed(ImageArchiveRunner(api: profileAPI())) { $0.cancel() }
@@ -208,19 +222,19 @@ extension ColimaModel {
                 let read = VMSettings.read(text)
                 return VMTypeRules.effective(vmType: read.vmType, mountType: read.mountType)
             },
-            stopReason: { [self] in
-                if profile != p { return .profileChanged }
-                // A VM that did not run before the change has nothing to wait for.
-                return !running || state == .running ? nil : .vmStopped
-            },
+            stopReason: { stopReason() },
             isCancelled: { [self] in recreate?.isCancelling == true },
             restore: { [self] volume, folder in
                 let url = folder.appendingPathComponent(volume.file)
-                guard let scan = await scanBackup(file: url) else { return nil }
+                guard let scan = await scanBackup(file: url, notifies: false) else {
+                    return .notice("the backup file is not readable")
+                }
+                // The scan awaited: the profile or the VM may have changed since the check of the flow.
+                if stopReason() != nil { return .cancelled(.nothing) }
                 progress { $0.volume = volume.name }
                 return await performRestore(
                     file: url, scan: scan, target: volume.name, isNew: true, confirmReplace: { _ in false },
-                    notifies: false, fromRecreate: true)
+                    notifies: false, fromRecreate: true, api: profileAPI())
             },
             volumeExists: { name in
                 switch await VolumeBackupRunner(api: profileAPI()).lookup(name) {

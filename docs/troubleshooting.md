@@ -169,7 +169,7 @@ The containers, images and volumes are gone after the delete. You cannot get the
 
 A change of the VM type or mount type runs `colima stop`, `colima delete --force` (without `--data`) and `colima start`. For a stopped VM, it skips the first `colima stop` and runs `colima stop` at the end. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
 
-Before it changes anything, ColimaBar saves `colima.yaml` as `~/.cache/colima-bar/colima.PROFILE.yaml.before-recreate`. The next change of the profile replaces this copy. It writes the new values to `colima.PROFILE.yaml.recreate` and removes that file after a good run.
+Before it changes anything, ColimaBar saves `colima.yaml` as `~/.cache/colima-bar/colima.PROFILE.yaml.before-recreate`. If this file exists from an earlier run, ColimaBar keeps it and saves the new original as `colima.PROFILE.yaml.before-recreate.DATE.PID`. The notice names the file that holds the original. ColimaBar writes the new values to `colima.PROFILE.yaml.recreate` and removes that file after a good run.
 
 - **ColimaBar could not stop the VM.** Nothing changed.
 - **Colima could not delete the VM.** ColimaBar put the old `colima.yaml` back.
