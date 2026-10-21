@@ -225,7 +225,7 @@ extension ColimaModel {
     /// CA stays installed with its files. If the user cancels the second
     /// dialog, the new files go and HTTPS is off. It never leaves the old files
     /// without the old CA, or a CA in the keychain without its files.
-    private func reissueCA(old: LocalCA, restore wasOpen: Bool) {
+    func reissueCA(old: LocalCA, restore wasOpen: Bool) {
         tearDownHTTPS()
         setHTTPSStatus(.init(phase: .settingUp))
         let services = domainTLS
@@ -256,6 +256,36 @@ extension ColimaModel {
                         problem: "HTTPS could not start. ColimaBar could not make the certificate authority."))
             }
             await install(ca)
+        }
+    }
+
+    /// A change of the custom suffix changes the names that the CA must
+    /// permit. A CA that lacks a name stops the listener at once (no old-CA
+    /// listener keeps running), then it is replaced like "Trust Again…"
+    /// does: two dialogs. A CA that permits a name that is gone is replaced
+    /// too, so the CA never covers a suffix without a resolver. A cancel keeps
+    /// the old CA. It needs the master switch on, because a dialog must
+    /// follow a click.
+    func replaceCAForSuffixes() async {
+        guard !isDebug, domainsEnabled, httpsEnabled else { return }
+        while let running = httpsSetupTask { await running.value }
+        guard httpsEnabled, domainsEnabled, let old = tlsCA ?? domainTLS.loadCA() else { return }
+        tlsCA = old
+        let suffixes = activeDomainSuffixes
+        if Set(old.permitted) == Set(suffixes) {
+            if !domainStatus.https.listening { await startHTTPS() }
+            return
+        }
+        // Stops a listener whose CA lacks a name, and keeps `.untrusted` with the reason.
+        await startHTTPS()
+        guard httpsSetupTask == nil, httpsEnabled else { return }
+        reissueCA(old: old, restore: closeDashboardForDialog())
+        while let running = httpsSetupTask { await running.value }
+        // A cancelled replacement leaves a CA that still covers every name: run with it.
+        if httpsEnabled, domainStatus.https.phase == .untrusted, tlsCA?.covers(suffixes) ?? false,
+            !domainStatus.https.listening
+        {
+            await startHTTPS()
         }
     }
 

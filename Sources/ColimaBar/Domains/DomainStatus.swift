@@ -54,11 +54,47 @@ struct DomainStatus: Equatable, Sendable {
         }
     }
 
+    /// What the System tab shows about the DNS server of the custom suffix.
+    struct DNS: Equatable, Sendable {
+        enum Phase: Equatable, Sendable {
+            case off
+            case applying
+            case running
+            /// The server runs, but macOS does not use the resolver file yet.
+            case notUsedYet
+            case failed
+        }
+
+        var phase: Phase = .off
+        var port: UInt16?
+        /// The text for `.failed` and `.notUsedYet`.
+        var problem: String?
+        /// A note after a cancel or a refusal. The state did not change.
+        var note: String?
+
+        /// The caption under the suffix field. `example` is a name that works now.
+        func caption(suffix: String?, example: String?) -> String? {
+            if let note { return note }
+            switch phase {
+            case .off: return nil
+            case .applying: return "Writing the resolver file…"
+            case .failed: return problem ?? "The DNS server could not start."
+            case .notUsedYet:
+                return problem
+                    ?? "macOS does not use /etc/resolver/\(suffix ?? "") yet. Wait a moment, or turn the suffix off and on."
+            case .running:
+                if let example { return "\(example) works on this Mac." }
+                return "Names under \(suffix ?? DomainSuffix.defaultValue) work on this Mac."
+            }
+        }
+    }
+
     var phase: Phase = .off
     var httpPort: UInt16?
     /// The text for `.failed`.
     var problem: String?
     var https = HTTPS()
+    var dns = DNS()
 
     /// True when the proxy listens on a port other than 80.
     var usesFallback: Bool { httpPort.map { $0 != DomainPorts.http[0] } ?? false }

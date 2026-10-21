@@ -3,6 +3,7 @@ import SwiftUI
 /// The switch for container domains and a line about the proxy.
 struct DomainsSection: View {
     @Bindable var model: ColimaModel
+    @Bindable var form: SystemForm
 
     var body: some View {
         Divider()
@@ -58,6 +59,65 @@ struct DomainsSection: View {
             Button("Show Certificate") { model.showCACertificate() }
                 .hint(Help.domainsShowCA)
                 .disabled(model.isDebug)
+                .padding(.leading, 44)
+        }
+        suffixRows
+    }
+
+    private var suffixOn: Bool { model.domainSuffix != nil || form.suffixEditing }
+
+    @ViewBuilder private var suffixRows: some View {
+        Toggle(
+            isOn: Binding(
+                get: { suffixOn },
+                set: { on in
+                    if on {
+                        form.suffixText = model.domainSuffix ?? DomainSuffix.defaultValue
+                        form.suffixEditing = true
+                    } else {
+                        form.suffixEditing = false
+                        if model.domainSuffix != nil { Task { await model.removeSuffix() } }
+                    }
+                })
+        ) {
+            Label("Also use a custom suffix", systemImage: "network")
+        }
+        .hint(Help.domainSuffix)
+        .disabled(!model.domainsEnabled || model.isDebug || model.domainStatus.dns.phase == .applying)
+        .padding(.leading, 22)
+        if suffixOn {
+            let problem = DomainSuffix.problem(form.suffixText)
+            let unchanged = DomainSuffix.normalized(form.suffixText) == model.domainSuffix
+            HStack {
+                TextField(DomainSuffix.defaultValue, text: $form.suffixText)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(model.isDebug || model.domainStatus.dns.phase == .applying)
+                Button("Apply") {
+                    let text = form.suffixText
+                    Task {
+                        await model.applySuffix(text)
+                        form.suffixEditing = model.domainSuffix != nil
+                    }
+                }
+                .hint(Help.domainSuffixApply)
+                .disabled(
+                    problem != nil || unchanged || !model.domainsEnabled || model.isDebug
+                        || model.domainStatus.dns.phase == .applying)
+            }
+            .padding(.leading, 44)
+            if let problem, !unchanged {
+                Text(problem).font(.caption2).foregroundStyle(Color.red).padding(.leading, 44)
+            }
+        }
+        if let caption = model.domainSuffixCaption {
+            Text(caption)
+                .font(.caption2)
+                .foregroundStyle(model.domainStatus.dns.phase == .failed ? Color.orange : .secondary)
+                .padding(.leading, 44)
+        }
+        if model.domainStatus.dns.phase == .failed || model.domainStatus.dns.phase == .notUsedYet {
+            Button("Repair…") { Task { await model.repairDNS() } }
+                .hint(Help.domainSuffixRepair)
                 .padding(.leading, 44)
         }
     }

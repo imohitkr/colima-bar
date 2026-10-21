@@ -552,7 +552,7 @@ HTTPS is off by default. It needs **Open containers at .localhost names**. To tu
 
 What the CA can and cannot sign:
 
-- It signs certificates for websites under `.localhost`, and for nothing else. Its certificate lists `localhost` as the only name that it may sign, and it excludes all IP addresses.
+- It signs certificates for websites under `.localhost` and under your [custom suffix](#custom-suffix), and for nothing else. Its certificate lists these names as the only names that it may sign, and it excludes all IP addresses.
 - You trust it for websites only (the SSL policy of macOS). It cannot sign code, mail or anything else.
 - ColimaBar makes a short certificate (30 days) for each name of a container when a browser asks for it. The certificate covers the name and its subdomains, so a subdomain never makes a new certificate. It covers a name of the current profile that has a container, or had one while the VM ran. So the page for a stopped VM (503) opens without a warning. Any other name gets the certificate of `localhost`, so the browser shows a warning. These certificates stay in memory.
 - The key of the CA is a file in `~/Library/Application Support/ColimaBar/domains`. Only your user can read it, and Time Machine skips it. The key is never in a keychain. Only the certificate of the CA is in your login keychain. Any process of your user can read the key file. A stolen key can sign only names under `.localhost`.
@@ -570,6 +570,31 @@ Tools that use their own trust store need the certificate file. Click **Show Cer
 Homebrew `curl` and Java keep their own stores, so they need the file too. Recent Firefox versions can use the certificates of macOS. If yours cannot, use the setting `security.enterprise_roots.enabled`, or the import of `ca.pem`.
 
 The proxy offers HTTP/1.1 only over HTTPS. The checks of the TLS setup run when HTTPS turns on. If the certificate for each name fails the check, ColimaBar serves one certificate for all names. The setting is not in the settings file, because turning it on needs your password.
+
+### Custom suffix
+
+`.localhost` names work with no setup. A custom suffix adds names such as `web.shop.colima.internal` that also work in tools that do not treat `.localhost` as the Mac. It is off by default and needs **Open containers at .localhost names**.
+
+To turn it on, set **Also use a custom suffix**, keep `colima.internal` or type another suffix, and click **Apply**.
+
+1. ColimaBar runs a small DNS server on `127.0.0.1` and a high UDP port. It answers only for names under the suffix, with `127.0.0.1` and `::1`.
+2. ColimaBar writes the file `/etc/resolver/SUFFIX`, which tells macOS to ask that server for the suffix. macOS asks for an administrator password once. Click **Cancel** to change nothing.
+3. The links in the rows then use the custom suffix, as soon as macOS uses the file.
+
+Allowed suffixes: `test`, or one or two names followed by `.test`, `.internal` or `.home.arpa`, for example `colima.internal`, `dev.test` or `lab.home.arpa`. These endings are reserved for private use, so a typo never takes over a real website. `localhost` already works, `.local` goes to multicast DNS, and ColimaBar refuses real domains such as `.dev` or `.com`. The default has the extra name `colima`, so it never takes over the `.internal` names of a company network. `/etc/resolver/test` often belongs to Valet, puma-dev or dnsmasq. ColimaBar never changes or removes a file that it did not write. It marks its files with a first line, and it says so when another tool owns the file.
+
+Changing the suffix asks for the password once: ColimaBar removes the old file and writes the new one in one step. With HTTPS on, the CA must cover the new suffix, so ColimaBar makes a new CA. macOS then asks to trust the new CA, and again to remove the trust of the old one. A change asks up to three times. If you cancel the dialog for the new CA, the old CA stays and HTTPS covers `.localhost` only. **Trust Again…** under the HTTPS switch tries again.
+
+To turn the suffix off, clear **Also use a custom suffix**. macOS asks for the password to remove the file. The master switch **Open containers at .localhost names** off stops the DNS server but keeps the file, so it asks for nothing. A query then fails at once, because nothing listens. Quit keeps the file too. The uninstall script removes it ([Uninstall](uninstall.md)).
+
+If the DNS server cannot start, or the file is missing or changed, the caption says so and **Repair…** picks a new port and writes the file again. It asks for the password.
+
+Limits:
+
+- A browser with its own secure DNS (DNS over HTTPS) may skip `/etc/resolver`. Turn that off for the suffix, or use `.localhost`.
+- A VPN client that rewrites the DNS setup can hide resolver files while it is connected.
+- Names of the suffix do not resolve inside containers.
+- The suffix is not in the settings file, because it needs your password.
 
 ### Error pages
 

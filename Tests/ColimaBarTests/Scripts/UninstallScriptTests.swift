@@ -338,4 +338,37 @@ import Testing
         let links = try #require(text.range(of: "remove_command_links \"$dir\""))
         #expect(rm.lowerBound < links.lowerBound)
     }
+
+    // MARK: Resolver files
+
+    @Test func resolverFilesListsOnlyFilesWithOurMarker() async throws {
+        let sb = try ScriptSandbox()
+        let dir = sb.root + "/resolver dir"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try ResolverFile.content(port: 25000).write(toFile: dir + "/colima.internal", atomically: true, encoding: .utf8)
+        try ResolverFile.content(port: 25001).write(toFile: dir + "/dev.test", atomically: true, encoding: .utf8)
+        try "nameserver 127.0.0.1\n".write(toFile: dir + "/test", atomically: true, encoding: .utf8)
+        try ("# other\n" + ResolverFile.marker + "\n").write(toFile: dir + "/late", atomically: true, encoding: .utf8)
+        try (ResolverFile.marker + " more\n").write(toFile: dir + "/longer", atomically: true, encoding: .utf8)
+        symlink(dir + "/dev.test", dir + "/link.test")
+        try FileManager.default.createDirectory(atPath: dir + "/sub", withIntermediateDirectories: true)
+        let r = try await call(sb, "own_resolver_files '\(dir)'")
+        #expect(r.status == 0)
+        #expect(r.out.split(separator: "\n").map(String.init) == [dir + "/colima.internal", dir + "/dev.test"])
+        // A missing folder lists nothing and does not fail.
+        let none = try await call(sb, "own_resolver_files '\(sb.root)/missing'")
+        #expect(none.status == 0 && none.out.isEmpty)
+    }
+
+    @Test func theScriptMarkerEqualsTheSwiftMarker() throws {
+        let text = try script()
+        let line = try #require(text.split(separator: "\n").first { $0.hasPrefix("RESOLVER_MARKER=") })
+        #expect(line == "RESOLVER_MARKER=\"\(ResolverFile.marker)\"")
+    }
+
+    @Test func theScriptRemovesResolverFilesWithSudoAndOnlyOurs() throws {
+        let text = try script()
+        #expect(text.contains("own_resolver_files /etc/resolver"))
+        #expect(text.contains("sudo rm -f \"$f\""))
+    }
 }

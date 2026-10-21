@@ -250,4 +250,20 @@ import Testing
         }
         #expect(cache.mintedCount == 1)
     }
+
+    @Test func resetUsesTheNewSuffixes() throws {
+        let (cache, _, _) = try rig()
+        #expect(LeafCache.mintName(sni: "a.dev.test", suffixes: ["localhost"], resolves: { _ in true }) == "localhost")
+        #expect(
+            LeafCache.mintName(sni: "a.dev.test", suffixes: ["localhost", "dev.test"], resolves: { _ in true })
+                == "a.dev.test")
+        _ = cache.identity(forSNI: "a.dev.test")  // before: the localhost leaf
+        let before = cache.mintedCount
+        let next = try LocalCA.create(permitted: ["localhost", "dev.test"])
+        cache.reset(ca: next, suffixes: ["localhost", "dev.test"])
+        #expect(cache.identity(forSNI: "a.dev.test") != nil)
+        #expect(cache.mintedCount == before + 1)
+        _ = cache.identity(forSNI: "a.dev.test")
+        #expect(cache.mintedCount == before + 1)  // cached under its own name
+    }
 }

@@ -68,6 +68,11 @@ enum Defaults {
         case domainsHTTPSPending
         /// The CA removal is in progress: set before the password dialog, cleared after it.
         case domainsHTTPSRemoving
+        /// The custom suffix with a resolver file that ColimaBar wrote, or unset.
+        /// Not in the settings file: it needs an administrator password.
+        case domainSuffix
+        /// The UDP port in that resolver file. Machine state.
+        case domainDNSPort
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

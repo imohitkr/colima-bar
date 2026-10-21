@@ -109,6 +109,19 @@ Restart the container once. The proxy stays on 8080 while a container, running o
 
 Port 443 is busy, or a container, running or stopped, publishes it. The HTTPS listener then uses port 8443. The caption under **Use HTTPS with a local certificate authority** says so. ColimaBar goes back to port 443 by itself when the port is free. If a container started while HTTPS held port 443, the System tab asks you to restart that container once, like for port 80.
 
+## A custom suffix name does not resolve
+
+The caption under **Also use a custom suffix** tells the state. If it says that macOS does not use the file yet, wait a moment or turn the suffix off and on. If it says that the file is missing or changed, or that the DNS server could not start, click **Repair…**. ColimaBar picks a new port and writes `/etc/resolver/SUFFIX` again (it asks for your password).
+
+Other causes:
+
+- A browser with its own secure DNS (DNS over HTTPS) skips `/etc/resolver`. Turn that off for local names. `.localhost` names always work.
+- A VPN client can rewrite the DNS setup and hide resolver files while it is connected.
+- The master switch **Open containers at .localhost names** stops the DNS server. Turn it on.
+- Names of the suffix do not resolve inside containers.
+
+To check, run `scutil --dns | grep -A3 colima.internal` (use your suffix). It must show `nameserver : 127.0.0.1` and the port of `/etc/resolver/colima.internal`. If another tool owns the file, ColimaBar says so and changes nothing: choose another suffix.
+
 ## Names do not resolve in containers
 
 If containers cannot resolve names, for example after you connect to a VPN, set the DNS servers of the VM. Open **More VM settings…**, type the IP addresses of your DNS servers in **DNS servers** and click **Apply**. The VM restarts. If the field is empty, the VM uses the DNS of your Mac. A VPN can change that DNS.

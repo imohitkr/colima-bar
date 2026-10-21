@@ -82,4 +82,18 @@ import Testing
         #expect(s.https.caption == "HTTPS listens on port 443.")
         #expect(DomainStatus().https == DomainStatus.HTTPS())
     }
+
+    @Test func theDNSCaptionsFollowThePhase() {
+        typealias DNS = DomainStatus.DNS
+        #expect(DNS().caption(suffix: nil, example: nil) == nil)
+        #expect(DNS(phase: .applying).caption(suffix: "a.test", example: nil) == "Writing the resolver file…")
+        #expect(
+            DNS(phase: .running).caption(suffix: "a.test", example: "web.a.test") == "web.a.test works on this Mac.")
+        #expect(
+            DNS(phase: .running).caption(suffix: "a.test", example: nil) == "Names under a.test work on this Mac.")
+        #expect(DNS(phase: .failed, problem: "boom").caption(suffix: "a.test", example: nil) == "boom")
+        let waiting = DNS(phase: .notUsedYet).caption(suffix: "a.test", example: nil)
+        #expect(waiting?.contains("/etc/resolver/a.test") == true)
+        #expect(DNS(phase: .running, note: "N").caption(suffix: "a.test", example: nil) == "N")
+    }
 }

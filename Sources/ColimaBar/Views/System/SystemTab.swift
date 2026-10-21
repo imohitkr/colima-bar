@@ -139,7 +139,7 @@ struct SystemTab: View {
             .toggleStyle(.checkbox)
             .hint(Help.hideIcon)
 
-            DomainsSection(model: model)
+            DomainsSection(model: model, form: form)
 
             Divider()
             SectionHeader(title: "Doctor")
