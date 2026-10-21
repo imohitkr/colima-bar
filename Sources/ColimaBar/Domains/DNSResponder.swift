@@ -34,6 +34,8 @@ final class DNSResponder: DNSServing, @unchecked Sendable {
     let maxFlows: Int
     let readyTimeout: TimeInterval
     let idleTimeout: TimeInterval
+    /// A flow that sends more messages than this closes.
+    let maxMessagesPerFlow = 64
     private let queue = DispatchQueue(label: "colimabar.dns")
     private let zoneLock = OSAllocatedUnfairLock(initialState: "")
     private let failureLock = OSAllocatedUnfairLock<(@Sendable () -> Void)?>(initialState: nil)
@@ -43,7 +45,15 @@ final class DNSResponder: DNSServing, @unchecked Sendable {
     private var listener: NWListener?
     private var generation = 0
     private var boundPort: UInt16?
-    private var flows: [ObjectIdentifier: NWConnection] = [:]
+    private var flows: [ObjectIdentifier: Flow] = [:]
+
+    /// Touched on `queue` only.
+    private final class Flow: @unchecked Sendable {
+        let connection: NWConnection
+        var epoch = 0
+        var handled = 0
+        init(_ connection: NWConnection) { self.connection = connection }
+    }
 
     /// The only address that production binds.
     static let loopback = "127.0.0.1"
@@ -77,11 +87,12 @@ final class DNSResponder: DNSServing, @unchecked Sendable {
     /// The number of open flows.
     var flowCount: Int { queue.sync { flows.count } }
 
-    /// Binds `127.0.0.1:port`. True when the listener is ready. A call
-    /// replaces an earlier listener, and `stop()` during a start makes the
-    /// start return false with nothing bound.
+    /// Binds `127.0.0.1:port`, or a free port when `port` is 0 (a test uses
+    /// that; read the port back from `port`). True when the listener is
+    /// ready. A call replaces an earlier listener, and `stop()` during a start
+    /// makes the start return false with nothing bound.
     func start(port: UInt16) async -> Bool {
-        guard let endpointPort = NWEndpoint.Port(rawValue: port), port != 0 else { return false }
+        guard let endpointPort = NWEndpoint.Port(rawValue: port) else { return false }
         let (gen, old) = queue.sync { () -> (Int, NWListener?) in
             generation += 1
             let old = listener
@@ -107,7 +118,7 @@ final class DNSResponder: DNSServing, @unchecked Sendable {
         listener?.cancel()
         listener = nil
         boundPort = nil
-        for (_, flow) in flows { flow.cancel() }
+        for (_, flow) in flows { flow.connection.cancel() }
         flows = [:]
     }
 
@@ -142,7 +153,7 @@ final class DNSResponder: DNSServing, @unchecked Sendable {
             guard first else { return }
             if ok, generation == gen {
                 listener = made
-                boundPort = port.rawValue
+                boundPort = made.port?.rawValue ?? port.rawValue
             } else {
                 made.cancel()
             }
@@ -173,22 +184,38 @@ final class DNSResponder: DNSServing, @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + readyTimeout) { finish(false) }
     }
 
-    /// One flow for each source endpoint: it reads one message, answers it and closes.
+    /// One flow for each source endpoint. A client such as `getaddrinfo` sends
+    /// the A and the AAAA query from one socket, so the flow keeps reading: it
+    /// answers each message, and it closes after `idleTimeout` without a
+    /// message or after `maxMessagesPerFlow` messages.
     private func accept(_ connection: NWConnection, generation gen: Int) {
         guard generation == gen, flows.count < maxFlows else { return connection.cancel() }
+        let flow = Flow(connection)
         let id = ObjectIdentifier(connection)
-        flows[id] = connection
+        flows[id] = flow
         connection.stateUpdateHandler = { [weak self] state in
             if case .cancelled = state { self?.flows[id] = nil }
         }
         connection.start(queue: queue)
-        queue.asyncAfter(deadline: .now() + idleTimeout) { connection.cancel() }
-        connection.receiveMessage { [weak self] data, _, _, error in
-            guard let self else { return connection.cancel() }
-            guard let data, error == nil, !data.isEmpty,
-                let reply = DNSMessage.response(to: [UInt8](data), zone: zone)
-            else { return connection.cancel() }
-            connection.send(content: Data(reply), completion: .contentProcessed { _ in connection.cancel() })
+        arm(flow)
+    }
+
+    /// Waits for the next message of the flow and restarts its idle timer.
+    private func arm(_ flow: Flow) {
+        flow.epoch += 1
+        let epoch = flow.epoch
+        queue.asyncAfter(deadline: .now() + idleTimeout) { [weak flow] in
+            if let flow, flow.epoch == epoch { flow.connection.cancel() }
+        }
+        flow.connection.receiveMessage { [weak self, weak flow] data, _, _, error in
+            guard let self, let flow else { return }
+            guard let data, error == nil else { return flow.connection.cancel() }
+            flow.handled += 1
+            guard flow.handled <= maxMessagesPerFlow else { return flow.connection.cancel() }
+            if !data.isEmpty, let reply = DNSMessage.response(to: [UInt8](data), zone: zone) {
+                flow.connection.send(content: Data(reply), completion: .idempotent)
+            }
+            arm(flow)
         }
     }
 

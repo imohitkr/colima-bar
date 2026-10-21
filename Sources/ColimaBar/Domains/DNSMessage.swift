@@ -2,8 +2,8 @@ import Foundation
 
 /// The DNS codec of the small responder for the custom suffix. Pure: bytes in,
 /// bytes out. It answers one question at a time, inside one zone: `A` with
-/// 127.0.0.1, `AAAA` with ::1, nothing for other types, and NXDOMAIN outside
-/// the zone. It never follows a compression pointer, so a hostile packet
+/// 127.0.0.1, `AAAA` with ::1, nothing for other types, and REFUSED (no AA)
+/// outside the zone or with an empty zone. It never follows a compression pointer, so a hostile packet
 /// cannot make it loop.
 enum DNSMessage {
     struct Query: Equatable, Sendable {
@@ -96,9 +96,12 @@ enum DNSMessage {
             let out = flagQR | (flags & 0x7800) | (flags & flagRD) | UInt16(code.rawValue)
             return header(id: u16(p, 0), flags: out, answers: 0, questions: 0)
         case .query(let q):
-            guard q.qclass == classIN || q.qclass == classANY else { return reply(p, q, .refused, []) }
-            let inZone = q.name == zone || q.name.hasSuffix("." + zone)
-            guard inZone else { return reply(p, q, .nxDomain, []) }
+            // A name that this server is not responsible for gets REFUSED without AA.
+            guard q.qclass == classIN || q.qclass == classANY else {
+                return reply(p, q, .refused, [], authority: false)
+            }
+            let inZone = !zone.isEmpty && (q.name == zone || q.name.hasSuffix("." + zone))
+            guard inZone else { return reply(p, q, .refused, [], authority: false) }
             var answers: [(UInt16, [UInt8])] = []
             if q.type == typeA || q.type == typeANY { answers.append((typeA, [127, 0, 0, 1])) }
             if q.type == typeAAAA || q.type == typeANY {
@@ -109,9 +112,12 @@ enum DNSMessage {
     }
 
     /// Copies the ID and the question verbatim (the 0x20 case stays). AA is
-    /// set, RA is not, and the additional section (an EDNS OPT) is dropped.
-    private static func reply(_ p: [UInt8], _ q: Query, _ code: RCode, _ answers: [(UInt16, [UInt8])]) -> [UInt8] {
-        let flags = flagQR | flagAA | (q.flags & flagRD) | UInt16(code.rawValue)
+    /// set when `authority` is true, RA is not, and the additional section
+    /// (an EDNS OPT) is dropped.
+    private static func reply(
+        _ p: [UInt8], _ q: Query, _ code: RCode, _ answers: [(UInt16, [UInt8])], authority: Bool = true
+    ) -> [UInt8] {
+        let flags = flagQR | (authority ? flagAA : 0) | (q.flags & flagRD) | UInt16(code.rawValue)
         var out = header(id: q.id, flags: flags, answers: answers.count, questions: 1)
         out += p[headerSize..<q.questionEnd]
         for (type, rdata) in answers {

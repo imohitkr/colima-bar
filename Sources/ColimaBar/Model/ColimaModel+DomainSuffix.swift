@@ -66,18 +66,24 @@ extension ColimaModel {
         dnsStartToken += 1
         dnsRetry?.cancel()
         dnsRetry = nil
+        dnsRecheck?.cancel()
+        dnsRecheck = nil
     }
 
     /// The master switch off, or a stop: no server. The resolver file stays.
+    /// A write of the resolver file that runs keeps its `.applying` state: its
+    /// flow ends it.
     func stopDNSResponder() {
         invalidateDNSTasks()
         dnsResponder.stop()
-        setDNSStatus(DomainStatus.DNS())
+        if domainStatus.dns.phase != .applying { setDNSStatus(DomainStatus.DNS()) }
     }
 
-    /// Starts the server on the saved port, if the resolver file is ours. It shows no dialog.
+    /// Starts the server on the saved port, if the resolver file is ours and
+    /// names that port. Then it asks the system resolver (`verifyResolver`).
+    /// It shows no dialog, and it waits while a write of the file runs.
     func startDNSResponder() async {
-        guard !isDebug, domainsEnabled, let suffix = domainSuffix else { return }
+        guard !isDebug, domainsEnabled, let suffix = domainSuffix, domainStatus.dns.phase != .applying else { return }
         dnsStartToken += 1
         let token = dnsStartToken
         dnsRetry?.cancel()
@@ -95,11 +101,17 @@ extension ColimaModel {
                 "The file /etc/resolver/\(suffix) is missing or changed. Click Repair to write it again.", retry: false
             )
         }
+        guard ResolverInstaller.port(suffix, dir: resolverDir) == port else {
+            dnsResponder.stop()
+            return setDNSFailed(
+                "The file /etc/resolver/\(suffix) names another port. Click Repair to write it again.", retry: false)
+        }
         dnsResponder.zone = suffix
         let ok = await dnsResponder.start(port: UInt16(port))
         guard token == dnsStartToken, domainsEnabled, !isDebug else { return }
         if ok {
             setDNSStatus(DomainStatus.DNS(phase: .running, port: UInt16(port)))
+            await verifyResolver()
         } else {
             setDNSFailed("The DNS server could not start on port \(port).")
         }
@@ -121,17 +133,41 @@ extension ColimaModel {
     }
 
     private func dnsListenerFailed(token: Int) {
-        guard !isDebug, domainsEnabled, token == dnsStartToken else { return }
+        guard !isDebug, domainsEnabled, token == dnsStartToken, domainStatus.dns.phase != .applying else { return }
         dnsStartToken += 1
         setDNSFailed("The DNS server stopped. ColimaBar tries again soon.")
     }
 
     /// The listener normally survives a sleep. Start it again if it is gone.
+    /// Then ask the system resolver again: a wake can change what it does with the file.
     func dnsAfterWake() {
-        guard !isDebug, domainsEnabled, domainSuffix != nil, domainStatus.dns.phase != .applying,
-            dnsResponder.port == nil
-        else { return }
-        Task { await startDNSResponder() }
+        guard !isDebug, domainsEnabled, domainSuffix != nil, domainStatus.dns.phase != .applying else { return }
+        Task {
+            if dnsResponder.port == nil {
+                await startDNSResponder()
+            } else {
+                await verifyResolver()
+            }
+        }
+    }
+
+    /// Checks the system resolver. While macOS does not use the file yet
+    /// (`.notUsedYet`), it checks again after each wait of
+    /// `DomainTimings.dnsRecheck`, because macOS can need a few seconds to read a new file.
+    func verifyResolver() async {
+        dnsRecheck?.cancel()
+        dnsRecheck = nil
+        await checkResolver()
+        guard domainStatus.dns.phase == .notUsedYet else { return }
+        let token = dnsStartToken
+        let waits = domainTimings.dnsRecheck
+        dnsRecheck = Task {
+            for wait in waits {
+                try? await Task.sleep(for: .seconds(wait))
+                guard !Task.isCancelled, token == dnsStartToken, domainStatus.dns.phase == .notUsedYet else { return }
+                await checkResolver()
+            }
+        }
     }
 
     /// Looks up a name of the suffix through the system resolver. It sets
@@ -172,9 +208,10 @@ extension ColimaModel {
         domainsStore.set(suffix, forKey: Defaults.Key.domainSuffix.rawValue)
         domainsStore.set(port, forKey: Defaults.Key.domainDNSPort.rawValue)
         setDomainSuffixValue(suffix)
+        setDNSStatus(DomainStatus.DNS())
         rebuildDomainRoutes()
         await startDNSResponder()
-        await checkResolver()
+        // The CA must permit the new suffix. With HTTPS on, this asks to replace it.
         if httpsEnabled { await replaceCAForSuffixes() }
     }
 
@@ -219,15 +256,18 @@ extension ColimaModel {
             new: suffix, old: nil, port: port, dir: resolverDir, run: resolverRun)
         guard await finishResolverWrite(outcome, before: before, suffix: suffix) else { return }
         domainsStore.set(port, forKey: Defaults.Key.domainDNSPort.rawValue)
+        invalidateDNSTasks()
         dnsResponder.stop()
+        setDNSStatus(DomainStatus.DNS())
         await startDNSResponder()
-        await checkResolver()
     }
 
     /// Shows the note of a cancel, a refusal or an error and restores the old state. True for `.done`.
     private func finishResolverWrite(_ outcome: ResolverInstaller.Outcome, before: DomainStatus.DNS, suffix: String)
         async -> Bool
     {
+        // The master switch can go off during the prompt. The server is off then.
+        let before = domainsEnabled ? before : DomainStatus.DNS()
         switch outcome {
         case .done:
             return true

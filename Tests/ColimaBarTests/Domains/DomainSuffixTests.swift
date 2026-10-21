@@ -8,6 +8,8 @@ import Testing
         #expect(DomainSuffix.problem(s) == nil)
     }
 
+    private let shape = "Use one or two parts before .test, .internal or .home.arpa. Or use test."
+
     @Test func rejectsWithTheExactMessage() {
         let table: [(String, String)] = [
             ("", "Type a suffix, for example colima.internal."),
@@ -28,24 +30,45 @@ import Testing
             ("x.localhost", "localhost works already. Choose another suffix."),
             ("local", ".local does not work: macOS sends .local names to multicast DNS."),
             ("foo.local", ".local does not work: macOS sends .local names to multicast DNS."),
-            ("internal", "End the suffix with .test, .internal or .home.arpa, or use test."),
-            ("home.arpa", "End the suffix with .test, .internal or .home.arpa, or use test."),
-            ("dev", "End the suffix with .test, .internal or .home.arpa, or use test."),
-            ("com", "End the suffix with .test, .internal or .home.arpa, or use test."),
-            ("example.com", "End the suffix with .test, .internal or .home.arpa, or use test."),
-            ("arpa", "End the suffix with .test, .internal or .home.arpa, or use test."),
-            ("test.com", "End the suffix with .test, .internal or .home.arpa, or use test."),
+            ("internal", shape),
+            ("home.arpa", shape),
+            ("dev", shape),
+            ("com", shape),
+            ("example.com", shape),
+            ("arpa", shape),
+            ("test.com", shape),
+            ("a.b.c.test", shape),
+            ("a.b.c.internal", shape),
+            ("a.b.c.home.arpa", "Use at most 4 parts and 100 characters."),
+            ("a\nb.test", "Use lower-case letters, digits, hyphens and dots."),
+            ("a\tb.test", "Use lower-case letters, digits, hyphens and dots."),
         ]
         for (raw, message) in table { #expect(DomainSuffix.problem(raw) == message, "\(raw)") }
     }
 
     @Test func aHundredBytesPassAndOneMoreFails() {
-        // 4 labels of at most 63 bytes: 24 + 1 + 24 + 1 + 24 + 1 + 4 = 79 bytes is fine.
-        let ok = ["a", "b", "c"].map { String(repeating: $0, count: 24) }.joined(separator: ".") + ".test"
-        #expect(DomainSuffix.problem(ok) == nil)
-        let long = String(repeating: "a", count: 60) + "." + String(repeating: "b", count: 41) + ".test"
-        #expect(long.utf8.count > 100)
-        #expect(DomainSuffix.problem(long) == "Use at most 4 parts and 100 characters.")
+        let label = String(repeating: "a", count: 63)
+        let hundred = label + "." + String(repeating: "b", count: 31) + ".test"
+        #expect(hundred.utf8.count == 100 && DomainSuffix.problem(hundred) == nil)
+        let more = label + "." + String(repeating: "b", count: 32) + ".test"
+        #expect(more.utf8.count == 101)
+        #expect(DomainSuffix.problem(more) == "Use at most 4 parts and 100 characters.")
+    }
+
+    @Test func aLabelOf63BytesPassesAndTheShapeLimitsTheParts() {
+        #expect(DomainSuffix.problem(String(repeating: "a", count: 63) + ".test") == nil)
+        for ok in ["a.b.test", "a.b.internal", "a.home.arpa", "a.b.home.arpa", "xn--bcher-kva.test", "test"] {
+            #expect(DomainSuffix.problem(ok) == nil, "\(ok)")
+        }
+        #expect(DomainSuffix.problem("a.b.c.home.arpa") != nil)
+        #expect(DomainSuffix.problem("a.b.c.internal") == shape)
+    }
+
+    @Test func dotsAndWhitespaceAtTheEndsAreTrimmed() {
+        #expect(DomainSuffix.problem("test.") == nil)
+        #expect(DomainSuffix.problem(".test.") == nil)
+        #expect(DomainSuffix.problem(" dev.test\n") == nil)
+        #expect(DomainSuffix.valid(" dev.test\n") == "dev.test")
     }
 
     @Test func normalizesCaseSpacesAndDots() {

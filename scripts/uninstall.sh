@@ -165,16 +165,29 @@ colimabar_ca_hashes() {
 # RESOLVER_MARKER is the first line of each file that ColimaBar adds for the
 # custom suffix of container domains: ResolverFile.marker. A test checks that
 # both strings are equal.
-RESOLVER_MARKER="# Managed by ColimaBar (com.imohitkr.ColimaBar). ColimaBar removes this file when you turn the custom suffix off."
+RESOLVER_MARKER="# Managed by ColimaBar (com.imohitkr.ColimaBar). ColimaBar changes and removes this file."
 
 # own_resolver_files DIR -> the files in DIR that ColimaBar wrote: regular
-# files (no links) with RESOLVER_MARKER on the first line. Other files stay.
+# files (no links) with RESOLVER_MARKER on the first line. It lists the
+# temporary files ".SUFFIX.colimabar-tmp" of a failed write too. Other files stay.
 own_resolver_files() {
   local f
-  for f in "$1"/*; do
+  for f in "$1"/* "$1"/.*.colimabar-tmp; do
     [ -f "$f" ] && [ ! -L "$f" ] || continue
     [ "$(head -n 1 "$f" 2>/dev/null)" = "$RESOLVER_MARKER" ] && echo "$f"
   done
+  return 0
+}
+
+# remove_resolver_files DIR -> removes our files of own_resolver_files DIR
+# with sudo (/etc needs it, as for /var/run). A failure only prints a hint.
+remove_resolver_files() {
+  local f
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    echo "Removing $f (needs sudo)"
+    sudo rm -f "$f" || echo "Could not remove $f. Remove it by hand." >&2
+  done < <(own_resolver_files "$1")
   return 0
 }
 
@@ -279,11 +292,7 @@ done < <(colimabar_ca_hashes "$KEYCHAIN")
 
 # The resolver file of the custom suffix. Only a file with our marker goes.
 # /etc needs sudo, as for /var/run.
-while IFS= read -r f; do
-  [ -n "$f" ] || continue
-  echo "Removing $f (needs sudo)"
-  sudo rm -f "$f" || echo "Could not remove $f. Remove it by hand." >&2
-done < <(own_resolver_files /etc/resolver)
+remove_resolver_files /etc/resolver
 
 echo "ColimaBar removed. Docker clients now use Colima's socket: $COLIMA_SOCK"
 echo "$STABLE now links to Colima's socket, so a DOCKER_HOST that points at it keeps working."

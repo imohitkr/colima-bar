@@ -43,6 +43,19 @@ enum ResolverInstaller {
         inspect(suffix, dir: dir) == .foreign ? .foreign : nil
     }
 
+    /// True for the cancel of the password dialog: error `(-128)`, not `-1280` or another number.
+    static func isCancel(_ text: String) -> Bool {
+        text.contains("(-128)") || text.localizedCaseInsensitiveContains("User canceled")
+    }
+
+    /// The port in the file, when the file is ours.
+    static func port(_ suffix: String, dir: String = ResolverFile.dir) -> Int? {
+        guard inspect(suffix, dir: dir) == .ours,
+            let data = FileManager.default.contents(atPath: ResolverFile.path(suffix, dir: dir))
+        else { return nil }
+        return ResolverFile.port(in: String(decoding: data, as: UTF8.self))
+    }
+
     static func apply(
         new: String?, old: String?, port: Int, dir: String = ResolverFile.dir, run: Runner = systemRun
     ) async -> Outcome {
@@ -52,7 +65,7 @@ enum ResolverInstaller {
         let result = await run(["osascript", "-e", ResolverFile.appleScript(shell)])
         if result.ok { return .done }
         let text = result.out
-        if text.contains("-128") || text.localizedCaseInsensitiveContains("User canceled") { return .cancelled }
+        if Self.isCancel(text) { return .cancelled }
         if result.status == ResolverFile.foreignExit || text.contains(ResolverFile.foreignToken) { return .foreign }
         let line = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? "status \(result.status)"
         return .failed(String(line.prefix(200)))

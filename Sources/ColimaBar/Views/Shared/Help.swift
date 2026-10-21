@@ -404,15 +404,15 @@ enum Help {
     }
     static let domainsDebug = "A debug run does not start the proxy."
     static let domainsHTTPS =
-        "Serve the names over HTTPS too. ColimaBar makes a certificate authority that works only for .localhost names, and only for websites. macOS asks for your password to trust it. Turn this off to remove it."
+        "Serve the names over HTTPS too. ColimaBar makes a certificate authority that works only for .localhost names and your custom suffix, and only for websites. macOS asks for your password to trust it. Turn this off to remove it."
     static let domainsTrustAgain =
-        "Add the certificate authority to your login keychain and trust it again. macOS asks for your password."
+        "Trust the certificate authority again. If it does not cover your names, ColimaBar replaces it. macOS then asks for your password twice: to remove the old one and to trust the new one."
     static let domainsDeleteCA =
         "Remove the old certificate authority from your login keychain. A removal did not finish. macOS asks for your password."
     static let domainSuffix =
-        "Also answer for names such as web.shop.colima.internal. ColimaBar runs a small DNS server on this Mac and adds the file /etc/resolver/SUFFIX. macOS asks for an administrator password to add it and to remove it."
+        "Also answer for names such as web.shop.colima.internal. ColimaBar runs a small DNS server on this Mac and adds the file /etc/resolver/SUFFIX. macOS asks for an administrator password to add it and to remove it. With HTTPS on, a change or a removal also replaces the certificate authority, and macOS asks for your password twice more."
     static let domainSuffixApply =
-        "Write the resolver file for this suffix. macOS asks for an administrator password. With HTTPS on, macOS also asks to trust a new certificate authority."
+        "Write the resolver file for this suffix. macOS asks for an administrator password. With HTTPS on, macOS also asks for your password twice to replace the certificate authority."
     static let domainSuffixRepair =
         "Pick a new port for the DNS server and write the resolver file again. macOS asks for an administrator password."
     static let domainsShowCA =

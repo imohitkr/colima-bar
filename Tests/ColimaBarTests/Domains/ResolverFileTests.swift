@@ -192,4 +192,78 @@ import Testing
         #expect(ResolverFile.isOurs(text(b.path("a.test")) ?? ""))
         #expect(ResolverInstaller.inspect("a.test", dir: b.dir) == .ours)
     }
+
+    @Test func theNewFileIsWrittenBeforeTheOldOneIsRemoved() async throws {
+        let b = try box()
+        defer { cleanup(b) }
+        try ResolverFile.content(port: 25000).write(toFile: b.path("old.test"), atomically: true, encoding: .utf8)
+        // The folder cannot be written: the new file fails, so the old file must stay.
+        chmod(b.dir, 0o555)
+        defer { chmod(b.dir, 0o755) }
+        let cmd = try #require(ResolverFile.shellCommand(dir: b.dir, new: "new.test", old: "old.test", port: 25000))
+        #expect(try await run(cmd).status != 0)
+        chmod(b.dir, 0o755)
+        #expect(text(b.path("old.test")) == ResolverFile.content(port: 25000))
+        #expect(!FileManager.default.fileExists(atPath: b.path("new.test")))
+        let order = cmd.range(of: "/bin/mv -f")?.lowerBound
+        let removal = cmd.range(of: "/bin/rm -f \"$D/$O\"")?.lowerBound
+        #expect(try #require(order) < #require(removal))
+    }
+
+    @Test func aFailureAfterTheTemporaryFileLeavesNoTemporaryFile() async throws {
+        let b = try box()
+        defer { cleanup(b) }
+        let cmd = try #require(ResolverFile.shellCommand(dir: b.dir, new: "a.test", old: nil, port: 25000))
+        #expect(cmd.contains("trap "))
+        // Force the rename to fail after the temporary file exists.
+        let broken = cmd.replacingOccurrences(of: "/bin/mv -f", with: "/usr/bin/false #")
+        #expect(try await run(broken).status != 0)
+        #expect(!FileManager.default.fileExists(atPath: b.path(".a.test.colimabar-tmp")))
+        #expect(!FileManager.default.fileExists(atPath: b.path("a.test")))
+    }
+
+    @Test func aTemporaryFileThatIsALinkIsReplacedNotFollowed() async throws {
+        let b = try box()
+        defer { cleanup(b) }
+        let victim = b.root + "/victim"
+        try "keep\n".write(toFile: victim, atomically: true, encoding: .utf8)
+        symlink(victim, b.path(".a.test.colimabar-tmp"))
+        let cmd = try #require(ResolverFile.shellCommand(dir: b.dir, new: "a.test", old: nil, port: 25000))
+        #expect(try await run(cmd).status == 0)
+        #expect(text(victim) == "keep\n")
+        #expect(text(b.path("a.test")) == ResolverFile.content(port: 25000))
+        #expect(!FileManager.default.fileExists(atPath: b.path(".a.test.colimabar-tmp")))
+    }
+
+    @Test func theSameSuffixAsOldAndNewKeepsTheFile() async throws {
+        let b = try box()
+        defer { cleanup(b) }
+        try ResolverFile.content(port: 25000).write(toFile: b.path("a.test"), atomically: true, encoding: .utf8)
+        let cmd = try #require(ResolverFile.shellCommand(dir: b.dir, new: "a.test", old: "a.test", port: 26000))
+        #expect(try await run(cmd).status == 0)
+        #expect(text(b.path("a.test")) == ResolverFile.content(port: 26000))
+    }
+
+    @Test func aDanglingLinkAtTheTargetGivesExit3() async throws {
+        let b = try box()
+        defer { cleanup(b) }
+        symlink(b.root + "/nowhere", b.path("a.test"))
+        let cmd = try #require(ResolverFile.shellCommand(dir: b.dir, new: "a.test", old: nil, port: 25000))
+        #expect(try await run(cmd).status == ResolverFile.foreignExit)
+        #expect(!FileManager.default.fileExists(atPath: b.root + "/nowhere"))
+    }
+
+    @Test func aDirectoryAtTheNewOrOldNameIsLeftAlone() async throws {
+        let b = try box()
+        defer { cleanup(b) }
+        try FileManager.default.createDirectory(atPath: b.path("new.test"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(atPath: b.path("old.test"), withIntermediateDirectories: true)
+        let asNew = try #require(ResolverFile.shellCommand(dir: b.dir, new: "new.test", old: nil, port: 25000))
+        #expect(try await run(asNew).status == ResolverFile.foreignExit)
+        let asOld = try #require(ResolverFile.shellCommand(dir: b.dir, new: nil, old: "old.test", port: 0))
+        #expect(try await run(asOld).status == 0)
+        var isDir: ObjCBool = false
+        #expect(FileManager.default.fileExists(atPath: b.path("new.test"), isDirectory: &isDir) && isDir.boolValue)
+        #expect(FileManager.default.fileExists(atPath: b.path("old.test"), isDirectory: &isDir) && isDir.boolValue)
+    }
 }

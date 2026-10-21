@@ -13,6 +13,7 @@ import Testing
         let dns: FakeDNSResponder
         let runner: FakeResolverRunner
         let tls: FakeDomainTLS
+        let proxy: FakeDomainProxy
         let store: UserDefaults
         let dir: String
         let dialogs: Counter
@@ -26,11 +27,12 @@ import Testing
         let dns = FakeDNSResponder()
         let runner = FakeResolverRunner()
         let tls = FakeDomainTLS()
+        let proxy = FakeDomainProxy()
         if ca { tls.ca = try LocalCA.create(permitted: ["localhost"] + [suffix].compactMap { $0 }) }
         let store = TestProcess.emptyStore()
         if let port { store.set(port, forKey: Defaults.Key.domainDNSPort.rawValue) }
         let model = ColimaModel(
-            profile: "suffix-\(UUID().uuidString.prefix(6))", domainProxy: FakeDomainProxy(), domainsEnabled: domains,
+            profile: "suffix-\(UUID().uuidString.prefix(6))", domainProxy: proxy, domainsEnabled: domains,
             domainsStore: store, httpsEnabled: https, domainTLS: tls, domainSuffix: suffix)
         let dir = NSTemporaryDirectory() + "cb-model-resolver-\(UUID().uuidString.prefix(8))"
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -56,7 +58,8 @@ import Testing
             try? ResolverFile.content(port: Int(port) ?? 0).write(
                 toFile: "\(dir)/\(name)", atomically: true, encoding: .utf8)
         }
-        return Rig(model: model, dns: dns, runner: runner, tls: tls, store: store, dir: dir, dialogs: dialogs)
+        return Rig(
+            model: model, dns: dns, runner: runner, tls: tls, proxy: proxy, store: store, dir: dir, dialogs: dialogs)
     }
 
     private func web(_ id: String) -> String {
@@ -386,5 +389,326 @@ import Testing
         await r.model.startDNSResponder()
         #expect(r.model.domainSuffixStatusText == "colima.internal, DNS port 25000, running")
         #expect(try rig().model.domainSuffixStatusText == "not set")
+    }
+
+    // MARK: Resolver check, wake, files
+
+    @Test func theResolverIsCheckedAgainWhileMacOSDoesNotUseTheFileYet() async throws {
+        let r = try rig()
+        r.model.domainTimings.dnsRecheck = [0.02, 0.02, 0.02]
+        let lookups = Counter()
+        // The third lookup works: the launch check and the first recheck fail.
+        r.model.resolverCheck = { _ in
+            lookups.add()
+            return lookups.value >= 3
+        }
+        await apply(r, "colima.internal")
+        #expect(await waitUntil { r.model.domainStatus.dns.phase == .running })
+        #expect(lookups.value == 3)
+    }
+
+    @Test func aLaunchChecksTheResolverToo() async throws {
+        let r = try rig(suffix: "colima.internal", resolves: false)
+        r.model.domainTimings.dnsRecheck = []
+        await r.model.startDNSResponder()
+        #expect(r.model.domainStatus.dns.phase == .notUsedYet)
+        #expect(r.model.primaryDomainSuffix == "localhost")
+    }
+
+    @Test func aWakeChecksTheResolverAgain() async throws {
+        let r = try rig(suffix: "colima.internal")
+        r.model.domainTimings.dnsRecheck = []
+        await r.model.startDNSResponder()
+        #expect(r.model.domainStatus.dns.phase == .running)
+        r.model.resolverCheck = { _ in false }
+        r.model.dnsAfterWake()
+        #expect(await waitUntil { r.model.domainStatus.dns.phase == .notUsedYet })
+        #expect(r.dns.starts.count == 1)  // the server lived: no restart
+    }
+
+    @Test func aFileWithAnotherPortThanTheStoredOneFailsWithRepair() async throws {
+        let r = try rig(suffix: "colima.internal", port: 25000)
+        try ResolverFile.content(port: 25001).write(
+            toFile: r.file("colima.internal"), atomically: true, encoding: .utf8)
+        await r.model.startDNSResponder()
+        #expect(r.model.domainStatus.dns.phase == .failed)
+        #expect(r.model.domainStatus.dns.problem?.contains("names another port") == true)
+        #expect(r.dns.starts.isEmpty)
+        // Repair writes a file with the new port (the fake root shell does it).
+        await r.model.repairDNS()
+        #expect(r.model.domainStatus.dns.phase == .running)
+    }
+
+    @Test func changingTheSuffixWorksWhenTheOldFileIsMissingOrForeign() async throws {
+        let missing = try rig(suffix: "colima.internal", file: false)
+        await missing.model.applySuffix("dev.test")
+        #expect(missing.runner.calls.count == 1 && missing.model.domainSuffix == "dev.test")
+        let foreign = try rig(suffix: "colima.internal")
+        try "nameserver 1.1.1.1\n".write(toFile: foreign.file("colima.internal"), atomically: true, encoding: .utf8)
+        await foreign.model.applySuffix("dev.test")
+        #expect(foreign.runner.calls.count == 1 && foreign.model.domainSuffix == "dev.test")
+        // The root shell leaves a foreign old file alone (`ResolverFileTests`).
+    }
+
+    @Test func aFailedRemovalKeepsTheSuffixAndShowsTheError() async throws {
+        let r = try rig(suffix: "colima.internal")
+        await r.model.startDNSResponder()
+        r.runner.queue(Shell.Result(status: 1, out: "execution error: nope (1)"))
+        await r.model.removeSuffix()
+        #expect(r.model.domainSuffix == "colima.internal")
+        #expect(r.model.domainStatus.dns.phase == .running)
+        #expect(
+            r.model.domainStatus.dns.note == "ColimaBar could not write the resolver file: execution error: nope (1)")
+        #expect(r.dns.port == 25000)
+    }
+
+    @Test func aForeignFileThatAppearsDuringRepairKeepsTheFailedState() async throws {
+        let r = try rig(suffix: "colima.internal", file: false)
+        await r.model.startDNSResponder()
+        #expect(r.model.domainStatus.dns.phase == .failed)
+        r.runner.queue(Shell.Result(status: 3, out: "colimabar-foreign"))
+        await r.model.repairDNS()
+        #expect(r.model.domainStatus.dns.phase == .failed)
+        #expect(r.model.domainStatus.dns.note?.contains("belongs to another tool") == true)
+    }
+
+    // MARK: A write that runs
+
+    /// Holds the fake `osascript` until `release()`, like an open password dialog.
+    private actor Gate {
+        private var waiting: CheckedContinuation<Void, Never>?
+        private var open = false
+        func wait() async {
+            if open { return }
+            await withCheckedContinuation { waiting = $0 }
+        }
+        func release() {
+            open = true
+            waiting?.resume()
+            waiting = nil
+        }
+    }
+
+    private func gated(_ r: Rig) -> Gate {
+        let gate = Gate()
+        let inner = r.runner.runner
+        r.model.resolverRun = { args in
+            await gate.wait()
+            return await inner(args)
+        }
+        return gate
+    }
+
+    @Test func aSecondApplyWhileTheDialogShowsDoesNothing() async throws {
+        let r = try rig()
+        let gate = gated(r)
+        let first = Task { await r.model.applySuffix("colima.internal") }
+        #expect(await waitUntil { r.model.domainStatus.dns.phase == .applying })
+        await r.model.applySuffix("dev.test")
+        await r.model.removeSuffix()
+        await r.model.repairDNS()
+        await gate.release()
+        await first.value
+        #expect(r.runner.calls.count == 1)
+        #expect(r.model.domainSuffix == "colima.internal")
+        #expect(r.model.domainStatus.dns.phase == .running)
+    }
+
+    @Test func theMasterSwitchDoesNotDisturbAWriteThatRuns() async throws {
+        let r = try rig()
+        let gate = gated(r)
+        let task = Task { await r.model.applySuffix("colima.internal") }
+        #expect(await waitUntil { r.model.domainStatus.dns.phase == .applying })
+        r.model.domainsEnabled = false
+        #expect(r.model.domainStatus.dns.phase == .applying)
+        r.model.domainsEnabled = true
+        #expect(r.model.domainStatus.dns.phase == .applying)
+        r.model.dnsAfterWake()
+        try await Task.sleep(for: .milliseconds(30))
+        #expect(r.model.domainStatus.dns.phase == .applying && r.dns.starts.isEmpty)
+        await gate.release()
+        await task.value
+        #expect(r.model.domainStatus.dns.phase == .running)
+        #expect(r.dns.starts == [25000])
+    }
+
+    @Test func aMasterSwitchThatGoesOffDuringAWriteLeavesNoStuckState() async throws {
+        let r = try rig()
+        let gate = gated(r)
+        let task = Task { await r.model.applySuffix("colima.internal") }
+        #expect(await waitUntil { r.model.domainStatus.dns.phase == .applying })
+        r.model.domainsEnabled = false
+        await gate.release()
+        await task.value
+        // The file is written, the server is off, and the state is not `.applying`.
+        #expect(r.model.domainSuffix == "colima.internal")
+        #expect(r.model.domainStatus.dns == DomainStatus.DNS())
+        #expect(r.dns.starts.isEmpty)
+    }
+
+    @Test func aCancelWhileTheMasterSwitchIsOffShowsTheNoteWithAnOffState() async throws {
+        let r = try rig(suffix: "colima.internal")
+        await r.model.startDNSResponder()
+        let gate = gated(r)
+        r.runner.queue(Shell.Result(status: 1, out: "User canceled. (-128)"))
+        let task = Task { await r.model.removeSuffix() }
+        #expect(await waitUntil { r.model.domainStatus.dns.phase == .applying })
+        r.model.domainsEnabled = false
+        await gate.release()
+        await task.value
+        #expect(r.model.domainSuffix == "colima.internal")
+        #expect(r.model.domainStatus.dns.phase == .off)
+        #expect(r.model.domainStatus.dns.note == "You cancelled the password dialog. Nothing changed.")
+    }
+
+    @Test func turningTheSuffixOffWorksWithTheMasterSwitchOff() async throws {
+        let r = try rig(suffix: "colima.internal", domains: false)
+        await r.model.removeSuffix()
+        #expect(r.runner.calls.count == 1 && r.model.domainSuffix == nil)
+    }
+
+    // MARK: HTTPS and the CA
+
+    private func httpsRig(suffix: String? = nil) async throws -> Rig {
+        let r = try rig(suffix: suffix, https: true, ca: true)
+        await r.model.startHTTPS()
+        #expect(r.model.domainStatus.https.phase == .running)
+        return r
+    }
+
+    @Test func aSuffixChangeWithHTTPSOnReplacesTheCAAndLeavesNoOldListener() async throws {
+        let r = try await httpsRig(suffix: "colima.internal")
+        let old = try #require(r.tls.ca)
+        let before = r.tls.events.count
+        let stale = Counter()
+        // At the first dialog, the listener of the old CA is gone already.
+        let proxy = r.proxy
+        r.tls.onUninstall { if proxy.httpsPort != nil { stale.add() } }
+        await apply(r, "dev.test")
+        #expect(stale.value == 0)
+        #expect(
+            Array(r.tls.events.dropFirst(before)) == [
+                "uninstall", "prepare", "install", "makeProvider", "selfTest 443",
+            ])
+        let new = try #require(r.tls.ca)
+        #expect(new.der != old.der && Set(new.permitted) == ["localhost", "dev.test"])
+        #expect(r.model.tlsCA?.der == new.der)
+        #expect(r.model.domainStatus.https.phase == .running)
+        #expect(r.model.domainStatus.https.problem == nil)
+        // One dialog for the resolver file and one before the CA dialogs.
+        #expect(r.dialogs.value == 2)
+        #expect(r.model.domainStatus.https.caption == "HTTPS listens on port 443.")
+    }
+
+    @Test func aCancelledReplacementKeepsTheOldCAAndNoListenerRuns() async throws {
+        let r = try await httpsRig()
+        let old = try #require(r.tls.ca)
+        r.tls.uninstallOutcome = .cancelled
+        await apply(r, "dev.test")
+        #expect(r.model.domainSuffix == "dev.test")
+        #expect(r.tls.ca?.der == old.der && r.model.httpsEnabled)
+        let https = r.model.domainStatus.https
+        #expect(https.phase == .untrusted && !https.listening)
+        #expect(https.problem?.hasPrefix("ColimaBar did not replace") == true)
+        #expect(r.proxy.httpsPort == nil)
+        // No HTTPS link: the listener is off, and the HTTPS switch offers Trust Again.
+        #expect(r.model.domainURL("web.shop")?.scheme != "https")
+        // Trust Again: the user agrees this time.
+        r.tls.uninstallOutcome = .done
+        r.model.trustCAAgain()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .running })
+        #expect(Set(try #require(r.tls.ca).permitted) == ["localhost", "dev.test"])
+    }
+
+    @Test func anOldCAThatMacOSDoesNotRemoveIsKept() async throws {
+        let r = try await httpsRig()
+        let old = try #require(r.tls.ca)
+        r.tls.uninstallOutcome = .failed(1)
+        await apply(r, "dev.test")
+        #expect(r.tls.ca?.der == old.der)
+        #expect(r.model.domainStatus.https.phase == .untrusted)
+        #expect(r.model.domainStatus.https.problem?.hasPrefix("ColimaBar did not replace") == true)
+    }
+
+    @Test func aCancelOfTheNewTrustTurnsHTTPSOffAndRemovesTheFiles() async throws {
+        let r = try await httpsRig()
+        r.tls.installOutcome = .cancelled
+        await apply(r, "dev.test")
+        #expect(r.model.domainSuffix == "dev.test")
+        #expect(!r.model.httpsEnabled && r.tls.ca == nil)
+        #expect(r.model.domainStatus.https.phase == .off)
+    }
+
+    @Test func turningTheSuffixOffTightensTheCA() async throws {
+        let r = try await httpsRig(suffix: "colima.internal")
+        await r.model.removeSuffix()
+        let ca = try #require(r.tls.ca)
+        #expect(ca.permitted == ["localhost"])
+        #expect(r.model.domainStatus.https.phase == .running)
+        #expect(r.tls.events.contains("uninstall") && r.tls.events.contains("prepare"))
+    }
+
+    @Test func aCancelledTighteningKeepsHTTPSRunningWithTheOldCA() async throws {
+        let r = try await httpsRig(suffix: "colima.internal")
+        let old = try #require(r.tls.ca)
+        r.tls.uninstallOutcome = .cancelled
+        await r.model.removeSuffix()
+        #expect(r.model.domainSuffix == nil)
+        #expect(r.tls.ca?.der == old.der)
+        #expect(r.model.domainStatus.https.phase == .running && r.model.domainStatus.https.listening)
+    }
+
+    @Test func aCancelledPasswordDialogStartsNoCAFlow() async throws {
+        let r = try await httpsRig()
+        let before = r.tls.events.count
+        r.runner.queue(Shell.Result(status: 1, out: "User canceled. (-128)"))
+        await r.model.applySuffix("dev.test")
+        #expect(r.model.domainSuffix == nil)
+        #expect(r.tls.events.count == before && r.model.domainStatus.https.phase == .running)
+    }
+
+    @Test func withoutHTTPSNoCAIsTouched() async throws {
+        let r = try rig()
+        await apply(r, "dev.test")
+        #expect(r.tls.events.isEmpty)
+        await r.model.removeSuffix()
+        #expect(r.tls.events.isEmpty)
+    }
+
+    @Test func withTheMasterSwitchOffNoDialogOfTheCAShows() async throws {
+        let r = try rig(suffix: "colima.internal", domains: false, https: true, ca: true)
+        await r.model.removeSuffix()
+        #expect(r.tls.events.isEmpty && r.dialogs.value == 1)
+    }
+
+    @Test func aDebugModelNeverReplacesTheCA() async throws {
+        let tls = FakeDomainTLS()
+        let model = ColimaModel(
+            profile: "suffix-debug2", readOnly: true, domainProxy: FakeDomainProxy(), domainsEnabled: true,
+            domainsStore: TestProcess.emptyStore(), httpsEnabled: true, domainTLS: tls)
+        await model.replaceCAForSuffixes()
+        #expect(tls.events.isEmpty)
+    }
+
+    @Test func aCAThatMissesTheSuffixAtStartStopsTheListener() async throws {
+        let r = try rig(suffix: "colima.internal", https: true, ca: false)
+        r.tls.ca = try LocalCA.create(permitted: ["localhost"])
+        await r.model.startHTTPS()
+        #expect(r.model.domainStatus.https.phase == .untrusted)
+        #expect(r.model.domainStatus.https.problem == ColimaModel.needsNewCAText)
+        #expect(r.proxy.httpsStarts.isEmpty)
+    }
+
+    @Test func httpsLinksUseTheSuffixOnlyWhenTheCACoversIt() async throws {
+        let r = try await httpsRig(suffix: "colima.internal")
+        await r.model.startDNSResponder()
+        #expect(r.model.domainStatus.dns.phase == .running)
+        #expect(r.model.primaryDomainSuffix == "colima.internal")
+        #expect(r.model.domainURL("web.shop")?.host == "web.shop.colima.internal")
+        #expect(r.model.domainURL("web.shop")?.scheme == "https")
+        // A CA without the suffix: the link keeps a name that the CA covers.
+        r.model.tlsCA = try LocalCA.create(permitted: ["localhost"])
+        #expect(r.model.primaryDomainSuffix == "localhost")
+        #expect(r.model.domainURL("web.shop")?.host == "web.shop.localhost")
     }
 }

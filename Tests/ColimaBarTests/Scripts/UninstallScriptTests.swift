@@ -368,7 +368,48 @@ import Testing
 
     @Test func theScriptRemovesResolverFilesWithSudoAndOnlyOurs() throws {
         let text = try script()
-        #expect(text.contains("own_resolver_files /etc/resolver"))
+        #expect(text.contains("remove_resolver_files /etc/resolver"))
         #expect(text.contains("sudo rm -f \"$f\""))
+    }
+
+    @Test func resolverFilesListsTheTemporaryFileOfAFailedWriteIfItIsOurs() async throws {
+        let sb = try ScriptSandbox()
+        let dir = sb.root + "/resolver"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let ours = ResolverFile.content(port: 25000)
+        try ours.write(toFile: dir + "/.colima.internal.colimabar-tmp", atomically: true, encoding: .utf8)
+        try "nameserver 1.1.1.1\n".write(toFile: dir + "/.dev.test.colimabar-tmp", atomically: true, encoding: .utf8)
+        try ours.write(toFile: dir + "/.hidden", atomically: true, encoding: .utf8)
+        symlink(dir + "/.colima.internal.colimabar-tmp", dir + "/.link.colimabar-tmp")
+        let r = try await call(sb, "own_resolver_files '\(dir)'")
+        #expect(r.out.split(separator: "\n").map(String.init) == [dir + "/.colima.internal.colimabar-tmp"])
+    }
+
+    @Test func theRemovalLoopRunsSudoRmOnOurFilesOnly() async throws {
+        let sb = try ScriptSandbox()
+        let dir = sb.root + "/resolver"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        try ResolverFile.content(port: 25000).write(toFile: dir + "/colima.internal", atomically: true, encoding: .utf8)
+        try ResolverFile.content(port: 25000).write(
+            toFile: dir + "/.colima.internal.colimabar-tmp", atomically: true, encoding: .utf8)
+        try "nameserver 1.1.1.1\n".write(toFile: dir + "/test", atomically: true, encoding: .utf8)
+        // A fake sudo: it logs its arguments and runs the command without root.
+        try sb.stub(
+            "sudo",
+            """
+            printf 'sudo %s\\n' "$*" >> "\(sb.log)"
+            exec "$@"
+            """)
+        let r = try await call(sb, "remove_resolver_files '\(dir)'")
+        #expect(r.status == 0)
+        #expect(!FileManager.default.fileExists(atPath: dir + "/colima.internal"))
+        #expect(!FileManager.default.fileExists(atPath: dir + "/.colima.internal.colimabar-tmp"))
+        #expect(FileManager.default.fileExists(atPath: dir + "/test"))
+        #expect(sb.calls.filter { $0.hasPrefix("sudo rm -f ") }.count == 2)
+        // A failing sudo only prints a hint.
+        try ResolverFile.content(port: 1).write(toFile: dir + "/again.test", atomically: true, encoding: .utf8)
+        try sb.stub("sudo", "exit 1")
+        let failed = try await call(sb, "remove_resolver_files '\(dir)' 2>&1")
+        #expect(failed.status == 0 && failed.out.contains("Could not remove"))
     }
 }

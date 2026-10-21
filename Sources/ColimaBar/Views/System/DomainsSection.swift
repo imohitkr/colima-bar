@@ -12,7 +12,7 @@ struct DomainsSection: View {
             Label("Open containers at .localhost names", systemImage: "globe")
         }
         .hint(Help.domains)
-        .disabled(model.isDebug)
+        .disabled(model.isDebug || model.domainStatus.dns.phase == .applying)
         if let caption = model.domainStatus.caption(routeCount: model.domainRoutes.count) {
             Text(caption)
                 .font(.caption2)
@@ -72,7 +72,12 @@ struct DomainsSection: View {
                 get: { suffixOn },
                 set: { on in
                     if on {
-                        form.suffixText = model.domainSuffix ?? DomainSuffix.defaultValue
+                        // A text that the user typed before a cancel stays.
+                        if let current = model.domainSuffix {
+                            form.suffixText = current
+                        } else if form.suffixText.isEmpty {
+                            form.suffixText = DomainSuffix.defaultValue
+                        }
                         form.suffixEditing = true
                     } else {
                         form.suffixEditing = false
@@ -83,7 +88,11 @@ struct DomainsSection: View {
             Label("Also use a custom suffix", systemImage: "network")
         }
         .hint(Help.domainSuffix)
-        .disabled(!model.domainsEnabled || model.isDebug || model.domainStatus.dns.phase == .applying)
+        // Turning the suffix off works with the master switch off too.
+        .disabled(
+            model.isDebug || model.domainStatus.dns.phase == .applying
+                || (!model.domainsEnabled && model.domainSuffix == nil)
+        )
         .padding(.leading, 22)
         if suffixOn {
             let problem = DomainSuffix.problem(form.suffixText)
@@ -94,10 +103,7 @@ struct DomainsSection: View {
                     .disabled(model.isDebug || model.domainStatus.dns.phase == .applying)
                 Button("Apply") {
                     let text = form.suffixText
-                    Task {
-                        await model.applySuffix(text)
-                        form.suffixEditing = model.domainSuffix != nil
-                    }
+                    Task { await model.applySuffix(text) }
                 }
                 .hint(Help.domainSuffixApply)
                 .disabled(

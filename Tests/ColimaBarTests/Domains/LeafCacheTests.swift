@@ -253,9 +253,9 @@ import Testing
 
     @Test func resetUsesTheNewSuffixes() throws {
         let (cache, _, _) = try rig()
-        #expect(LeafCache.mintName(sni: "a.dev.test", suffixes: ["localhost"], resolves: { _ in true }) == "localhost")
+        #expect(LeafCache.mintName(sni: "a.dev.test", suffixes: ["localhost"], resolves: { $0 }) == "localhost")
         #expect(
-            LeafCache.mintName(sni: "a.dev.test", suffixes: ["localhost", "dev.test"], resolves: { _ in true })
+            LeafCache.mintName(sni: "a.dev.test", suffixes: ["localhost", "dev.test"], resolves: { $0 })
                 == "a.dev.test")
         _ = cache.identity(forSNI: "a.dev.test")  // before: the localhost leaf
         let before = cache.mintedCount
@@ -265,5 +265,12 @@ import Testing
         #expect(cache.mintedCount == before + 1)
         _ = cache.identity(forSNI: "a.dev.test")
         #expect(cache.mintedCount == before + 1)  // cached under its own name
+    }
+
+    @Test func aRouteUnderTheCustomSuffixGetsItsOwnLeaf() {
+        let name = LeafCache.mintName(
+            sni: "api.web.dev.test", suffixes: ["localhost", "dev.test"],
+            resolves: { $0.hasSuffix("web.dev.test") ? "web.dev.test" : nil })
+        #expect(name == "web.dev.test")
     }
 }

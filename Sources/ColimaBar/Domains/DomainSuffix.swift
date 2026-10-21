@@ -3,7 +3,9 @@ import Foundation
 /// The rules for the custom suffix of container domains. Pure: no I/O. Only
 /// names that ICANN and the IETF reserve for private use are allowed, so a
 /// typo such as `dev` can never take over real sites, and the name
-/// constraint of the local CA never covers a real top-level domain.
+/// constraint of the local CA never covers a real top-level domain. The
+/// shape is `test`, or one or two labels before `test`, `internal` or
+/// `home.arpa`.
 enum DomainSuffix {
     static let defaultValue = "colima.internal"
     static let allowedEndings = ["test", "internal", "home.arpa"]
@@ -30,11 +32,21 @@ enum DomainSuffix {
         if s == "local" || s.hasSuffix(".local") {
             return ".local does not work: macOS sends .local names to multicast DNS."
         }
-        let allowed =
-            s == "test" || s.hasSuffix(".test") || (s.hasSuffix(".internal") && labels.count >= 2)
-            || (s.hasSuffix(".home.arpa") && labels.count >= 3)
-        if !allowed { return "End the suffix with .test, .internal or .home.arpa, or use test." }
+        if !hasAllowedShape(labels.map(String.init)) {
+            return "Use one or two parts before .test, .internal or .home.arpa. Or use test."
+        }
         return nil
+    }
+
+    /// `test`, or one or two labels before `test`, `internal` or `home.arpa`.
+    private static func hasAllowedShape(_ labels: [String]) -> Bool {
+        if labels == ["test"] { return true }
+        for ending in allowedEndings {
+            let tail = ending.split(separator: ".").map(String.init)
+            guard labels.count > tail.count, Array(labels.suffix(tail.count)) == tail else { continue }
+            return (1...2).contains(labels.count - tail.count)
+        }
+        return false
     }
 
     /// The normalized suffix when it passes `problem`, else nil.

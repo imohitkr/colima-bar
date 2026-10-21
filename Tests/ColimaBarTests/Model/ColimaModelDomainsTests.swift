@@ -418,9 +418,9 @@ import Testing
         let (model, proxy) = rig(failureRetry: 0.01)
         proxy.busyPorts = [80, 8080]
         model.startDomainProxy()
-        // Each failed try plans the next one.
-        #expect(await waitUntil { proxy.starts.count >= 6 })
-        #expect(model.domainStatus.phase == .failed)
+        // Each failed try plans the next one. A try that runs shows `.starting`
+        // for a moment, so the check waits for six tries and the failed phase together.
+        #expect(await waitUntil { proxy.starts.count >= 6 && model.domainStatus.phase == .failed })
         proxy.busyPorts = []
         #expect(await waitUntil { model.domainStatus.phase == .running })
         let tries = proxy.starts.count

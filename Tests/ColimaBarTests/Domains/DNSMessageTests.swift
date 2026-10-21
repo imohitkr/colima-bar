@@ -68,10 +68,18 @@ import Testing
 
     @Test func theZoneApexAnswersAndOtherNamesDoNot() throws {
         #expect(count(try respond(query("colima.internal")), 6) == 1)
-        let out = try respond(query("example.com"))
-        #expect(rcode(out) == 3 && count(out, 6) == 0)
-        #expect(rcode(try respond(query("evilcolima.internal"))) == 3)
-        #expect(rcode(try respond(query("colima.internal.example.com"))) == 3)
+        // A name outside the zone gets REFUSED, never an authoritative answer.
+        for outside in ["example.com", "evilcolima.internal", "colima.internal.example.com", "."] {
+            let out = try respond(query(outside))
+            #expect(rcode(out) == 5 && count(out, 6) == 0 && flags(out) & 0x0400 == 0, "\(outside)")
+        }
+    }
+
+    @Test func anEmptyZoneRefusesEverythingIncludingTheRoot() throws {
+        for name in ["", "example.com", "a.colima.internal"] {
+            let r = try #require(DNSMessage.response(to: query(name), zone: ""))
+            #expect(rcode(r) == 5 && count(r, 6) == 0 && flags(r) & 0x0400 == 0, "\(name)")
+        }
     }
 
     @Test func theFlagsAreAuthoritativeWithoutRecursionAvailable() throws {
@@ -136,7 +144,9 @@ import Testing
         let notimp = try respond(query("a.colima.internal", flags: 0x1100))
         #expect(rcode(notimp) == 4 && notimp.count == 12)
         let refused = try respond(query("a.colima.internal", qclass: 3))
-        #expect(rcode(refused) == 5 && count(refused, 6) == 0)
+        #expect(rcode(refused) == 5 && count(refused, 6) == 0 && flags(refused) & 0x0400 == 0)
+        let chaos = try respond(query("a.colima.internal", qclass: 3, id: 7))
+        #expect(rcode(chaos) == 5 && flags(chaos) & 0x0400 == 0)
         #expect(count(try respond(query("a.colima.internal", qclass: 255)), 6) == 1)
     }
 
@@ -146,12 +156,112 @@ import Testing
         #expect(q.questionEnd == 12 + encode("Web.Colima.Internal").count + 4)
     }
 
-    @Test func randomGarbageNeverCrashes() {
-        var generator = SystemRandomNumberGenerator()
-        for _ in 0..<2000 {
-            let n = Int.random(in: 0...80, using: &generator)
-            let bytes = (0..<n).map { _ in UInt8.random(in: 0...255, using: &generator) }
-            _ = DNSMessage.response(to: bytes, zone: zone)
+    // MARK: Fuzz
+
+    /// A small deterministic generator (SplitMix64), so a failure repeats.
+    private struct SeededGenerator: RandomNumberGenerator {
+        var state: UInt64
+        mutating func next() -> UInt64 {
+            state &+= 0x9E37_79B9_7F4A_7C15
+            var z = state
+            z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+            z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+            return z ^ (z >> 31)
         }
+    }
+
+    /// Checks the rules that every reply must keep, whatever the input was.
+    private func check(_ reply: [UInt8]?, for packet: [UInt8], _ note: String) {
+        guard let reply else { return }
+        #expect(reply.count >= 12 && reply.count <= 512, "\(note)")
+        #expect(flags(reply) & 0x8000 != 0, "\(note): QR")
+        #expect(packet.count >= 2 && Array(reply.prefix(2)) == Array(packet.prefix(2)), "\(note): id")
+        #expect(flags(reply) & 0x0080 == 0, "\(note): RA")
+    }
+
+    @Test func randomGarbageNeverCrashesAndKeepsTheReplyRules() {
+        var rng = SeededGenerator(state: 0xC0FFEE)
+        for i in 0..<3000 {
+            let n = Int.random(in: 0...80, using: &rng)
+            let bytes = (0..<n).map { _ in UInt8.random(in: 0...255, using: &rng) }
+            check(DNSMessage.response(to: bytes, zone: zone), for: bytes, "garbage \(i)")
+        }
+    }
+
+    @Test func mutatedValidPacketsNeverCrash() {
+        var rng = SeededGenerator(state: 42)
+        let seeds = [
+            query("web.shop.colima.internal"), query("a.colima.internal", type: 28),
+            query("a.colima.internal", extra: [0, 0, 41, 0x10, 0, 0, 0, 0, 0, 0, 0], arcount: 1),
+            query("example.com", type: 255),
+        ]
+        for seed in seeds {
+            for round in 0..<1500 {
+                var p = seed
+                for _ in 0..<Int.random(in: 1...4, using: &rng) {
+                    switch Int.random(in: 0..<3, using: &rng) {
+                    case 0: p[Int.random(in: 0..<p.count, using: &rng)] = UInt8.random(in: 0...255, using: &rng)
+                    case 1:
+                        p[Int.random(in: 0..<p.count, using: &rng)] ^= UInt8(1 << Int.random(in: 0..<8, using: &rng))
+                    default:
+                        p.insert(UInt8.random(in: 0...255, using: &rng), at: Int.random(in: 0...p.count, using: &rng))
+                    }
+                }
+                check(DNSMessage.response(to: p, zone: zone), for: p, "mutation \(round)")
+            }
+        }
+    }
+
+    @Test func aTruncationAtEveryOffsetNeverCrashes() {
+        let seeds = [
+            query("web.shop.colima.internal"), query("a.colima.internal", extra: [0xC0, 0x0C], arcount: 1),
+        ]
+        for seed in seeds {
+            for cut in 0...seed.count {
+                let p = Array(seed.prefix(cut))
+                check(DNSMessage.response(to: p, zone: zone), for: p, "cut \(cut)")
+            }
+        }
+    }
+
+    @Test func packetsOf512And513BytesAreTheLimit() throws {
+        // A valid query padded with trailing bytes (ignored) to 512, then 513 bytes.
+        let base = query("a.colima.internal")
+        let at512 = base + [UInt8](repeating: 0, count: 512 - base.count)
+        let reply = try respond(at512)
+        #expect(at512.count == 512 && count(reply, 6) == 1)
+        let at513 = at512 + [0]
+        #expect(DNSMessage.response(to: at513, zone: zone) == nil)
+    }
+
+    @Test func aNameOfExactly255BytesPassesTheParserAndOneMoreFails() throws {
+        // Wire length 255: 3 labels of 63 bytes (3 x 64 = 192) and one of 61 bytes (62) and the root (1).
+        func packet(last: Int) -> [UInt8] {
+            var p = Array(query("a.colima.internal").prefix(12))
+            for _ in 0..<3 { p += [63] + [UInt8](repeating: 97, count: 63) }
+            p += [UInt8(last)] + [UInt8](repeating: 98, count: last) + [0, 0, 1, 0, 1]
+            return p
+        }
+        let exact = DNSMessage.parse(packet(last: 61))
+        guard case .query(let q) = exact else {
+            Issue.record("a 255-byte name must parse")
+            return
+        }
+        #expect(q.name.utf8.count == 253)
+        // 256 bytes on the wire is a format error.
+        #expect(DNSMessage.parse(packet(last: 62)) == .reject(.formErr))
+        // The packet is over 512 bytes? No: 12 + 255 + 4 = 271.
+        #expect(packet(last: 61).count == 271)
+    }
+
+    @Test func aLabelWithADotByteIsOneLabelAndNeverInTheZone() throws {
+        // The label "a.colima" (with a dot byte) plus "internal": it spells a name in the zone when read as text.
+        var p = Array(query("x.colima.internal").prefix(12))
+        p += [8] + Array("a.colima".utf8) + [8] + Array("internal".utf8) + [0, 0, 1, 0, 1]
+        let q = try #require(DNSMessage.parseQuery(p))
+        #expect(q.name == "a.colima.internal")
+        // The text form cannot tell the two apart, and both name only ColimaBar's own zone.
+        let reply = try respond(p)
+        #expect(count(reply, 6) == 1)
     }
 }

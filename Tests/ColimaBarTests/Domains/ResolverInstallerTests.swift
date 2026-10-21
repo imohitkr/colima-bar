@@ -36,6 +36,38 @@ import Testing
         #expect(await run(1, "0:1: execution error: Benutzer abgebrochen. (-128)").0 == .cancelled)
     }
 
+    @Test func onlyErrorMinus128IsACancel() async {
+        #expect(await run(1, "execution error: Application isn't running. (-1728)").0 != .cancelled)
+        #expect(await run(1, "execution error: something (-1280)").0 == .failed("execution error: something (-1280)"))
+        #expect(await run(1, "execution error: odd (-12800)").0 != .cancelled)
+        #expect(ResolverInstaller.isCancel("User canceled. (-128)"))
+        #expect(!ResolverInstaller.isCancel("(-1280)"))
+    }
+
+    @Test func aWrongPasswordIsAFailureWithItsText() async {
+        let text = "execution error: The administrator user name or password was incorrect. (-60005)"
+        #expect(await run(1, text).0 == .failed(text))
+    }
+
+    @Test func aTimeoutIsAFailure() async {
+        // Shell.run ends the process with SIGTERM after the time limit: no output, status 15.
+        #expect(await run(15, "").0 == .failed("status 15"))
+    }
+
+    @Test func thePortOfTheFileIsReadOnlyForOurFile() throws {
+        let dir = NSTemporaryDirectory() + "cb-port-\(UUID().uuidString.prefix(8))"
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: dir) }
+        try ResolverFile.content(port: 25001).write(toFile: dir + "/a.test", atomically: true, encoding: .utf8)
+        #expect(ResolverInstaller.port("a.test", dir: dir) == 25001)
+        try "nameserver 127.0.0.1\nport 25002\n".write(toFile: dir + "/b.test", atomically: true, encoding: .utf8)
+        #expect(ResolverInstaller.port("b.test", dir: dir) == nil)
+        #expect(ResolverInstaller.port("missing.test", dir: dir) == nil)
+        #expect(ResolverFile.port(in: "x\nport 80\n") == nil)
+        #expect(ResolverFile.port(in: "x\nport abc\n") == nil)
+        #expect(ResolverFile.port(in: ResolverFile.content(port: 65535)) == 65535)
+    }
+
     @Test func otherErrorsKeepTheirFirstLine() async {
         #expect(await run(1, "execution error: boom (1)\nsecond").0 == .failed("execution error: boom (1)"))
         #expect(await run(7, "").0 == .failed("status 7"))
