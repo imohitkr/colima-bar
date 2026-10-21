@@ -62,6 +62,7 @@ struct StoppedView: View {
             .frame(maxWidth: .infinity)
             .padding(.top, 16).padding(.bottom, 4)
             Divider()
+            VMRecreateNotice(model: model).padding(.horizontal, 12).padding(.top, 8)
             Group {
                 if model.config != nil {
                     VMSettingsSection(model: model, form: form, ui: ui, running: false)

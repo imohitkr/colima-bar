@@ -6,16 +6,18 @@ import Foundation
 extension ColimaModel {
     /// The rule for a start: a normal run, a running VM with a docker
     /// socket, and no other transfer.
+    /// `recreating` is true while a VM type change runs: only its own
+    /// transfers may start then.
     nonisolated static func canTransferVolumes(
-        isDebug: Bool, running: Bool, hasSocket: Bool, transferring: Bool
+        isDebug: Bool, running: Bool, hasSocket: Bool, transferring: Bool, recreating: Bool = false
     ) -> Bool {
-        !isDebug && running && hasSocket && !transferring
+        !isDebug && running && hasSocket && !transferring && !recreating
     }
 
     var canTransferVolumes: Bool {
         Self.canTransferVolumes(
             isDebug: isDebug, running: state == .running, hasSocket: hasDockerSocket,
-            transferring: volumeTransfer != nil)
+            transferring: volumeTransfer != nil, recreating: recreate != nil)
     }
 
     // MARK: - Reads for the panels
@@ -67,33 +69,69 @@ extension ColimaModel {
     }
 
     private func backUp(volumes rows: [VolumeRow], destinations: [URL], replace: Bool, folder: String?) {
-        guard !rows.isEmpty, mayStartTransfer() else { return }
+        // The transfer starts now, not in the Task, so a second click can't race it.
+        guard let job = beginBackup(rows, destinations: destinations, notifies: true, fromRecreate: false) else {
+            return
+        }
+        Task { _ = await runBackup(job, replace: replace, folder: folder, notifies: true) }
+    }
+
+    /// Backs up the volumes in order and returns the summary. It returns nil
+    /// if no transfer may start (see `mayStartTransfer`). With `notifies`, it
+    /// posts the result. The VM type change runs it with `fromRecreate` and
+    /// no notification.
+    func performBackup(
+        volumes rows: [VolumeRow], destinations: [URL], replace: Bool, folder: String?, notifies: Bool,
+        fromRecreate: Bool = false
+    ) async -> VolumeBackupBatch.Summary? {
+        guard let job = beginBackup(rows, destinations: destinations, notifies: notifies, fromRecreate: fromRecreate)
+        else { return nil }
+        return await runBackup(job, replace: replace, folder: folder, notifies: notifies)
+    }
+
+    private struct BackupJob {
+        let runner: VolumeBackupRunner
+        let profile: String
+        let items: [VolumeBackupBatch.Item]
+    }
+
+    private func beginBackup(
+        _ rows: [VolumeRow], destinations: [URL], notifies: Bool, fromRecreate: Bool
+    ) -> BackupJob? {
+        guard !rows.isEmpty, mayStartTransfer(fromRecreate: fromRecreate, tell: notifies ? nil : { _ in }) else {
+            return nil
+        }
         let runner = VolumeBackupRunner(api: api)
-        let started = profile
         volumeRunner = runner
-        volumeProfile = started
+        volumeProfile = profile
         setVolumeTransfer(VolumeTransfer(kind: .backup, volume: rows[0].name, total: rows[0].size))
         let items = zip(rows, destinations).map {
             VolumeBackupBatch.Item(name: $0.name, size: $0.size, destination: $1.path)
         }
-        let count = rows.count
-        Task {
-            let summary = await VolumeBackupBatch.run(
-                runner: runner, items: items, replace: replace, app: "ColimaBar \(AppDelegate.version)",
-                willStart: { [self] i, item in
-                    setVolumeTransfer(
-                        VolumeTransfer(
-                            kind: .backup, volume: item.name, total: item.size, position: count > 1 ? i + 1 : nil,
-                            count: count))
-                },
-                onProgress: { [self] bytes in Task { @MainActor in self.transferProgress(bytes) } })
-            if let text = Self.backupMessage(
-                summary: summary, volumes: items.map(\.name), folder: folder, because: volumeStop?.because)
-            {
-                notify(text)
-            }
-            await finishTransfer(runner, profile: started)
+        return BackupJob(runner: runner, profile: profile, items: items)
+    }
+
+    private func runBackup(_ job: BackupJob, replace: Bool, folder: String?, notifies: Bool) async
+        -> VolumeBackupBatch.Summary
+    {
+        let count = job.items.count
+        let summary = await VolumeBackupBatch.run(
+            runner: job.runner, items: job.items, replace: replace, app: "ColimaBar \(AppDelegate.version)",
+            willStart: { [self] i, item in
+                setVolumeTransfer(
+                    VolumeTransfer(
+                        kind: .backup, volume: item.name, total: item.size, position: count > 1 ? i + 1 : nil,
+                        count: count))
+            },
+            onProgress: { [weak self] bytes in Task { @MainActor in self?.transferProgress(bytes) } })
+        if notifies,
+            let text = Self.backupMessage(
+                summary: summary, volumes: job.items.map(\.name), folder: folder, because: volumeStop?.because)
+        {
+            notify(text)
         }
+        await finishTransfer(job.runner, profile: job.profile)
+        return summary
     }
 
     // MARK: - Restore
@@ -118,24 +156,57 @@ extension ColimaModel {
         file: URL, scan: TarFileScan.Summary, target: String, isNew: Bool,
         confirmReplace: @escaping @MainActor (String) -> Bool
     ) {
-        guard mayStartTransfer() else { return }
+        guard let job = beginRestore(target, notifies: true, fromRecreate: false) else { return }
+        Task {
+            _ = await runRestore(
+                job, file: file, scan: scan, isNew: isNew, confirmReplace: confirmReplace, notifies: true)
+        }
+    }
+
+    /// Restores a backup file into the volume `target` and returns what
+    /// happened. It returns nil if no transfer may start. With `notifies`, it
+    /// posts the result. The VM type change runs it with `fromRecreate`.
+    func performRestore(
+        file: URL, scan: TarFileScan.Summary, target: String, isNew: Bool,
+        confirmReplace: @escaping @MainActor (String) -> Bool, notifies: Bool, fromRecreate: Bool = false
+    ) async -> VolumeRestoreFlow.Outcome? {
+        guard let job = beginRestore(target, notifies: notifies, fromRecreate: fromRecreate) else { return nil }
+        return await runRestore(
+            job, file: file, scan: scan, isNew: isNew, confirmReplace: confirmReplace, notifies: notifies)
+    }
+
+    private struct RestoreJob {
+        let runner: VolumeBackupRunner
+        let profile: String
+        let target: String
+    }
+
+    private func beginRestore(_ target: String, notifies: Bool, fromRecreate: Bool) -> RestoreJob? {
+        guard mayStartTransfer(fromRecreate: fromRecreate, tell: notifies ? nil : { _ in }) else { return nil }
         let runner = VolumeBackupRunner(api: api)
-        let started = profile
         volumeRunner = runner
-        volumeProfile = started
+        volumeProfile = profile
         var checking = VolumeTransfer(kind: .restore, volume: target)
         checking.isChecking = true
         setVolumeTransfer(checking)
+        return RestoreJob(runner: runner, profile: profile, target: target)
+    }
+
+    private func runRestore(
+        _ job: RestoreJob, file: URL, scan: TarFileScan.Summary, isNew: Bool,
+        confirmReplace: @escaping @MainActor (String) -> Bool, notifies: Bool
+    ) async -> VolumeRestoreFlow.Outcome {
+        let target = job.target
         let fileName = file.lastPathComponent
-        Task {
-            let outcome = await VolumeRestoreFlow.run(
-                runner: runner, file: file.path, scan: scan, target: target, isNew: isNew,
-                confirmReplace: confirmReplace,
-                willSend: { [self] in
-                    setVolumeTransfer(
-                        VolumeTransfer(kind: .restore, volume: target, total: Double(scan.size - scan.skip)))
-                },
-                onProgress: { [self] bytes in Task { @MainActor in self.transferProgress(bytes) } })
+        let outcome = await VolumeRestoreFlow.run(
+            runner: job.runner, file: file.path, scan: scan, target: target, isNew: isNew,
+            confirmReplace: confirmReplace,
+            willSend: { [self] in
+                setVolumeTransfer(
+                    VolumeTransfer(kind: .restore, volume: target, total: Double(scan.size - scan.skip)))
+            },
+            onProgress: { [weak self] bytes in Task { @MainActor in self?.transferProgress(bytes) } })
+        if notifies {
             switch outcome {
             case .done: notify(Self.restoreMessage(file: fileName, volume: target))
             case .declined: break
@@ -146,24 +217,33 @@ extension ColimaModel {
             case .refused(let text), .notice(let text): notify(text)
             case .failed(let reason): notify(Self.restoreMessage(failure: reason))
             }
-            await finishTransfer(runner, profile: started)
         }
+        await finishTransfer(job.runner, profile: job.profile)
+        return outcome
     }
 
     // MARK: - Control
 
     /// Why a transfer cannot start now, or nil. A hint and a notification use it.
-    var transferBlockReason: String? {
-        if canTransferVolumes { return nil }
+    var transferBlockReason: String? { transferBlockReason(fromRecreate: false) }
+
+    /// `fromRecreate` is true for the transfers of a VM type change: the
+    /// change itself does not block them.
+    func transferBlockReason(fromRecreate: Bool) -> String? {
+        let can = Self.canTransferVolumes(
+            isDebug: isDebug, running: state == .running, hasSocket: hasDockerSocket,
+            transferring: volumeTransfer != nil, recreating: recreate != nil && !fromRecreate)
+        if can { return nil }
         if isDebug { return Help.transferDebug }
         if volumeTransfer != nil { return Help.transferBusy }
+        if recreate != nil, !fromRecreate { return Help.recreateBusy }
         return Help.transferNeedsVM
     }
 
     /// True if a transfer can start. If not, it tells the user why: with a
     /// notification, or with `tell` (for tests).
-    func mayStartTransfer(tell: ((String) -> Void)? = nil) -> Bool {
-        guard let reason = transferBlockReason else { return true }
+    func mayStartTransfer(fromRecreate: Bool = false, tell: ((String) -> Void)? = nil) -> Bool {
+        guard let reason = transferBlockReason(fromRecreate: fromRecreate) else { return true }
         if let tell { tell(reason) } else { notify(reason) }
         return false
     }

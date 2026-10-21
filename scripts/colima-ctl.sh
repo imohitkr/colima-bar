@@ -285,6 +285,14 @@ cleanup() {
       notify "The VM settings of $NAMED did not finish. ColimaBar could not put the old colima.yaml back. A copy is in $VM_BACKUP."
     fi
   fi
+  if [ -n "$RECREATE_COPY" ] && [ ! -f "$CONFIG" ] && [ -d "$COLIMA_DIR" ]; then
+    if mkdir -p "$PROFILE_DIR" && cp -p "$RECREATE_COPY" "$CONFIG"; then
+      notify "The VM type change of $NAMED did not finish. ColimaBar put colima.yaml back with the new values. Start the VM to finish. A copy is in $RECREATE_COPY."
+    else
+      notify "The VM type change of $NAMED did not finish. A copy of colima.yaml is in $RECREATE_COPY."
+    fi
+    RECREATE_COPY=""
+  fi
   if [ -e "$FOLDER_CHANGED" ]; then
     rm -f "$FOLDER_CHANGED"
     notify "The Colima folder changed during the action of $NAMED. Try again.$FOLDER_NOTE"
@@ -398,6 +406,79 @@ shrink_disk() {
   mkdir -p "$PROFILE_DIR" && cp -p "$1" "$CONFIG" || return 1
   # shellcheck disable=SC2119 # no flags: a plain colima start
   start_vm || return 1
+  if [ -n "${2:-}" ]; then
+    colima stop || return "$RESTOP_FAILED"
+  fi
+}
+
+# The VM types and mount types that vm-recreate accepts. VMTypeRules in
+# ColimaBar has the same lists: a test checks this. vz takes virtiofs or
+# sshfs. qemu takes sshfs or 9p. Colima changes other pairs without a word.
+recreate_pair_ok() {
+  case "$1:$2" in
+    vz:virtiofs|vz:sshfs|qemu:sshfs|qemu:9p) return 0 ;;
+  esac
+  return 1
+}
+
+# The exit codes of recreate_vm. The caller tells the user. RESTOP_FAILED (3)
+# means the new VM exists but the last stop failed.
+RECREATE_STOP_FAILED=5
+RECREATE_DELETE_FAILED=6
+RECREATE_START_FAILED=7
+
+# The copy of colima.yaml with the new values while recreate_vm runs. If the
+# script ends then (a signal or the time limit of ColimaBar) and colima.yaml
+# is gone, cleanup puts the copy back.
+RECREATE_COPY=""
+
+# put_key KEY VALUE FILE -> sets a top-level key in FILE, or adds it at the
+# end if FILE has no such key, and checks it took.
+put_key() {
+  if tr -d '\r' <"$3" | grep -qE "^$1:"; then
+    set_key "$1" "$2" "$3"
+    return
+  fi
+  # A last line without a newline must not join the new line.
+  [ -z "$(tail -c 1 "$3")" ] || printf '\n' >>"$3"
+  printf '%s: %s\n' "$1" "$2" >>"$3"
+  grep -qE "^$1: $2\$" "$3" || { notify "Couldn't set $1 in colima.yaml."; exit 1; }
+}
+
+# section_has SECTION REGEX -> true if a line in the top-level SECTION of
+# colima.yaml matches REGEX (two-space indent), like set_k8s reads it.
+section_has() {
+  tr -d '\r' <"$CONFIG" | sed -n "/^$1:/,/^[a-z]/p" | grep -qE "$2"
+}
+
+# data_disk_kept -> true if the Docker data is on its own Lima disk (Colima
+# 0.7 and later). `colima delete` without --data keeps that disk, and the next
+# start mounts it again. Then images, containers and volumes stay.
+data_disk_kept() {
+  [ -d "$LIMA_DIR/_disks/$LIMA_INST" ] || return 1
+  tr -d ' \t\r\n' <"$COLIMA_DIR/_store/$LIMA_INST.json" 2>/dev/null | grep -q '"disk_formatted":true'
+}
+
+# qemu_ok ARCH -> true if QEMU for ARCH is installed (brew install qemu).
+qemu_ok() {
+  local sys=qemu-system-aarch64
+  case "$1" in ""|aarch64|arm64) ;; *) sys=qemu-system-x86_64 ;; esac
+  type -P qemu-img >/dev/null && type -P "$sys" >/dev/null
+}
+
+# recreate_vm COPY [RESTOP] -> stops the VM, deletes it without --data, puts
+# COPY in place of colima.yaml and starts the VM. Colima fixes vmType and
+# mountType when it creates the VM, so only a new VM takes them. A VM that was
+# stopped starts once: if RESTOP is set, it stops again at the end.
+recreate_vm() {
+  if colima status >/dev/null 2>&1; then
+    colima stop || return "$RECREATE_STOP_FAILED"
+  fi
+  colima delete --force || return "$RECREATE_DELETE_FAILED"
+  [ -d "$COLIMA_DIR" ] || return "$RECREATE_START_FAILED"
+  mkdir -p "$PROFILE_DIR" && cp -p "$1" "$CONFIG" || return "$RECREATE_START_FAILED"
+  # shellcheck disable=SC2119 # no flags: colima start reads the copy
+  start_vm || return "$RECREATE_START_FAILED"
   if [ -n "${2:-}" ]; then
     colima stop || return "$RESTOP_FAILED"
   fi
@@ -1028,6 +1109,118 @@ $after" || exit 2
     rm -f "$backup"
     ;;
 
+  # vm-recreate VMTYPE MOUNTTYPE: changes vmType and mountType, which Colima
+  # fixes when it creates the VM. It saves the old colima.yaml, sets the keys
+  # in a copy, deletes the VM without --data and starts it with the copy.
+  # Colima keeps its Docker data disk (Colima 0.7 and later), so images,
+  # containers and volumes stay. A stopped VM starts once, then stops again.
+  vm-recreate)
+    vmtype="${2:-}"; mounttype="${3:-}"
+    recreate_pair_ok "$vmtype" "$mounttype" || {
+      notify "Invalid VM type or mount type for $NAMED: $vmtype / $mounttype."
+      exit 1
+    }
+    # Colima maps "colima" to "default" and removes a "colima-" prefix: the
+    # delete would hit another profile.
+    case "$PROFILE" in
+      colima|colima-*)
+        notify "Can't change the VM type of $NAMED. Colima reads this name as a different profile."
+        exit 1 ;;
+    esac
+    if ! profile_dir_exists || [ ! -f "$CONFIG" ]; then
+      notify "Can't change the VM type of $NAMED. Its colima.yaml does not exist."
+      exit 1
+    fi
+    arch=$(yaml_value arch)
+    case "$arch" in
+      ""|aarch64|arm64) ;;
+      *) [ "$vmtype" = qemu ] || { notify "An $arch VM of $NAMED needs the qemu VM type."; exit 1; } ;;
+    esac
+    if [ "$vmtype" = qemu ]; then
+      qemu_ok "$arch" || { notify "The qemu VM type needs QEMU. Install it with brew install qemu, then try again."; exit 1; }
+      if section_has network '^  address: true$'; then
+        notify "The VM of $NAMED has a reachable IP address. It needs the vz VM type."; exit 1
+      fi
+      if section_has network '^  mode: bridged$'; then
+        notify "Bridged networking with qemu needs socket_vmnet. Change the VM type of $NAMED by hand."; exit 1
+      fi
+    fi
+    # Colima uses vz if the file has no VM type, and the default mount type
+    # of the VM type if it has no mount type (VMTypeRules.effective).
+    old_type=$(yaml_value vmType); old_type="${old_type:-vz}"
+    old_mount=$(yaml_value mountType)
+    if [ -z "$old_mount" ]; then
+      case "$old_type" in vz) old_mount=virtiofs ;; qemu) old_mount=sshfs ;; esac
+    fi
+    if [ "$old_type" = "$vmtype" ] && [ "$old_mount" = "$mounttype" ]; then
+      notify "$NAMED uses $vmtype and $mounttype already. Nothing changed."
+      exit 1
+    fi
+    lock_vm
+    no_start_in_progress
+    was_up=0
+    restop=1
+    after="Colima starts the VM once to create it, then stops it again."
+    if vm_up; then
+      was_up=1
+      restop=""
+      after="Then Colima starts the VM again with the same other settings. $(running_count) running container(s) will stop."
+    fi
+    if data_disk_kept; then
+      data="Colima keeps the Docker data disk. Images, containers and volumes stay."
+    else
+      data="This VM has no separate Docker data disk. All containers, images, volumes and build cache are lost for good."
+      if section_has kubernetes '^  enabled: true$'; then
+        data="$data The Kubernetes cluster and its data are also deleted."
+      fi
+    fi
+    rosetta_note=""
+    if [ "$vmtype" = qemu ] && [ "$(yaml_value rosetta)" = true ]; then
+      rosetta_note=" Rosetta turns off, because it needs the vz VM type."
+    fi
+    confirm "Change the VM of $NAMED from $old_type / ${old_mount:-default} to $vmtype / $mounttype?
+
+Colima deletes the VM and creates it again. $data$rosetta_note
+
+$after" || exit 2
+    same_state "$was_up" || state_changed
+    orig="$STATE_DIR/colima.$PROFILE.yaml.before-recreate"
+    copy="$STATE_DIR/colima.$PROFILE.yaml.recreate"
+    cp -p "$CONFIG" "$orig" || { notify "Couldn't copy colima.yaml to $orig."; exit 1; }
+    cp -p "$CONFIG" "$copy" || { notify "Couldn't copy colima.yaml to $copy."; exit 1; }
+    # Edit the copy first: a failed edit deletes nothing.
+    put_key vmType "$vmtype" "$copy"
+    put_key mountType "$mounttype" "$copy"
+    [ -z "$rosetta_note" ] || set_key rosetta false "$copy"
+    FOLDER_NOTE=" A copy of colima.yaml is in $copy."
+    # ColimaBar can quit during the run. A write to its closed pipe must not
+    # end the script between the delete and the start.
+    trap '' PIPE
+    RECREATE_COPY="$copy"
+    with_busy "Changing VM type" recreate_vm "$copy" "$restop"
+    rc=$?
+    RECREATE_COPY=""
+    case "$rc" in
+      0) rm -f "$copy" ;;
+      "$RESTOP_FAILED")
+        rm -f "$copy"
+        notify "The VM of $NAMED now uses $vmtype / $mounttype, but the stop failed - $SEE_LOG"
+        exit 1 ;;
+      "$RECREATE_STOP_FAILED")
+        rm -f "$copy"
+        notify "ColimaBar could not stop the VM of $NAMED, so nothing changed - $SEE_LOG"
+        exit 1 ;;
+      "$RECREATE_DELETE_FAILED")
+        [ -f "$CONFIG" ] || { mkdir -p "$PROFILE_DIR" && cp -p "$orig" "$CONFIG"; }
+        notify "Colima could not delete the VM of $NAMED - $SEE_LOG. The old colima.yaml is in $orig."
+        exit 1 ;;
+      *)
+        [ -f "$CONFIG" ] || { mkdir -p "$PROFILE_DIR" && cp -p "$copy" "$CONFIG"; }
+        notify "The VM of $NAMED did not start with $vmtype / $mounttype - $SEE_LOG. Start it again, or change the VM type back. The old colima.yaml is in $orig."
+        exit 1 ;;
+    esac
+    ;;
+
   # stale-files: prints the pid files of Lima and Colima that they cannot use, one per
   # line: REASON<TAB>PATH<TAB>PID. It takes no lock and changes nothing.
   stale-files) stale_files ;;
@@ -1140,9 +1333,10 @@ $list" || exit 2
     lock_vm quiet
     with_busy "Auto-stopping $PROFILE" colima stop || { notify "Auto-stop of $NAMED failed - $SEE_LOG"; exit 1; } ;;
 
-  # profile-create CPU MEM_GB DISK_GB [RUNTIME]: creates the profile in
-  # COLIMABAR_PROFILE and starts its VM. RUNTIME is docker (default) or
-  # containerd. ColimaBar asked for the values in its form, so no dialog.
+  # profile-create CPU MEM_GB DISK_GB [RUNTIME [VMTYPE MOUNTTYPE]]: creates the
+  # profile in COLIMABAR_PROFILE and starts its VM. RUNTIME is docker (default)
+  # or containerd. VMTYPE and MOUNTTYPE (a valid pair, see recreate_pair_ok)
+  # are optional. ColimaBar asked for the values in its form, so no dialog.
   profile-create)
     cpu="$2"; mem="$3"; disk="$4"; rt="${5:-docker}"
     new_name_ok "$PROFILE" || {
@@ -1155,13 +1349,22 @@ $list" || exit 2
       exit 1
     fi
     case "$rt" in docker|containerd) ;; *) notify "Invalid runtime: $rt"; exit 1 ;; esac
+    vmt="${6:-}"; mnt="${7:-}"
+    vm_flags=()
+    if [ -n "$vmt" ]; then
+      recreate_pair_ok "$vmt" "$mnt" || { notify "Invalid VM type or mount type: $vmt / $mnt"; exit 1; }
+      if [ "$vmt" = qemu ] && ! qemu_ok ""; then
+        notify "The qemu VM type needs QEMU. Install it with brew install qemu, then try again."; exit 1
+      fi
+      vm_flags=(--vm-type "$vmt" --mount-type "$mnt")
+    fi
     # The Mac file system ignores case, so this also finds "Work" for "work".
     if [ -e "$PROFILE_DIR" ]; then
       notify "Profile $PROFILE already exists."
       exit 1
     fi
     lock_vm
-    with_busy "Creating $PROFILE" start_vm --cpu "$cpu" --memory "$mem" --disk "$disk" --runtime "$rt" \
+    with_busy "Creating $PROFILE" start_vm --cpu "$cpu" --memory "$mem" --disk "$disk" --runtime "$rt" ${vm_flags[@]+"${vm_flags[@]}"} \
       || { notify "Creating $NAMED failed - $SEE_LOG"; exit 1; }
     ;;
 
@@ -1285,7 +1488,7 @@ $list" || exit 2
     if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
-    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|ctr-*|compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...|img-rm|img-pull|vol-rm|log-truncate ID [NAME]|disk-trim|auto-prune|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME]|profile-delete}" >&2
+    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|vm-recreate VMTYPE MOUNTTYPE|ctr-*|compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...|img-rm|img-pull|vol-rm|log-truncate ID [NAME]|disk-trim|auto-prune|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME [VMTYPE MOUNTTYPE]]|profile-delete}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
     echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta, k8s and vm-config stop if the VM state differs" >&2
     echo "env: COLIMABAR_UPGRADE_NOTE and COLIMABAR_RELEASE_NOTES make start, restart and the config actions ask after an upgrade" >&2

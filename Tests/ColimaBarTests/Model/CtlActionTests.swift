@@ -75,7 +75,7 @@ import Testing
             #expect(!a.showsDialog(running: false), "\(a.rawValue)")
         }
         // A grow becomes permanent at the next start, and a shrink deletes data.
-        for a in [CtlAction.disk, .diskShrink, .profileDelete, .prune] {
+        for a in [CtlAction.disk, .diskShrink, .vmRecreate, .profileDelete, .prune] {
             #expect(a.showsDialog(running: false), "\(a.rawValue)")
         }
         #expect(!CtlAction.start.showsDialog(running: false))
@@ -103,15 +103,15 @@ import Testing
     @Test func diskActionsAreUrgent() {
         let disk: Set<CtlAction> = [
             .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,
-            .composePull, .composeDown, .autoPrune,
+            .vmRecreate, .composePull, .composeDown, .autoPrune,
         ]
         for a in CtlAction.allCases { #expect(a.changesDisk == disk.contains(a), "\(a.rawValue)") }
     }
 
     @Test func actionsThatStopContainersHoldContainerAlerts() {
         let stops: Set<CtlAction> = [
-            .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .autoStop, .repair, .stopAll,
-            .profileDelete,
+            .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .vmRecreate, .autoStop, .repair,
+            .stopAll, .profileDelete,
         ]
         for a in CtlAction.allCases { #expect(a.stopsContainers == stops.contains(a), "\(a.rawValue)") }
         for a in [CtlAction.composeUp, .imagePull, .diskTrim, .prune, .ssh] { #expect(!a.stopsContainers) }
@@ -136,8 +136,8 @@ import Testing
 
     @Test func vmActionsShowABusyLabel() {
         let vm: Set<CtlAction> = [
-            .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .autoStop,
-            .profileCreate, .profileDelete, .repair,
+            .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .vmRecreate,
+            .autoStop, .profileCreate, .profileDelete, .repair,
         ]
         for a in CtlAction.allCases {
             #expect(a.isVMAction == vm.contains(a), "\(a.rawValue)")
@@ -149,6 +149,8 @@ import Testing
         #expect(CtlAction.disk.busyLabel(running: true) == "Restarting")
         #expect(CtlAction.diskShrink.busyLabel(running: true) == "Shrinking disk")
         #expect(CtlAction.diskShrink.busyLabel(running: false) == "Shrinking disk")
+        #expect(CtlAction.vmRecreate.busyLabel(running: true) == "Changing VM type")
+        #expect(CtlAction.vmRecreate.busyLabel(running: false) == "Changing VM type")
         #expect(CtlAction.profileCreate.busyLabel(running: false) == "Creating")
         #expect(CtlAction.profileDelete.busyLabel(running: false) == "Deleting")
         #expect(CtlAction.repair.busyLabel(running: true) == "Repairing")
@@ -188,12 +190,26 @@ import Testing
         #expect(try scriptActions().contains("disk-shrink"))
     }
 
+    @Test func vmRecreateMatchesTheScriptAndAsksInBothStates() throws {
+        #expect(CtlAction.vmRecreate.rawValue == "vm-recreate")
+        #expect(try scriptActions().contains("vm-recreate"))
+        #expect(CtlAction.vmRecreate.showsDialog(running: true) && CtlAction.vmRecreate.showsDialog(running: false))
+        #expect(!CtlAction.vmRecreate.checksExpectedState)
+        #expect(CtlAction.vmRecreate.isVMAction && CtlAction.vmRecreate.stopsContainers)
+    }
+
+    @Test func onlyAVMTypeChangeGetsThirtyMinutes() {
+        for a in CtlAction.allCases {
+            #expect(a.timeout == (a == .vmRecreate ? 1800 : 900), "\(a.rawValue)")
+        }
+    }
+
     // MARK: upgrade guard
 
     @Test func onlyAStartThatLeavesAFreshVMCounts() {
         #expect(CtlAction.start.startsVM(running: false))
         #expect(!CtlAction.start.startsVM(running: true))
-        for a in [CtlAction.restart, .repair, .profileCreate, .diskShrink] {
+        for a in [CtlAction.restart, .repair, .profileCreate, .diskShrink, .vmRecreate] {
             #expect(a.startsVM(running: true) && a.startsVM(running: false), "\(a.rawValue)")
         }
         for a in [CtlAction.resources, .rosetta, .k8s, .disk, .vmConfig] {
@@ -217,7 +233,7 @@ import Testing
         #expect(!CtlAction.resources.warnsAfterUpgrade(running: false))
         #expect(CtlAction.vmConfig.warnsAfterUpgrade(running: true))
         #expect(!CtlAction.vmConfig.warnsAfterUpgrade(running: false))
-        for a in [CtlAction.repair, .diskShrink, .profileCreate] {
+        for a in [CtlAction.repair, .diskShrink, .vmRecreate, .profileCreate] {
             #expect(!a.warnsAfterUpgrade(running: true) && !a.warnsAfterUpgrade(running: false), "\(a.rawValue)")
         }
     }

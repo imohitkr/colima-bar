@@ -35,6 +35,7 @@ struct VMConfigView: View {
         VStack(spacing: 0) {
             topBar
             Divider()
+            VMRecreateNotice(model: model).padding(.horizontal, 12).padding(.top, 6)
             ScrollView {
                 if model.vmSettings == nil {
                     Text("This profile has no colima.yaml. Start it once to create one.")
@@ -48,7 +49,7 @@ struct VMConfigView: View {
                         Divider()
                         registries
                         Divider()
-                        fixed
+                        VMTypeSection(model: model, form: form)
                     }
                     .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -206,17 +207,6 @@ struct VMConfigView: View {
         }
     }
 
-    private var fixed: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            SectionHeader(title: "Set when the VM was created", hint: Help.vmSettingsFixed) { EmptyView() }
-            Text(
-                "VM type: \(shown(read.vmType, "vz")) · Mount type: \(shown(read.mountType, "default")) · Arch: \(shown(read.arch, "host"))"
-            )
-            .font(.caption)
-            caption("To change these, delete the profile and create it again.")
-        }
-    }
-
     private var bottomBar: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(problems, id: \.self) { Text($0).font(.caption).foregroundStyle(.red) }
@@ -243,8 +233,6 @@ struct VMConfigView: View {
     }
 
     // MARK: Helpers
-
-    private func shown(_ value: String, _ fallback: String) -> String { value.isEmpty ? fallback : value }
 
     private func caption(_ text: String, indent: CGFloat = 0) -> some View {
         Text(text).font(.caption2).foregroundStyle(.secondary).padding(.leading, indent)

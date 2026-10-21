@@ -167,8 +167,25 @@ enum Help {
     static let registryMirrors = "Registries that Docker tries before Docker Hub. Separate them with commas."
     static let insecureRegistries =
         "Registries that Docker reaches without TLS. Use them only on networks that you trust. Separate them with commas."
-    static let vmSettingsFixed =
-        "Colima ignores a change of these values after it created the VM. To change them, delete the profile and create it again."
+    static let vmTypeSection =
+        "The virtual machine (vz or qemu) and how Mac folders reach it (virtiofs, sshfs or 9p). Colima fixes both when it creates the VM."
+    static let vmTypePicker =
+        "vz uses Apple's Virtualization framework. It is fast and supports Rosetta. qemu needs QEMU from Homebrew and is slower."
+    static let mountTypePicker =
+        "virtiofs is the fastest and needs vz. sshfs works with both VM types and with some tools that fail on virtiofs. 9p needs qemu."
+    static let vmRecreate =
+        "Delete the VM and create it again with the new types. ColimaBar can back up the volumes and save the images first. You must type the profile name to confirm."
+    static let recreateBusy = "A VM type change runs now. Wait until it ends."
+    static let recreateNoConfig = "This profile has no colima.yaml. Start it once to create one."
+    static let recreateCancel =
+        "Stop this step. Nothing in the VM has changed yet, or the backups stay for a later restore."
+    static let recreateNoCancel = "ColimaBar cannot stop this step. Wait until it ends."
+    static let recreateRestore =
+        "Copy the backups into the new VM. ColimaBar restores only the volumes and images that are missing."
+    static let recreateShowFolder = "Show the backup folder in Finder."
+    static let recreateDismiss = "Hide this notice. The backup folder stays."
+    static let newProfileVMType = vmTypePicker
+    static let newProfileMountType = mountTypePicker
     static let vmSettingsApply =
         "Write the new settings to colima.yaml and restart the VM. ColimaBar keeps a copy of the old file. Running containers stop."
     static let vmSettingsApplyWhenStopped =

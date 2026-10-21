@@ -105,6 +105,11 @@ final class ColimaModel {
     private(set) var isSavingDiagnostics = false
     /// The volume backup or restore that runs now, or nil. One at a time.
     private(set) var volumeTransfer: VolumeTransfer?
+    /// The VM type change that runs now, or nil. One at a time.
+    private(set) var recreate: VMRecreateProgress?
+    /// The VM type changes that did not finish, by profile. The notice of the
+    /// System tab shows the one of the selected profile.
+    private(set) var pendingRecreate: [String: VMRecreateJournal] = [:]
     /// A Doctor run was asked for while another one ran (a profile switch).
     /// The running one starts once more when it ends.
     @ObservationIgnored var isDoctorRunQueued = false
@@ -416,6 +421,8 @@ final class ColimaModel {
     @ObservationIgnored let tlsMintQueue = DispatchQueue(label: "colimabar.domains.mint")
     /// The runner of the volume transfer that runs now.
     @ObservationIgnored var volumeRunner: VolumeBackupRunner?
+    /// The runner of the image save or load of a VM type change.
+    @ObservationIgnored var imageRunner: ImageArchiveRunner?
     /// The profile of that transfer, and why it stopped if the VM or the profile changed.
     @ObservationIgnored var volumeProfile: String?
     @ObservationIgnored var volumeStop: VolumeTransferStop?
@@ -831,6 +838,7 @@ final class ColimaModel {
                     status: $0.status)
             })
         syncProfiles()
+        loadRecreateJournals()
         pruneNetworkHealth()
         seedGoodStarts()
         // `colima start` switches the docker context, and `colima stop`
@@ -907,6 +915,7 @@ final class ColimaModel {
 
     func clearVMData(because: VolumeTransferStop) {
         stopVolumeTransferForVMChange(because)
+        imageRunner?.cancel()
         events?.cancel()
         events = nil
         resetDF()
@@ -1799,11 +1808,18 @@ final class ColimaModel {
     func run(_ action: CtlAction, args: [String], profile target: String? = nil) {
         // The old copy quits at once after the swap of an update.
         guard !updateRestarting else { return }
-        if action == .diskShrink, volumeTransfer != nil {
-            notify("Wait until the volume backup or restore ends, then shrink the disk.")
+        if action == .diskShrink || action == .vmRecreate, volumeTransfer != nil {
+            notify(
+                action == .diskShrink
+                    ? "Wait until the volume backup or restore ends, then shrink the disk."
+                    : "Wait until the volume backup or restore ends, then change the VM type.")
             return
         }
         let p = target ?? profile
+        if action.isVMAction, recreate?.profile == p {
+            notify(Help.recreateBusy)
+            return
+        }
         let running = isRunning(profile: p)
         if action.showsDialog(running: running) { dismissPopover() }
         let label = markBusy(action, p, running: running)
@@ -1863,7 +1879,7 @@ final class ColimaModel {
             probed = Task { await probeVersions() }
         }
         let env = action.environment(profile: p, expectRunning: expectRunning, upgrade: upgrade)
-        let r = await Shell.run([Paths.ctl, action.rawValue] + args, timeout: 900, extraEnv: env)
+        let r = await Shell.run([Paths.ctl, action.rawValue] + args, timeout: action.timeout, extraEnv: env)
         if let probed { versions = await probed.value }
         if starts, r.ok, UpgradeGuard.started(in: r.out), let versions { saveGoodStart(versions, p) }
         // colima-ctl.sh reports failures as "COLIMABAR_NOTIFY:<message>"
@@ -1928,7 +1944,26 @@ final class ColimaModel {
 
     /// `ColimaModel+Diagnostics` sets the flag through this function.
     func setSavingDiagnostics(_ on: Bool) { set(\.isSavingDiagnostics, on) }
-    func setVolumeTransfer(_ transfer: VolumeTransfer?) { set(\.volumeTransfer, transfer) }
+    func setVolumeTransfer(_ transfer: VolumeTransfer?) {
+        set(\.volumeTransfer, transfer)
+        // A VM type change shows the backup and the restore in its own strip.
+        guard let t = transfer, var r = recreate, r.step == .backingUp || r.step == .restoring else { return }
+        r.volume = t.volume
+        r.bytes = t.bytes
+        r.total = t.total
+        r.position = t.position ?? r.position
+        r.count = t.position == nil ? r.count : t.count
+        r.isCancelling = t.isCancelling || r.isCancelling
+        set(\.recreate, r)
+    }
+
+    /// `ColimaModel+VMRecreate` stores its state through these.
+    func setRecreate(_ progress: VMRecreateProgress?) { set(\.recreate, progress) }
+    func setPendingRecreate(_ all: [String: VMRecreateJournal]) { set(\.pendingRecreate, all) }
+    /// A VM type change holds the actions of its profile, so auto-stop and the
+    /// weekly cleanup stay away while it runs.
+    func holdAction(_ p: String) { actionsInFlight[p, default: 0] += 1 }
+    func releaseAction(_ p: String) { actionsInFlight[p, default: 1] -= 1 }
 
     /// `ColimaModel+Cleanup` stores its state through these.
     func setLogSizes(_ sizes: [String: Int64]?, error: String?) {
@@ -1982,7 +2017,9 @@ final class ColimaModel {
     /// Creates a profile and starts its VM. The directory watcher then
     /// lists it, and it gets its proxy and its docker context.
     func createProfile(_ form: NewProfileForm) {
-        if let problem = form.problem(existing: profiles.map(\.name)) {
+        if let problem = form.problem(
+            existing: profiles.map(\.name), qemuInstalled: VMTypeRules.qemuInstalled(arch: ""))
+        {
             Notifier.shared.post(problem)
             return
         }
@@ -2009,8 +2046,9 @@ final class ColimaModel {
             Notifier.shared.post("Wait until the action of the profile \(p) ends, then delete it.")
             return
         }
-        if volumeTransfer != nil {
-            Notifier.shared.post("Wait until the volume backup or restore ends, then delete the profile \(p).")
+        if volumeTransfer != nil || recreate != nil {
+            Notifier.shared.post(
+                "Wait until the volume backup, restore or VM type change ends, then delete the profile \(p).")
             return
         }
         if let refusal = ProfileDelete.refusal(profile: p, selected: profile, isRunning: isRunning(profile: p)) {

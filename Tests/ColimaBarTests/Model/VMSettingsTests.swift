@@ -69,4 +69,18 @@ import Testing
             #expect(r.isEditable(.mounts), "\(text)")
         }
     }
+
+    @Test func theFactsOfTheVMTypeChangeAreRead() {
+        let r = VMSettings.read(
+            "rosetta: true\nnetwork:\n  address: false\n  mode: bridged\nkubernetes:\n  enabled: true\n")
+        #expect(r.rosetta && r.kubernetes && r.networkMode == "bridged")
+        let none = VMSettings.read("cpu: 2\n")
+        #expect(!none.rosetta && !none.kubernetes && none.networkMode.isEmpty && !none.typesUnreadable)
+    }
+
+    @Test func aListWhereTheVMTypeBelongsIsMarkedUnreadable() {
+        #expect(VMSettings.read("vmType:\n  - vz\n").typesUnreadable)
+        #expect(VMSettings.read("mountType:\n  a: b\n").typesUnreadable)
+        #expect(!VMSettings.read("vmType: vz\nmountType: null\n").typesUnreadable)
+    }
 }

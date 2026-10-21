@@ -165,6 +165,21 @@ If the notification says that the stop failed, the new disk exists and the VM ru
 
 The containers, images and volumes are gone after the delete. You cannot get them back.
 
+## A VM type change fails
+
+A change of the VM type or mount type runs `colima stop`, `colima delete --force` (without `--data`) and `colima start`. For a stopped VM, it skips the first `colima stop` and runs `colima stop` at the end. If a step fails, ColimaBar sends a notification. Open `~/.cache/colima-bar/ctl.log` to see the output of Colima.
+
+Before it changes anything, ColimaBar saves `colima.yaml` as `~/.cache/colima-bar/colima.PROFILE.yaml.before-recreate`. The next change of the profile replaces this copy. It writes the new values to `colima.PROFILE.yaml.recreate` and removes that file after a good run.
+
+- **ColimaBar could not stop the VM.** Nothing changed.
+- **Colima could not delete the VM.** ColimaBar put the old `colima.yaml` back.
+- **The VM did not start with the new types.** The new `colima.yaml` is in place, and `.recreate` stays. To go back, copy the `.before-recreate` file to `PROFILE/colima.yaml` in your [Colima folder](#colimabar-uses-the-wrong-colima-folder), then run `colima start --profile PROFILE`. The data disk stays. If the VM runs, click **Restore Backups…** in the notice to restore what is missing.
+- **The qemu VM type needs QEMU.** Run `brew install qemu`, then try again.
+- **The VM of a profile with a reachable IP address does not start with qemu.** Use `vz` for such a profile.
+- **The notice "did not finish" shows after a restart of ColimaBar.** The change was cut off. Read the notice. **Restore Backups…** restores the volumes and images that are missing. **Dismiss** deletes only the journal.
+
+If virtiofs breaks a bind mount of `docker.sock`, change the mount type to `sshfs`. See [Change the VM type or mount type](usage.md#change-the-vm-type-or-mount-type).
+
 ## The disk image does not get smaller
 
 When you remove images, volumes or containers, the space is free in the VM. The disk image on your Mac keeps its size. To give the space back, open the cleanup page and click **Return Free Space**. See [Clean up disk space](usage.md#clean-up-disk-space).

@@ -158,13 +158,40 @@ If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-res
 - **Mounts**: the Mac folders that the VM shares. Click **Add Folder…** to pick one. **Writable** lets containers change the files. The page knows three cases. If `colima.yaml` has no `mounts` key, or `mounts: null`, Colima mounts no folder, and the page says "No folders are mounted." The first folder that you add is then the only one. If `colima.yaml` has `mounts: []`, Colima mounts your home folder, writable. The first folder that you add then goes after `~`. Remove `~` if you do not want your home folder. If you remove the last folder of a list, ColimaBar writes `mounts: []`, and Colima mounts your home folder again. A folder must exist. Colima does not start if one folder path begins with another, for example `~` and `~/code`, so ColimaBar refuses that list. A folder name must have no line break or control character.
 - **Send file changes to the VM (inotify)**: for tools that watch files. It is experimental.
 - **Docker registries**: mirrors that Docker tries before Docker Hub (an http or https address with no user name, query or fragment), and insecure registries that Docker reaches without TLS. They need the `docker` runtime.
-- **Set when the VM was created**: the VM type, the mount type and the architecture. Colima ignores a change of these values. To change them, delete the profile and create it again.
+- **VM type and mount type**: the VM type (`vz` or `qemu`) and the mount type (`virtiofs`, `sshfs` or `9p`). Colima fixes both when it creates the VM, so a change needs **Change and Recreate…**. See [Change the VM type or mount type](#change-the-vm-type-or-mount-type). The page also shows the architecture and the runtime. They are read-only.
 
 ColimaBar shows a problem in red and turns **Apply** off until you fix it. If the VM runs, **Apply** asks first, restarts the VM and stops the running containers. If the VM is stopped, **Apply** only writes `colima.yaml`. The VM stays stopped, and the settings apply at the next start.
 
 ColimaBar changes only the lines that you changed in `colima.yaml`. It keeps your comments and the keys that it does not know. Before it writes, it saves a copy of the old file in `~/.cache/colima-bar/colima.PROFILE.yaml.bak`. If `colima.yaml` changed outside ColimaBar after the page read it, ColimaBar changes nothing. It shows the message "colima.yaml changed outside ColimaBar. ColimaBar reloaded it. Check your changes and click Apply again." and drops your edits. After a good **Apply**, the page shows the new file, so **Apply** and **Revert** are off again. If the VM does not start with the new settings, or the restart does not end (it stops, or it takes longer than 15 minutes), ColimaBar puts the old file back. See [The VM does not start after a VM settings change](troubleshooting.md#the-vm-does-not-start-after-a-vm-settings-change).
 
 If a setting has a form that ColimaBar cannot edit (an anchor, or a list over several lines), the page shows it as read-only. Edit `colima.yaml` by hand then.
+
+### Change the VM type or mount type
+
+Colima ignores a new `vmType` or `mountType` in `colima.yaml` while the VM exists. Thus ColimaBar deletes the VM and creates it again. On the "More VM settings" page, pick a VM type and a mount type in **VM type and mount type**. ColimaBar offers only these pairs: `vz` with `virtiofs` or `sshfs`, and `qemu` with `sshfs` or `9p`. A problem shows in red, for example:
+
+- `qemu` needs QEMU. Run `brew install qemu`.
+- `vz` needs the architecture of your Mac. An `x86_64` VM needs `qemu`.
+- `qemu` does not work with a reachable IP address (`network.address`) or bridged networking.
+
+**Change and Recreate…** works while you have no unsaved edit on the page and no other action runs. To change a mount type because virtiofs breaks a bind mount of `docker.sock`, pick `sshfs`.
+
+**Your data.** Colima keeps the Docker data disk when it deletes a VM without `--data` (Colima 0.7 and later). It mounts the disk again in the new VM. Thus images, containers and volumes should stay. ColimaBar backs up the volumes anyway by default, in case the new VM cannot use the disk. A profile from before Colima 0.7 has no separate data disk. Then the delete removes all containers, images, volumes and build cache, and the warning says so. ColimaBar does not create containers again: run `docker compose up` again if you need to.
+
+To change the types:
+
+1. Pick the types and click **Change and Recreate…**.
+2. Read the warning. It names the old and the new types, and says if the data disk stays.
+3. Choose what to back up. **Back up all named volumes** is on by default while the VM runs. **Save the images that containers use** is on by default only if the profile has no data disk. Both are off while the VM is stopped or uses the containerd runtime.
+4. Type the profile name and click **Delete and Recreate**.
+5. If a backup is on, choose a folder. ColimaBar checks the free space (the size of the data, 10% more and 2 GB) and makes the folder `ColimaBar-PROFILE-YYYYMMDD-HHMMSS` in it. The folder has the volume files, `images.tar` and a copy of the journal, `recreate.json`. Only you can read them.
+6. Colima asks one more time. Click **OK**.
+
+The progress strip under the header shows each step: the backup of each volume, the image save, "Recreating the VM…", "Waiting for Docker…" and the restore. **Cancel** works before the VM changes (nothing changes, and the files that exist stay) and during the restore. It does not work during "Recreating the VM…" and "Waiting for Docker…".
+
+After the VM runs again, ColimaBar restores only the volumes that are missing and loads the images only if one is missing. If the data disk stayed, it restores nothing, and the notification says "Volumes and images are still there." A VM that was stopped starts once, then stops again.
+
+If ColimaBar quits during the change, the script goes on. At the next launch, a notice on the System tab and on the stopped screen says what is left, and shows **Restore Backups…**, **Show Folder** and **Dismiss**. **Restore Backups…** asks for the backup folder and restores what is missing. **Dismiss** deletes the journal and keeps the folder. If the Mac sleeps during a backup, that step fails. Before the VM changes, nothing changed. After it, use **Restore Backups…**. See [A VM type change fails](troubleshooting.md#a-vm-type-change-fails).
 
 ### Doctor
 
@@ -383,6 +410,8 @@ When the Mac wakes from sleep, ColimaBar does these steps:
 3. If Docker does not answer, it sends one notification with a **Restart** button.
 4. If Docker answers and the clock of the VM is more than 2 seconds off, it waits 20 seconds for Lima to fix it. If the clock is still off, ColimaBar sets it to the time of the Mac. If ColimaBar cannot set the clock, it sends a notification with a **Restart** button.
 5. If Docker answers, ColimaBar waits 15 seconds for the network. Then it checks the published ports of the VM. If a port answers in the VM but not on the Mac, it checks again after 5 seconds. If the port still fails, ColimaBar sends a notification with a **Restart** button.
+
+A backup or restore of a VM type change fails if the Mac sleeps in the middle of a transfer. See [Change the VM type or mount type](#change-the-vm-type-or-mount-type).
 
 The **Restart** button restarts only a profile that still exists, has no running action and has a running VM. Else ColimaBar sends a short notice and does nothing. The check never starts a VM. Auto-stop does not count the sleep time. See [Auto-stop](auto-stop.md#when-the-mac-sleeps).
 
@@ -635,10 +664,10 @@ If the selected profile no longer exists, ColimaBar switches to `default`.
 
 1. In the profile menu, choose **New Profile…**.
 2. Type a name. Use lowercase letters, digits and single hyphens, up to 30 characters. Start and end with a letter or a digit. You cannot use `default`, `colima` or a name that starts with `colima-`. Colima maps `colima` to `default` and removes the `colima-` prefix.
-3. Select the CPU, memory, disk and runtime. The form starts with the values of the selected profile. The runtime is docker by default. Only a docker profile gets auto-start, auto-stop, a profile socket and a docker context.
+3. Select the CPU, memory, disk, runtime, VM type and mount type. The form starts with the values of the selected profile. The runtime is docker by default. The VM type is `vz` with `virtiofs` by default. The mount type menu shows only the types that the VM type takes. `qemu` needs QEMU (`brew install qemu`). Only a docker profile gets auto-start, auto-stop, a profile socket and a docker context.
 4. Click **Create**.
 
-The form offers whole GB, so a profile with 2.5 GB starts the form at 2 GB. ColimaBar runs `colima start --profile NAME --cpu CPU --memory MEMORY --disk DISK --runtime RUNTIME`. The first start of a new profile can take some minutes. The dashboard keeps showing the selected profile.
+The form offers whole GB, so a profile with 2.5 GB starts the form at 2 GB. ColimaBar runs `colima start --profile NAME --cpu CPU --memory MEMORY --disk DISK --runtime RUNTIME --vm-type VMTYPE --mount-type MOUNTTYPE`. The first start of a new profile can take some minutes. The dashboard keeps showing the selected profile.
 
 ### Delete a profile
 

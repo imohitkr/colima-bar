@@ -179,4 +179,64 @@ import Testing
         let found = problems(VMSettingsChange(mounts: [VMMount(location: path)]))
         #expect(found == ["Folder names with line breaks or control characters are not supported."])
     }
+
+    // MARK: VM type change
+
+    private func recreate(
+        _ vmType: String, _ mountType: String, arch: String = "", address: Bool = false, mode: String = "",
+        qemu: Bool = true
+    ) -> [String] {
+        var read = VMSettings.Read()
+        read.arch = arch
+        read.address = address
+        read.networkMode = mode
+        return VMSettingsCheck.recreateProblems(
+            vmType: vmType, mountType: mountType, context: .init(current: read, qemuInstalled: qemu))
+    }
+
+    @Test(arguments: [("vz", "virtiofs"), ("vz", "sshfs"), ("qemu", "sshfs"), ("qemu", "9p")])
+    func everyValidPairHasNoProblem(pair: (String, String)) {
+        #expect(recreate(pair.0, pair.1).isEmpty)
+    }
+
+    @Test func aMountTypeThatTheVMTypeDoesNotTakeFails() {
+        #expect(recreate("qemu", "virtiofs") == ["virtiofs needs the vz VM type."])
+        #expect(recreate("vz", "9p") == ["9p needs the qemu VM type."])
+        #expect(recreate("vz", "nfs") == ["Select a mount type that the VM type supports."])
+    }
+
+    @Test func anotherVMTypeFails() {
+        #expect(recreate("krunkit", "sshfs") == ["Use the VM type vz or qemu."])
+    }
+
+    @Test func vzFailsForAnotherArchitecture() {
+        #expect(recreate("vz", "sshfs", arch: "x86_64") == ["An x86_64 VM needs the qemu VM type."])
+        #expect(recreate("vz", "sshfs", arch: "aarch64").isEmpty)
+        #expect(recreate("qemu", "sshfs", arch: "x86_64").isEmpty)
+    }
+
+    @Test func qemuNeedsQEMUNoAddressAndNoBridge() {
+        #expect(
+            recreate("qemu", "sshfs", qemu: false) == [
+                "The qemu VM type needs QEMU. Install it with brew install qemu."
+            ])
+        #expect(
+            recreate("qemu", "sshfs", address: true) == [
+                "This VM has a reachable IP address. It needs the vz VM type."
+            ])
+        #expect(
+            recreate("qemu", "sshfs", mode: "bridged") == [
+                "Bridged networking with qemu needs socket_vmnet. ColimaBar does not set it up."
+            ])
+        // vz needs none of these.
+        #expect(recreate("vz", "sshfs", address: true, mode: "bridged", qemu: false).isEmpty)
+    }
+
+    @Test func aFileWithAnUnreadableTypeAsksForAManualEdit() {
+        var read = VMSettings.Read()
+        read.typesUnreadable = true
+        let found = VMSettingsCheck.recreateProblems(
+            vmType: "qemu", mountType: "sshfs", context: .init(current: read, qemuInstalled: true))
+        #expect(found == ["Edit colima.yaml by hand: vmType or mountType has a form that ColimaBar cannot read."])
+    }
 }

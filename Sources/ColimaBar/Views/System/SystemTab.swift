@@ -9,6 +9,7 @@ struct SystemTab: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            VMRecreateNotice(model: model)
             VMSettingsSection(model: model, form: form, ui: ui, running: true)
 
             Divider()

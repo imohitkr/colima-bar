@@ -47,6 +47,34 @@ import Testing
         #expect(model.volumeTransfer?.isCancelling == true)
     }
 
+    @Test func aVMTypeChangeBlocksManualTransfersButNotItsOwn() {
+        #expect(
+            !ColimaModel.canTransferVolumes(
+                isDebug: false, running: true, hasSocket: true, transferring: false, recreating: true))
+        let model = ColimaModel(profile: "volume-test-profile", readOnly: true)
+        model.setRecreate(VMRecreateProgress(profile: "volume-test-profile", step: .preparing))
+        #expect(model.transferBlockReason(fromRecreate: false) == Help.transferDebug)
+        let live = ColimaModel(profile: "volume-test-profile")
+        live.setRecreate(VMRecreateProgress(profile: "volume-test-profile", step: .preparing))
+        #expect(live.transferBlockReason(fromRecreate: false) == Help.recreateBusy)
+        // Its own transfers fail only for the VM state: this model has no running VM.
+        #expect(live.transferBlockReason(fromRecreate: true) == Help.transferNeedsVM)
+    }
+
+    @Test func aTransferThatCannotStartReturnsNilAndPostsNothingWhenItDoesNotNotify() async {
+        let model = ColimaModel(profile: "volume-test-profile", readOnly: true)
+        let rows = [VolumeRow(name: "data", size: 1, links: 0, project: nil, isAnonymous: false)]
+        let folder = URL(fileURLWithPath: "/nonexistent/a.tar")
+        let summary = await model.performBackup(
+            volumes: rows, destinations: [folder], replace: false, folder: nil, notifies: false, fromRecreate: true)
+        #expect(summary == nil)
+        let restored = await model.performRestore(
+            file: folder, scan: .init(size: 0, skip: 0, meta: nil, entryCount: 0), target: "data", isNew: true,
+            confirmReplace: { _ in false }, notifies: false, fromRecreate: true)
+        #expect(restored == nil)
+        #expect(model.volumeTransfer == nil && model.volumeRunner == nil)
+    }
+
     // MARK: - Helper containers
 
     @Test func theDashboardHidesHelperContainers() throws {

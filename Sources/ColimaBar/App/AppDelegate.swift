@@ -231,6 +231,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             }
             // COLIMABAR_VMCONFIG=1: show the "More VM settings" page.
             if ProcessInfo.processInfo.environment["COLIMABAR_VMCONFIG"] == "1" { ui.showVMConfig = true }
+            // COLIMABAR_RECREATE_DEMO=1: show the progress strip of a VM type
+            // change with fake values. It runs nothing and writes nothing.
+            if ProcessInfo.processInfo.environment["COLIMABAR_RECREATE_DEMO"] == "1" {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    self?.model.showRecreateDemo()
+                }
+            }
             // COLIMABAR_RUNNING_ONLY=1: turn the filter on in memory only.
             // It is not a saved setting, so a debug run changes no Defaults.
             if ProcessInfo.processInfo.environment["COLIMABAR_RUNNING_ONLY"] == "1" { ui.runningOnly = true }

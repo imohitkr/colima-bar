@@ -6,6 +6,11 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Change the VM type and mount type of a profile with a guided recreate. On the "More VM settings" page, pick the VM type (`vz` or `qemu`) and the mount type (`virtiofs`, `sshfs` or `9p`), then click **Change and Recreate…**. ColimaBar can back up the volumes and save the images first, deletes and creates the VM again (Colima keeps its Docker data disk), and restores what is missing. See [Change the VM type or mount type](docs/usage.md#change-the-vm-type-or-mount-type).
+- Pick the VM type and mount type for a new profile.
+
 ### Changed
 
 - ColimaBar now needs macOS 15 or later. Version 0.14.0 is the last version for macOS 14. The in-app update and the Homebrew notice skip a release that needs a newer macOS than the one that runs, and say why.

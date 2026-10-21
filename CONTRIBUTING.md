@@ -74,6 +74,7 @@ The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--no
 - `COLIMABAR_CLEANUP`: set it to `1`. The PNG then shows the Cleanup page. It may read the log sizes with `colima ssh` and measure the disk image. The remove, empty and Return Free Space buttons are disabled.
 - `COLIMABAR_CLEANUP_FIXTURE`: the path of a JSON file. The Cleanup page then shows its rows instead of the live data. The format is `{"df": <the raw body of GET /system/df>, "logs": {"<64 hex container ID>": BYTES}, "diskImage": {"allocated": BYTES, "apparent": BYTES}}`. Each ID in `logs` must be the `Id` of a container in `df.Containers`. Only a debug run reads the file. Set it together with `COLIMABAR_CLEANUP=1`.
 - `COLIMABAR_DOMAINS`: set it to `1`. The PNG then shows the domain links. Nothing listens.
+- `COLIMABAR_RECREATE_DEMO`: set it to `1`. The PNG then shows the progress strip of a VM type change with fake values. It runs nothing and writes nothing.
 - `COLIMABAR_RUNNING_ONLY`: set it to `1`. The Containers tab then shows only running containers. The app does not save this filter.
 - `COLIMABAR_SNAPSHOT_HEIGHT`: the window height in points.
 - `COLIMABAR_SNAPSHOT_DELAY`: seconds to wait before the snapshot (default 6). Use 65 to fill the sparklines.
