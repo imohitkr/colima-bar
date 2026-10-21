@@ -63,6 +63,14 @@
     <td align="center"><b>VM settings</b>: DNS, port forwarder, mounts and registries</td>
   </tr>
   <tr>
+    <td width="50%"><img src="docs/screenshots/cleanup.png" alt="Cleanup page: the largest images, unused volumes, stopped containers, build cache and container logs, with Return Free Space"></td>
+    <td width="50%"></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Cleanup</b>: the largest items, container logs, Return Free Space</td>
+    <td></td>
+  </tr>
+  <tr>
     <td colspan="2"><img src="docs/screenshots/logs.png" alt="Log viewer with search, follow, timestamps and highlighted stderr"></td>
   </tr>
   <tr>

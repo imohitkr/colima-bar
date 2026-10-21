@@ -4,11 +4,6 @@
 
 These milestones are planned next. Each milestone gets its own release. Features that need an extra tool, such as kubectl, mkcert, Trivy or Grype, are off by default and appear only when the tool is installed.
 
-## Housekeeping (0.13.0)
-
-- **Cleanup advisor**: see the largest images, unused volumes, build cache, stopped containers and container logs, and remove them. Give free disk space back to the Mac (fstrim). Optionally prune dangling images and build cache once a week.
-- **Better container alerts**: one notification for a container that keeps restarting, no alert during a planned restart, mute a Compose project, and an optional notification when a container becomes healthy again.
-
 ## Container domains (0.14.0)
 
 - Open containers at names like `web.shop.colima.local`, with HTTPS from a local certificate authority. ColimaBar asks for an administrator password once to add the resolver, and it can remove everything again.

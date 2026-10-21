@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-21
+
 ### Added
 
 - Restart-loop alert. A container that exits 3 times in 5 minutes sends one "keeps restarting" notification. It then sends no crash alerts until it runs 10 minutes without an exit, or becomes healthy. In a loop, out-of-memory and unhealthy alerts are silent for 5 minutes after the last exit.
@@ -265,7 +267,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/imohitkr/colima-bar/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/imohitkr/colima-bar/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/imohitkr/colima-bar/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/imohitkr/colima-bar/compare/v0.9.0...v0.10.0
