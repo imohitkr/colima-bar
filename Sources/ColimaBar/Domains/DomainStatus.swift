@@ -24,7 +24,7 @@ struct DomainStatus: Equatable, Sendable {
         case .off: return nil
         case .debugRun: return Help.domainsDebug
         case .starting: return "Starting the proxy…"
-        case .failed: return "The proxy could not start. \(problem ?? "")"
+        case .failed: return problem ?? "The proxy could not start."
         case .running:
             if usesFallback { return "Port 80 is busy, so the proxy listens on port \(httpPort ?? 0)." }
             let names = routeCount == 1 ? "1 container has a name." : "\(routeCount) containers have a name."

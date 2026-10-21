@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// A small HTTP server on 127.0.0.1 with a port that the system picks. It
+/// A small HTTP server on 127.0.0.1 (or ::1) with a port that the system picks. It
 /// stands in for a container that publishes a web port. Each connection has
 /// its own thread. The test never leaves the loopback interface.
 ///
@@ -30,17 +30,33 @@ final class LoopbackHTTPServer: @unchecked Sendable {
         var isStopped: Bool { lock.withLock { stopped } }
     }
 
-    init(marker: String, mode: Mode = .hello) throws {
-        let s = socket(AF_INET, SOCK_STREAM, 0)
+    /// With `ipv6`, the server listens on ::1 and not on 127.0.0.1.
+    init(marker: String, mode: Mode = .hello, ipv6: Bool = false) throws {
+        let s = socket(ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0)
         guard s >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = 0
-        addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
-        let bound = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        var bound: Int32
+        var chosen: UInt16 = 0
+        if ipv6 {
+            var addr = sockaddr_in6()
+            addr.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+            addr.sin6_family = sa_family_t(AF_INET6)
+            addr.sin6_port = 0
+            addr.sin6_addr = in6addr_loopback
+            bound = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(s, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
+                }
+            }
+        } else {
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = 0
+            addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+            bound = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
             }
         }
         let flags = fcntl(s, F_GETFL)
@@ -49,12 +65,22 @@ final class LoopbackHTTPServer: @unchecked Sendable {
             close(s)
             throw POSIXError(code)
         }
-        var name = sockaddr_in()
-        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
-        _ = withUnsafeMutablePointer(to: &name) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(s, $0, &length) }
+        if ipv6 {
+            var name = sockaddr_in6()
+            var length = socklen_t(MemoryLayout<sockaddr_in6>.size)
+            _ = withUnsafeMutablePointer(to: &name) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(s, $0, &length) }
+            }
+            chosen = UInt16(bigEndian: name.sin6_port)
+        } else {
+            var name = sockaddr_in()
+            var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+            _ = withUnsafeMutablePointer(to: &name) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(s, $0, &length) }
+            }
+            chosen = UInt16(bigEndian: name.sin_port)
         }
-        port = Int(UInt16(bigEndian: name.sin_port))
+        port = Int(chosen)
         let state = state
         Thread.detachNewThread { Self.acceptLoop(listener: s, marker: marker, mode: mode, state: state) }
     }

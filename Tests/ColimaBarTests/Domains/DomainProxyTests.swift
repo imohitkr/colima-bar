@@ -8,18 +8,23 @@ import Testing
 @Suite struct DomainProxyTests {
     private typealias Rig = (proxy: DomainProxy, port: Int)
 
-    private func started(limits: DomainProxy.Limits = .init()) async throws -> Rig {
-        let proxy = DomainProxy(addresses: ["127.0.0.1"], limits: limits)
+    private func started(
+        limits: DomainProxy.Limits = .init(), addresses: [String] = ["127.0.0.1"]
+    ) async throws -> Rig {
+        let proxy = DomainProxy(addresses: addresses, limits: limits)
         let candidates = try [LoopbackListener.unusedPort(), LoopbackListener.unusedPort()].map { UInt16($0) }
         let port = try #require(await proxy.start(candidates: candidates))
         return (proxy, Int(port))
     }
 
     /// Routes `<name>.localhost` to the upstream ports.
-    private func routes(_ upstreams: [String: Int], vmRunning: Bool = true) -> DomainRoutes {
+    private func routes(
+        _ upstreams: [String: Int], vmRunning: Bool = true, containerPort: Int = 80, ipv6Only: Bool = false
+    ) -> DomainRoutes {
         let list = upstreams.map {
             DomainCandidate(
-                id: $0.key, name: $0.key, ports: [.init(containerPort: 80, hostPort: $0.value)])
+                id: $0.key, name: $0.key,
+                ports: [.init(containerPort: containerPort, hostPort: $0.value, ipv6Only: ipv6Only)])
         }
         return DomainRoutes.build(list, suffixes: ["localhost"], profile: "default", vmRunning: vmRunning)
     }
@@ -284,5 +289,220 @@ import Testing
         }
         #expect(hasTLS(DomainSession.upstreamParameters(tls: true, host: "web.localhost")))
         #expect(!hasTLS(DomainSession.upstreamParameters(tls: false, host: "web.localhost")))
+    }
+
+    // MARK: Guards and pages
+
+    @Test func aRouteToThePortOfTheProxyGetsABadGatewayPage() async throws {
+        let (proxy, port) = try await started()
+        defer { proxy.stop() }
+        proxy.routes = routes(["loop": port])
+        let r = await tcpExchange(port: port, send: [httpGet("loop.localhost")], until: "</html>")
+        #expect(r.hasPrefix("HTTP/1.1 502 Bad Gateway"))
+        #expect(r.contains("That is the port of this proxy."))
+        // The proxy did not dial itself: no second session stays open.
+        #expect(await waitUntil { proxy.sessionCount == 0 })
+    }
+
+    @Test func anAbsoluteTargetThatDiffersFromTheHostGetsABadRequest() async throws {
+        let (proxy, port) = try await started()
+        defer { proxy.stop() }
+        let alpha = try LoopbackHTTPServer(marker: "alpha-server")
+        proxy.routes = routes(["alpha": alpha.port])
+        let request = Data("GET http://alpha.localhost/ HTTP/1.1\r\nHost: evil.com\r\n\r\n".utf8)
+        let r = await tcpExchange(port: port, send: [request], until: "</html>")
+        #expect(r.hasPrefix("HTTP/1.1 400 Bad Request"))
+        #expect(alpha.requestCount == 0)
+    }
+
+    @Test func aHeadRequestGetsNoBodyFromABadGatewayOrAStoppedVM() async throws {
+        let (proxy, port) = try await started()
+        defer { proxy.stop() }
+        let head = Data("HEAD / HTTP/1.1\r\nHost: alpha.localhost\r\n\r\n".utf8)
+        proxy.routes = routes(["alpha": try LoopbackListener.unusedPort()])
+        let bad = await tcpExchange(port: port, send: [head])
+        #expect(bad.hasPrefix("HTTP/1.1 502 Bad Gateway"))
+        #expect(bad.contains("Content-Length:"))
+        #expect(!bad.contains("<html"))
+        proxy.routes = routes(["alpha": 1], vmRunning: false)
+        let stopped = await tcpExchange(port: port, send: [head])
+        #expect(stopped.hasPrefix("HTTP/1.1 503 Service Unavailable"))
+        #expect(!stopped.contains("<html"))
+    }
+
+    @Test func anErrorPageReachesAClientThatSendsABodyAfterTheHead() async throws {
+        let (proxy, port) = try await started()
+        defer { proxy.stop() }
+        let junk = Data(repeating: 0x41, count: 300_000)
+        let r = await onOwnThread { () -> String in
+            guard let client = TCPClient(port: port) else { return "<no connect>" }
+            client.send(Data("GET / HTTP/1.1\r\n\r\n".utf8))
+            client.send(junk)
+            return client.read(until: "</html>", timeout: 10)
+        }
+        #expect(r.hasPrefix("HTTP/1.1 400 Bad Request"), "[\(r.prefix(40))]")
+        #expect(r.contains("</html>"))
+    }
+
+    // MARK: Lifecycle
+
+    @Test func stopEndsTheConnectionOfTheClient() async throws {
+        let (proxy, port) = try await started()
+        let echo = try LoopbackHTTPServer(marker: "echo-server", mode: .echo)
+        proxy.routes = routes(["ws": echo.port])
+        let client = await onOwnThread { () -> TCPClient? in
+            guard let client = TCPClient(port: port) else { return nil }
+            client.send(httpGet("ws.localhost"))
+            _ = client.read(until: "\r\n\r\n", timeout: 10)
+            return client
+        }
+        let open = try #require(client)
+        proxy.stop()
+        // The read ends with the end of the stream, long before its 10 s limit.
+        let started = Date()
+        let rest = await onOwnThread { open.read(until: nil, timeout: 10) }
+        #expect(rest.isEmpty)
+        #expect(Date().timeIntervalSince(started) < 8)
+    }
+
+    @Test func aRouteSwapKeepsASplicedUpstream() async throws {
+        let (proxy, port) = try await started()
+        defer { proxy.stop() }
+        let echo = try LoopbackHTTPServer(marker: "echo-server", mode: .echo)
+        let other = try LoopbackHTTPServer(marker: "other-server")
+        proxy.routes = routes(["ws": echo.port])
+        let client = await onOwnThread { () -> TCPClient? in
+            guard let client = TCPClient(port: port) else { return nil }
+            client.send(httpGet("ws.localhost"))
+            _ = client.read(until: "\r\n\r\n", timeout: 10)
+            return client
+        }
+        let open = try #require(client)
+        proxy.routes = routes(["ws": other.port])
+        let reply = await onOwnThread { () -> String in
+            open.send(Data("after-swap".utf8))
+            return open.read(until: "after-swap", timeout: 10)
+        }
+        #expect(reply == "after-swap")
+        #expect(other.requestCount == 0)
+    }
+
+    @Test func aQuickRestartOnTheSamePortBinds() async throws {
+        let proxy = DomainProxy(addresses: ["127.0.0.1"])
+        defer { proxy.stop() }
+        let port = UInt16(try LoopbackListener.unusedPort())
+        #expect(await proxy.start(candidates: [port]) == port)
+        #expect(await proxy.start(candidates: [port]) == port)
+        #expect(await proxy.start(candidates: [port]) == port)
+        #expect(await canConnect(Int(port)))
+    }
+
+    @Test func aBusyPageEndsWithTheClientAndWithStop() async throws {
+        var limits = DomainProxy.Limits()
+        limits.maxSessions = 1
+        let (proxy, port) = try await started(limits: limits)
+        let holder = await onOwnThread { TCPClient(port: port) }
+        #expect(holder != nil)
+        #expect(await waitUntil { proxy.sessionCount == 1 })
+        _ = await tcpExchange(port: port, send: [], until: "</html>")
+        #expect(await waitUntil { proxy.rejectCount == 0 })
+        // A rejected client that stays open is cancelled by stop().
+        let open = await onOwnThread { () -> TCPClient? in
+            guard let client = TCPClient(port: port) else { return nil }
+            _ = client.read(until: "</html>", timeout: 10)
+            return client
+        }
+        #expect(open != nil)
+        proxy.stop()
+        #expect(proxy.rejectCount == 0)
+        _ = holder
+    }
+
+    @Test func aListenerFailureStopsTheProxyAndCallsTheHandler() async throws {
+        let (proxy, port) = try await started()
+        let called = Counter()
+        proxy.onListenerFailure = { called.add() }
+        proxy.simulateListenerFailure()
+        #expect(called.value == 1)
+        #expect(proxy.port == nil)
+        #expect(await refuses(port))
+    }
+
+    // MARK: Addresses
+
+    @Test func theProxyServesIPv4AndIPv6() async throws {
+        let (proxy, port) = try await started(addresses: DomainProxy.loopbackAddresses)
+        defer { proxy.stop() }
+        let alpha = try LoopbackHTTPServer(marker: "alpha-server")
+        proxy.routes = routes(["alpha": alpha.port])
+        let v4 = await tcpExchange(port: port, send: [httpGet("alpha.localhost")], until: "alpha.localhost /")
+        let v6 = await tcpExchange(
+            port: port, ipv6: true, send: [httpGet("alpha.localhost", "/six")], until: "/six")
+        #expect(v4.contains("alpha-server alpha.localhost /"))
+        #expect(v6.contains("alpha-server alpha.localhost /six"))
+    }
+
+    @Test func aMissingIPv6AddressStillServesIPv4() async throws {
+        // 2001:db8::1 is a documentation address that no interface has.
+        let (proxy, port) = try await started(addresses: ["127.0.0.1", "2001:db8::1"])
+        defer { proxy.stop() }
+        let alpha = try LoopbackHTTPServer(marker: "alpha-server")
+        proxy.routes = routes(["alpha": alpha.port])
+        let r = await tcpExchange(port: port, send: [httpGet("alpha.localhost")], until: "alpha.localhost /")
+        #expect(r.contains("alpha-server alpha.localhost /"))
+    }
+
+    @Test func aPortThatOnlyIPv6PublishesIsDialedOnIPv6() async throws {
+        let (proxy, port) = try await started()
+        defer { proxy.stop() }
+        let six = try LoopbackHTTPServer(marker: "six-server", ipv6: true)
+        let four = try LoopbackHTTPServer(marker: "four-server")
+        proxy.routes = routes(["six": six.port], ipv6Only: true)
+        let r = await tcpExchange(port: port, send: [httpGet("six.localhost")], until: "six.localhost /")
+        #expect(r.contains("six-server six.localhost /"))
+        // Without the flag, the proxy dials IPv4: a server on ::1 only gives a bad gateway.
+        proxy.routes = routes(["six": six.port, "four": four.port])
+        let wrong = await tcpExchange(port: port, send: [httpGet("six.localhost")], until: "</html>")
+        #expect(wrong.hasPrefix("HTTP/1.1 502 Bad Gateway"))
+        let right = await tcpExchange(port: port, send: [httpGet("four.localhost")], until: "four.localhost /")
+        #expect(right.contains("four-server four.localhost /"))
+    }
+
+    @Test func aListenerOnAllAddressesMakesAPortBusy() async throws {
+        let wildcard = try LoopbackListener(.quiet, wildcard: true)
+        defer { wildcard.stop() }
+        let free = try LoopbackListener.unusedPort()
+        let proxy = DomainProxy(addresses: ["127.0.0.1"])
+        defer { proxy.stop() }
+        #expect(await proxy.start(candidates: [UInt16(wildcard.port)]) == nil)
+        #expect(await proxy.start(candidates: [UInt16(wildcard.port), UInt16(free)]) == UInt16(free))
+        #expect(await !proxy.isFree(port: UInt16(wildcard.port)))
+        #expect(await proxy.isFree(port: UInt16(try LoopbackListener.unusedPort())))
+    }
+
+    // MARK: TLS upstream
+
+    @Test func aRouteToATLSPortSplicesToASelfSignedUpstream() async throws {
+        let (proxy, port) = try await started()
+        defer { proxy.stop() }
+        let upstream = try #require(await TLSUpstream.start())
+        defer { upstream.stop() }
+        proxy.routes = routes(["secure": upstream.port], containerPort: 443)
+        let r = await tcpExchange(port: port, send: [httpGet("secure.localhost")], until: "alpn=")
+        #expect(r.hasPrefix("HTTP/1.1 200 OK"), "[\(r.prefix(80))]")
+        #expect(r.contains("tls-upstream sni=secure.localhost alpn=http/1.1"))
+    }
+
+    @Test func aTLSHandshakeThatNeverEndsGetsABadGatewayPage() async throws {
+        var limits = DomainProxy.Limits()
+        limits.connectTimeout = 1
+        let (proxy, port) = try await started(limits: limits)
+        defer { proxy.stop() }
+        // The upstream accepts the connection and says nothing, so the handshake hangs.
+        let silent = try LoopbackListener(.quiet)
+        proxy.routes = routes(["secure": silent.port], containerPort: 443)
+        let r = await tcpExchange(port: port, send: [httpGet("secure.localhost")], until: "</html>")
+        #expect(r.hasPrefix("HTTP/1.1 502 Bad Gateway"))
+        #expect(await waitUntil { proxy.sessionCount == 0 })
     }
 }

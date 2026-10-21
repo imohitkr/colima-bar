@@ -47,23 +47,16 @@ struct ContainerRow: View {
         .opacity(c.isRunning ? 1 : 0.75)
     }
 
-    /// The globe that opens the container at its domain name. If the container
-    /// has no name, a note says why.
+    /// The globe that opens the container at its domain name. A warning shows
+    /// every note about the names of the container, also when it has a name.
     @ViewBuilder private var domainBadge: some View {
         if let rel = model.domainRoutes.primaryName(c.id), let url = model.domainURL(rel) {
             IconButton("globe", Help.domainLink(url.absoluteString)) { model.openDomain(rel) }
-        } else if let note = model.domainRoutes.notes[c.id]?.first {
+        }
+        if let notes = model.domainRoutes.notes[c.id], !notes.isEmpty {
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 11)).foregroundStyle(.orange)
-                .hint(domainNoteHint(note))
-        }
-    }
-
-    private func domainNoteHint(_ note: DomainRoutes.Note) -> String {
-        switch note {
-        case .taken(let name, let by):
-            Help.domainTaken(DomainLink.host(relative: name, suffix: model.primaryDomainSuffix), by: by)
-        case .labelPortNotPublished(let port): Help.domainPortNotPublished(port)
+                .hint(Help.domainNotes(notes, suffix: model.primaryDomainSuffix))
         }
     }
 

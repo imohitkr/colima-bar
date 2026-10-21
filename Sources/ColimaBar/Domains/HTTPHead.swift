@@ -49,10 +49,20 @@ struct HTTPHead: Equatable, Sendable {
         }
         guard hosts.count <= 1 else { return .failure(.duplicateHost) }
         let target = String(request[1])
-        let host = authority(ofAbsolute: target) ?? hosts.first
+        let absolute = authority(ofAbsolute: target)
+        // The proxy routes by one name, but the upstream may read the other. A mismatch is an attack shape.
+        if let absolute, let header = hosts.first, !sameAuthority(absolute, header) { return .failure(.malformed) }
+        let host = absolute ?? hosts.first
         guard let host, !host.isEmpty else { return .failure(.noHost) }
         return .success(
             HTTPHead(method: String(request[0]), target: target, version: String(request[2]), host: host, length: end))
+    }
+
+    /// True when two authorities name the same host. The port may differ.
+    private static func sameAuthority(_ a: String, _ b: String) -> Bool {
+        if let x = DomainName.normalizedHost(a), let y = DomainName.normalizedHost(b) { return x == y }
+        return a.trimmingCharacters(in: .whitespaces).lowercased()
+            == b.trimmingCharacters(in: .whitespaces).lowercased()
     }
 
     /// The index after the first CRLFCRLF, or nil.

@@ -371,6 +371,27 @@ enum Help {
     static func domainPortNotPublished(_ p: Int) -> String {
         "The label dev.colimabar.port names port \(p), but the container does not publish it."
     }
+    static func domainPortInvalid(_ value: String) -> String {
+        "The label dev.colimabar.port is \"\(value)\", which is not a port. The container uses its first web port."
+    }
+    static func domainPortNotWeb(_ p: Int) -> String {
+        "The proxy ignores port \(p) in a label: it is not a web port. The container uses its first web port."
+    }
+    static func domainNameDropped(_ entry: String) -> String {
+        "The label dev.colimabar.domains has the entry \"\(entry)\", which gives no name. Use ASCII names that end in .localhost."
+    }
+    /// The hint for all notes of one container.
+    static func domainNotes(_ notes: [DomainRoutes.Note], suffix: String) -> String {
+        notes.map { note -> String in
+            switch note {
+            case .taken(let name, let by): domainTaken(DomainLink.host(relative: name, suffix: suffix), by: by)
+            case .labelPortNotPublished(let port): domainPortNotPublished(port)
+            case .labelPortInvalid(let value): domainPortInvalid(value)
+            case .labelPortNotWeb(let port): domainPortNotWeb(port)
+            case .nameDropped(let entry): domainNameDropped(entry)
+            }
+        }.joined(separator: " ")
+    }
     static let domainsDebug = "A debug run does not start the proxy."
 
     // Network notice

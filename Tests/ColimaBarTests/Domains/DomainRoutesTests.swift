@@ -22,9 +22,12 @@ import Testing
 
     private func standalone(
         _ id: String, name: String, created: Int64 = 1, ports: [P] = [P(containerPort: 80, hostPort: 8000)],
-        labelPort: Int? = nil, domains: C.Domains = .none
+        labelPort: Int? = nil, labelPortInvalid: String? = nil, domains: C.Domains = .none,
+        droppedEntries: [String] = []
     ) -> C {
-        C(id: id, name: name, created: created, ports: ports, labelPort: labelPort, domains: domains)
+        C(
+            id: id, name: name, created: created, ports: ports, labelPort: labelPort,
+            labelPortInvalid: labelPortInvalid, domains: domains, droppedEntries: droppedEntries)
     }
 
     // MARK: Naming
@@ -106,6 +109,67 @@ import Testing
         let t = build([standalone("a", name: "w", labelPort: 9999)])
         #expect(t.routes.isEmpty)
         #expect(t.notes["a"] == [.labelPortNotPublished(9999)])
+    }
+
+    @Test func aLabelPortOfADatabaseIsIgnoredWithANote() {
+        let ports = [P(containerPort: 5432, hostPort: 5432), P(containerPort: 8080, hostPort: 9000)]
+        let t = build([standalone("a", name: "db", ports: ports, labelPort: 5432)])
+        #expect(t.routes["db"]?.hostPort == 9000)
+        #expect(t.notes["a"] == [.labelPortNotWeb(5432)])
+        let only = build([standalone("b", name: "pg", ports: [P(containerPort: 5432, hostPort: 5432)], labelPort: 5432)]
+        )
+        #expect(only.routes.isEmpty)
+        #expect(only.notes["b"] == [.labelPortNotWeb(5432)])
+    }
+
+    @Test func aDatabasePortInANameEntryGivesNoNameAndANote() {
+        let ports = [P(containerPort: 80, hostPort: 8000), P(containerPort: 6379, hostPort: 6379)]
+        let c = standalone(
+            "a", name: "w", ports: ports, domains: .names([.init(name: "cache.localhost", containerPort: 6379)]))
+        let t = build([c])
+        #expect(t.routes["cache"] == nil)
+        #expect(t.routes["w"] != nil)
+        #expect(t.notes["a"] == [.labelPortNotWeb(6379)])
+    }
+
+    @Test func aBadPortLabelGivesANoteAndTheAutomaticPort() {
+        let t = build([standalone("a", name: "w", labelPortInvalid: "http")])
+        #expect(t.routes["w"]?.hostPort == 8000)
+        #expect(t.notes["a"] == [.labelPortInvalid("http")])
+    }
+
+    @Test func droppedLabelEntriesGiveNotes() {
+        let c = standalone(
+            "a", name: "w", domains: .names([.init(name: "other.example.com", containerPort: nil)]),
+            droppedEntries: ["bücher.localhost"])
+        let t = build([c])
+        #expect(t.notes["a"] == [.nameDropped("bücher.localhost"), .nameDropped("other.example.com")])
+    }
+
+    @Test func aPortOnIPv6OnlyKeepsItsFlag() {
+        let t = build([standalone("a", name: "w", ports: [P(containerPort: 80, hostPort: 8000, ipv6Only: true)])])
+        #expect(t.routes["w"]?.ipv6Only == true)
+        #expect(build([standalone("b", name: "x")]).routes["x"]?.ipv6Only == false)
+    }
+
+    @Test func otherPublishedPortsCountForTheConflictSet() {
+        let t = DomainRoutes.build(
+            [standalone("a", name: "w")], suffixes: ["localhost"], profile: "p", vmRunning: true, otherPublished: [80])
+        #expect(t.publishedHostPorts == [80, 8000])
+    }
+
+    @Test func aLongReplicaNameKeepsItsNumber() {
+        let service = String(repeating: "s", count: 63)
+        let list = (1...2).map { n in compose("c\(n)", service: service, number: n, created: Int64(n)) }
+        let t = build(list)
+        let names = list.compactMap { t.primaryName($0.id) }
+        #expect(names.count == 2)
+        for name in names {
+            let label = String(name.split(separator: ".")[0])
+            #expect(label.count <= 63)
+        }
+        #expect(names[0].hasSuffix("-1.shop"))
+        #expect(names[1].hasSuffix("-2.shop"))
     }
 
     @Test func routesToTLSPortsUseUpstreamTLS() {

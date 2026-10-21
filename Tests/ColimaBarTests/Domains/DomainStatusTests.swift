@@ -28,6 +28,7 @@ import Testing
 
     @Test func aFailureShowsItsProblem() {
         let s = DomainStatus(phase: .failed, problem: "Ports 80 and 8080 are busy.")
-        #expect(s.caption(routeCount: 0) == "The proxy could not start. Ports 80 and 8080 are busy.")
+        #expect(s.caption(routeCount: 0) == "Ports 80 and 8080 are busy.")
+        #expect(DomainStatus(phase: .failed).caption(routeCount: 0) == "The proxy could not start.")
     }
 }

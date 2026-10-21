@@ -28,14 +28,16 @@ final class LoopbackListener: @unchecked Sendable {
         let finished = DispatchSemaphore(value: 0)
     }
 
-    init(_ behavior: Behavior) throws {
+    /// With `wildcard`, it listens on 0.0.0.0, like a container that publishes a port
+    /// on all addresses. A test closes it at once with `stop()`.
+    init(_ behavior: Behavior, wildcard: Bool = false) throws {
         let s = socket(AF_INET, SOCK_STREAM, 0)
         guard s >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         var addr = sockaddr_in()
         addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         addr.sin_family = sa_family_t(AF_INET)
         addr.sin_port = 0
-        addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+        addr.sin_addr.s_addr = wildcard ? UInt32(INADDR_ANY).bigEndian : UInt32(INADDR_LOOPBACK).bigEndian
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
                 bind(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size))

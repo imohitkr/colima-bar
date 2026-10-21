@@ -15,6 +15,8 @@ final class DomainSession: @unchecked Sendable {
     private var head: [UInt8] = []
     private var upstream: NWConnection?
     private var headTimer: DispatchSourceTimer?
+    /// Bounds the time from the start of the upstream connection to its `.ready`, TLS handshake included.
+    private var connectTimer: DispatchSourceTimer?
     private var routed = false
     private var finished = false
     private var clientHalfClosed = false
@@ -110,25 +112,51 @@ final class DomainSession: @unchecked Sendable {
         guard !finished else { return }
         headTimer?.cancel()
         headTimer = nil
+        connectTimer?.cancel()
+        connectTimer = nil
         routed = true
-        client.send(
-            content: DomainPage.response(kind, headOnly: headOnly),
-            completion: .contentProcessed { [weak self] _ in self?.end() })
+        FinalPage(connection: client, queue: queue, grace: limits.pageGrace) { [weak self] in self?.end() }
+            .run(DomainPage.response(kind, headOnly: headOnly))
     }
 
     // MARK: - Splice
 
     private func connectUpstream(_ route: DomainRoutes.Route, request: HTTPHead) {
-        guard let port = NWEndpoint.Port(rawValue: UInt16(truncatingIfNeeded: route.hostPort)),
-            (1...65535).contains(route.hostPort)
+        guard (1...65535).contains(route.hostPort),
+            let port = NWEndpoint.Port(rawValue: UInt16(truncatingIfNeeded: route.hostPort))
         else { return respond(.badRequest, headOnly: false) }
         let host = request.host.flatMap(DomainName.normalizedHost) ?? "localhost"
+        // A route to the port of the proxy would make the proxy dial itself until it is full.
+        if let own = proxy.portOnQueue, Int(own) == route.hostPort {
+            return respond(
+                .selfLoop(host: host, container: route.containerName, hostPort: route.hostPort),
+                headOnly: request.isHead)
+        }
         let connection = NWConnection(
-            host: "127.0.0.1", port: port,
+            host: NWEndpoint.Host(route.ipv6Only ? "::1" : "127.0.0.1"), port: port,
             using: Self.upstreamParameters(
                 tls: route.upstreamTLS, host: host, connectTimeout: limits.connectTimeout, queue: queue))
         upstream = connection
         routed = true
+        let down: @Sendable () -> Void = { [weak self, weak connection] in
+            guard let self, !finished, !spliced else { return }
+            log.notice("upstream port \(route.hostPort, privacy: .public) does not answer")
+            connectTimer?.cancel()
+            connectTimer = nil
+            connection?.stateUpdateHandler = nil
+            connection?.cancel()
+            upstream = nil
+            respond(
+                .upstreamDown(
+                    host: host, container: route.containerName, containerPort: route.containerPort,
+                    hostPort: route.hostPort),
+                headOnly: request.isHead)
+        }
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + .seconds(limits.connectTimeout))
+        timer.setEventHandler(handler: down)
+        timer.resume()
+        connectTimer = timer
         connection.stateUpdateHandler = { [weak self, weak connection] state in
             guard let self, let connection, !finished else { return }
             switch state {
@@ -138,19 +166,7 @@ final class DomainSession: @unchecked Sendable {
                 // After the splice, a failed upstream is no reason to end the session
                 // at once: its pending read still delivers the bytes that arrived
                 // and then ends that direction (see `pump`).
-                if spliced {
-                    break
-                } else {
-                    log.notice("upstream port \(route.hostPort, privacy: .public) does not answer")
-                    connection.cancel()
-                    upstream = nil
-                    routed = false
-                    respond(
-                        .upstreamDown(
-                            host: host, container: route.containerName, containerPort: route.containerPort,
-                            hostPort: route.hostPort),
-                        headOnly: request.isHead)
-                }
+                if !spliced { down() }
             case .cancelled:
                 if spliced { end() }
             default:
@@ -167,6 +183,8 @@ final class DomainSession: @unchecked Sendable {
         spliced = true
         headTimer?.cancel()
         headTimer = nil
+        connectTimer?.cancel()
+        connectTimer = nil
         // The head and any early body bytes go first.
         connection.send(
             content: Data(head),
@@ -184,14 +202,17 @@ final class DomainSession: @unchecked Sendable {
     }
 
     /// Copies one direction. It reads again only after the send is processed
-    /// (backpressure). An end of stream, or an error, from one side half-closes
-    /// the other. Bytes that arrive with the end still go out first.
+    /// (backpressure). An end of stream half-closes the other side. An error
+    /// ends the session at once, so that the peer sees a reset and not a
+    /// clean end. Bytes that arrive with the end or the error still go out first.
     private func pump(from source: NWConnection, to target: NWConnection, fromClient: Bool) {
         source.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, complete, error in
             guard let self, !finished else { return }
-            let last = complete || error != nil
+            let failed = error != nil
             guard let data, !data.isEmpty else {
-                if last {
+                if failed {
+                    end()
+                } else if complete {
                     halfClose(target, fromClient: fromClient)
                 } else {
                     pump(from: source, to: target, fromClient: fromClient)
@@ -202,8 +223,8 @@ final class DomainSession: @unchecked Sendable {
                 content: data,
                 completion: .contentProcessed { [weak self] sendError in
                     guard let self, !finished else { return }
-                    if sendError != nil { return end() }
-                    if last {
+                    if sendError != nil || failed { return end() }
+                    if complete {
                         halfClose(target, fromClient: fromClient)
                     } else {
                         pump(from: source, to: target, fromClient: fromClient)
@@ -227,6 +248,8 @@ final class DomainSession: @unchecked Sendable {
         finished = true
         headTimer?.cancel()
         headTimer = nil
+        connectTimer?.cancel()
+        connectTimer = nil
         client.stateUpdateHandler = nil
         upstream?.stateUpdateHandler = nil
         client.cancel()

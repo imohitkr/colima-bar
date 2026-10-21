@@ -50,8 +50,35 @@ import Testing
         #expect(
             c.ports == [
                 .init(containerPort: 80, hostPort: 1001), .init(containerPort: 81, hostPort: 1002),
-                .init(containerPort: 82, hostPort: 1003),
+                .init(containerPort: 82, hostPort: 1003, ipv6Only: true),
             ])
+    }
+
+    @Test func aPortOnBothLoopbackAddressesUsesIPv4() throws {
+        let ports = [port("::1", 1001, 80), port("127.0.0.1", 1001, 80), port("::1", 1002, 81), port("::", 1002, 81)]
+        let c = try #require(DomainCandidate(try api(ports: "[\(ports.joined(separator: ","))]")))
+        #expect(c.ports == [.init(containerPort: 80, hostPort: 1001), .init(containerPort: 81, hostPort: 1002)])
+    }
+
+    @Test func everyRunningContainerCountsForThePublishedPorts() throws {
+        let json = """
+            [{"Id":"a","Names":["/a"],"Image":"i","State":"running","Status":"Up",
+              "Ports":[{"IP":"0.0.0.0","PublicPort":80,"PrivatePort":80,"Type":"tcp"}]},
+             {"Id":"b","Names":["/b"],"Image":"i","State":"running","Status":"Up","Labels":{"org.testcontainers":"true"},
+              "Ports":[{"IP":"0.0.0.0","PublicPort":8080,"PrivatePort":80,"Type":"tcp"}]},
+             {"Id":"c","Names":["/c"],"Image":"i","State":"exited","Status":"Exited",
+              "Ports":[{"IP":"0.0.0.0","PublicPort":9090,"PrivatePort":80,"Type":"tcp"}]}]
+            """
+        let list = try JSONDecoder().decode([APIContainer].self, from: Data(json.utf8))
+        #expect(DomainCandidate.publishedHostPorts(list) == [80, 8080])
+        #expect(list.compactMap(DomainCandidate.init).count == 1)
+    }
+
+    @Test func theParserNamesTheEntriesThatItDrops() {
+        let scanned = DomainCandidate.scanDomains("ok.localhost, bücher.localhost, *.x.localhost, a.localhost@0")
+        #expect(scanned.domains == .names([.init(name: "ok.localhost", containerPort: nil)]))
+        #expect(scanned.dropped == ["bücher.localhost", "*.x.localhost", "a.localhost@0"])
+        #expect(DomainCandidate.scanDomains("off").dropped.isEmpty)
     }
 
     @Test func portsHaveAFixedOrder() throws {
@@ -87,9 +114,12 @@ import Testing
         #expect(orb.labelPort == 4000)
         let bad = try #require(
             DomainCandidate(try api(labels: #"{"dev.colimabar.port":"0","dev.orbstack.http-port":"4000"}"#)))
-        #expect(bad.labelPort == 4000)
+        // A label that is set but bad does not fall through to the OrbStack label.
+        #expect(bad.labelPort == nil)
+        #expect(bad.labelPortInvalid == "0")
         let none = try #require(DomainCandidate(try api(labels: #"{"dev.colimabar.port":"http"}"#)))
         #expect(none.labelPort == nil)
+        #expect(none.labelPortInvalid == "http")
     }
 
     @Test func aMissingCreatedFieldIsZero() throws {

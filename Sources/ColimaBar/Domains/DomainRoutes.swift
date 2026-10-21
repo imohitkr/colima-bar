@@ -9,6 +9,8 @@ struct DomainRoutes: Equatable, Sendable {
         let containerName: String
         let containerPort: Int
         let hostPort: Int
+        /// The port is published on `::1` only.
+        var ipv6Only = false
         /// The proxy connects with TLS to the ports that speak TLS.
         var upstreamTLS: Bool { DomainPorts.tlsContainerPorts.contains(containerPort) }
     }
@@ -17,6 +19,12 @@ struct DomainRoutes: Equatable, Sendable {
         /// `name` is relative. `by` is the container that has the name.
         case taken(name: String, by: String)
         case labelPortNotPublished(Int)
+        /// The port label is set but is not a port. The value is cut to 40 characters.
+        case labelPortInvalid(String)
+        /// The label port is a port that does not speak HTTP (a database), so the proxy ignores it.
+        case labelPortNotWeb(Int)
+        /// An entry of `dev.colimabar.domains` that gives no name.
+        case nameDropped(String)
     }
 
     enum Resolution: Equatable, Sendable {
@@ -59,35 +67,41 @@ struct DomainRoutes: Equatable, Sendable {
         let primary: Bool
     }
 
+    /// `otherPublished` holds the host ports of containers that are not candidates
+    /// (internal ones, testcontainers). They count for `publishedHostPorts`.
     static func build(
-        _ candidates: [DomainCandidate], suffixes: [String], profile: String, vmRunning: Bool
+        _ candidates: [DomainCandidate], suffixes: [String], profile: String, vmRunning: Bool,
+        otherPublished: Set<Int> = []
     ) -> DomainRoutes {
         var table = DomainRoutes()
         table.suffixes = suffixes
         table.profile = profile
         table.vmRunning = vmRunning
         let sorted = candidates.sorted { ($0.created, $0.id) < ($1.created, $1.id) }
-        table.publishedHostPorts = Set(sorted.flatMap { $0.ports.map(\.hostPort) })
+        table.publishedHostPorts = otherPublished.union(sorted.flatMap { $0.ports.map(\.hostPort) })
 
         var picked: [String: DomainCandidate.PortMap] = [:]
         for c in sorted {
-            if let port = pickPort(c) {
-                picked[c.id] = port
-            } else if let p = c.labelPort, !c.ports.contains(where: { $0.containerPort == p }) {
-                table.notes[c.id, default: []].append(.labelPortNotPublished(p))
+            let choice = choose(c)
+            if let port = choice.port { picked[c.id] = port }
+            if !choice.notes.isEmpty { table.notes[c.id, default: []].append(contentsOf: choice.notes) }
+            if c.domains != .off {
+                for piece in c.droppedEntries { table.notes[c.id, default: []].append(.nameDropped(piece)) }
             }
         }
 
         var claims: [Claim] = []
+        @discardableResult
         func add(
             _ priority: Int, _ order: Int, _ relative: String, _ c: DomainCandidate, _ port: DomainCandidate.PortMap,
             primary: Bool
-        ) {
+        ) -> Bool {
             guard DomainName.isValidRelative(relative),
                 relative.split(separator: ".").first.map(String.init) != DomainName.selfTestLabel
-            else { return }
+            else { return false }
             claims.append(
                 Claim(priority: priority, order: order, relative: relative, candidate: c, port: port, primary: primary))
+            return true
         }
 
         // Derived names. A replica group has two or more containers of one service.
@@ -121,7 +135,11 @@ struct DomainRoutes: Equatable, Sendable {
             if let base = derived[c.id] {
                 if let r = replica[c.id] {
                     let parts = base.split(separator: ".", maxSplits: 1).map(String.init)
-                    add(1, order, "\(parts[0])-\(r.number).\(parts[1])", c, port, primary: true)
+                    // The label `<service>-<n>` must fit in 63 characters: cut the service part.
+                    let tail = "-\(r.number)"
+                    var service = String(parts[0].prefix(max(1, DomainName.maxLabel - tail.count)))
+                    while service.hasSuffix("-") { service.removeLast() }
+                    add(1, order, "\(service)\(tail).\(parts[1])", c, port, primary: true)
                     if r.plain { add(2, order, base, c, port, primary: false) }
                 } else {
                     add(1, order, base, c, port, primary: true)
@@ -132,14 +150,26 @@ struct DomainRoutes: Equatable, Sendable {
         for (order, c) in sorted.enumerated() {
             guard case .names(let entries) = c.domains else { continue }
             for e in entries {
-                guard let relative = DomainName.relative(e.name, suffixes: suffixes) else { continue }
+                guard let relative = DomainName.relative(e.name, suffixes: suffixes) else {
+                    table.notes[c.id, default: []].append(.nameDropped(String(e.name.prefix(60))))
+                    continue
+                }
                 let port: DomainCandidate.PortMap?
                 if let p = e.containerPort {
-                    port = c.ports.first { $0.containerPort == p }
+                    let found = c.ports.first { $0.containerPort == p }
+                    if isNonWeb(p) || found.map({ isNonWeb($0.hostPort) }) == true {
+                        table.notes[c.id, default: []].append(.labelPortNotWeb(p))
+                        port = nil
+                    } else {
+                        if found == nil { table.notes[c.id, default: []].append(.labelPortNotPublished(p)) }
+                        port = found
+                    }
                 } else {
                     port = picked[c.id]
                 }
-                if let port { add(0, order, relative, c, port, primary: false) }
+                if let port, !add(0, order, relative, c, port, primary: false) {
+                    table.notes[c.id, default: []].append(.nameDropped(String(e.name.prefix(60))))
+                }
             }
         }
 
@@ -157,7 +187,7 @@ struct DomainRoutes: Equatable, Sendable {
             }
             table.routes[claim.relative] = Route(
                 containerID: c.id, containerName: c.name, containerPort: claim.port.containerPort,
-                hostPort: claim.port.hostPort)
+                hostPort: claim.port.hostPort, ipv6Only: claim.port.ipv6Only)
             owners[claim.relative] = c.name
             won[c.id, default: []].append(claim)
         }
@@ -176,15 +206,31 @@ struct DomainRoutes: Equatable, Sendable {
         return table
     }
 
+    private static func isNonWeb(_ port: Int) -> Bool { PortLink.nonWebPorts.contains(port) }
+
     /// The container port that a route uses. nil when there is none.
-    static func pickPort(_ c: DomainCandidate) -> DomainCandidate.PortMap? {
-        if let p = c.labelPort { return c.ports.first { $0.containerPort == p } }
+    static func pickPort(_ c: DomainCandidate) -> DomainCandidate.PortMap? { choose(c).port }
+
+    /// The port of `c` and the notes about its port label. A label port that
+    /// is a database port, or a bad label, gives a note and the automatic pick.
+    /// A label port that no published port matches gives a note and no route.
+    private static func choose(_ c: DomainCandidate) -> (port: DomainCandidate.PortMap?, notes: [Note]) {
+        var notes: [Note] = []
+        if let bad = c.labelPortInvalid { notes.append(.labelPortInvalid(bad)) }
+        if let p = c.labelPort {
+            if let m = c.ports.first(where: { $0.containerPort == p }) {
+                if !isNonWeb(p), !isNonWeb(m.hostPort) { return (m, notes) }
+                notes.append(.labelPortNotWeb(p))
+            } else if isNonWeb(p) {
+                notes.append(.labelPortNotWeb(p))
+            } else {
+                return (nil, notes + [.labelPortNotPublished(p)])
+            }
+        }
         for p in DomainPorts.preferred {
-            if let m = c.ports.first(where: { $0.containerPort == p }) { return m }
+            if let m = c.ports.first(where: { $0.containerPort == p }) { return (m, notes) }
         }
-        return c.ports.first {
-            !PortLink.nonWebPorts.contains($0.containerPort) && !PortLink.nonWebPorts.contains($0.hostPort)
-        }
+        return (c.ports.first { !isNonWeb($0.containerPort) && !isNonWeb($0.hostPort) }, notes)
     }
 
     func resolve(host: String) -> Resolution {

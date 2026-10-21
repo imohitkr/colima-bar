@@ -75,7 +75,7 @@ The name exists, but nothing answers on the published port. Do these steps:
 
 ## The domain links say :8080
 
-Port 80 is busy, or a running container publishes it. The proxy of container domains then listens on port 8080. The caption under **Open containers at .localhost names** says so. To use port 80, stop the app or the container that uses it, and turn the switch off and on again.
+Port 80 is busy, or a running container publishes it. The proxy of container domains then listens on port 8080. The caption under **Open containers at .localhost names** says so. To use port 80, stop the app or the container that uses it. ColimaBar goes back to port 80 by itself when the port is free, after a change of the containers or a wake.
 
 ## Names do not resolve in containers
 

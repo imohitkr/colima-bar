@@ -16,6 +16,8 @@ enum DomainPage {
         case headTooLarge
         /// 502
         case upstreamDown(host: String, container: String, containerPort: Int, hostPort: Int)
+        /// 502, for a route to the port of the proxy itself.
+        case selfLoop(host: String, container: String, hostPort: Int)
         /// 503
         case vmStopped(profile: String)
         /// 503
@@ -98,6 +100,13 @@ enum DomainPage {
                 502, "Bad Gateway", "Nothing answers for \(host)",
                 p(
                     "\(host) points to the container \(container) on port \(containerPort) (localhost:\(hostPort)), but nothing answers there. Check the logs of the container."
+                )
+            )
+        case .selfLoop(let host, let container, let hostPort):
+            return (
+                502, "Bad Gateway", "\(host) points to the proxy",
+                p(
+                    "\(host) points to the container \(container) on localhost:\(hostPort). That is the port of this proxy. Publish the container on another port."
                 )
             )
         case .vmStopped(let profile):

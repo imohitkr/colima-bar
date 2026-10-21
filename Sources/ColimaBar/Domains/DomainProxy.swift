@@ -2,6 +2,17 @@ import Foundation
 import Network
 import os
 
+/// What the model needs from the proxy. The tests give the model a fake.
+protocol DomainProxying: AnyObject, Sendable {
+    var routes: DomainRoutes { get set }
+    var onListenerFailure: (@Sendable () -> Void)? { get set }
+    var port: UInt16? { get }
+    func start(candidates: [UInt16]) async -> UInt16?
+    func stop()
+    /// True when nothing on this Mac accepts connections on `port`.
+    func isFree(port: UInt16) async -> Bool
+}
+
 /// The HTTP proxy of container domains. It listens on 127.0.0.1 and ::1 only.
 /// It reads the head of each request, finds the route of its Host and then
 /// splices the bytes to `127.0.0.1:<published host port>` (`DomainSession`).
@@ -11,7 +22,7 @@ import os
 /// sessions and `generation`. `table` has its own `OSAllocatedUnfairLock`.
 /// All `NWListener` and `NWConnection` objects are created and used only on
 /// `queue`. `@unchecked Sendable` for that reason.
-final class DomainProxy: @unchecked Sendable {
+final class DomainProxy: DomainProxying, @unchecked Sendable {
     struct Limits: Sendable {
         /// The time for the first request head.
         var headTimeout: TimeInterval = 10
@@ -23,6 +34,10 @@ final class DomainProxy: @unchecked Sendable {
         var readyTimeout: TimeInterval = 2
         /// The time of the connect that finds a busy port.
         var probeTimeout: TimeInterval = 0.3
+        /// How long `start` waits for the old listeners to close.
+        var closeTimeout: TimeInterval = 1
+        /// How long a connection that got an error page stays open to read the rest of the request.
+        var pageGrace: TimeInterval = 1
     }
 
     /// The only addresses that production binds. The proxy never binds `0.0.0.0` or `::`.
@@ -40,6 +55,8 @@ final class DomainProxy: @unchecked Sendable {
     private var sessions: [ObjectIdentifier: DomainSession] = [:]
     private var generation = 0
     private var boundPort: UInt16?
+    /// Connections that get the busy page. `stop()` cancels them.
+    private var rejects: [ObjectIdentifier: NWConnection] = [:]
 
     init(addresses: [String] = DomainProxy.loopbackAddresses, limits: Limits = .init()) {
         self.addresses = addresses
@@ -71,19 +88,15 @@ final class DomainProxy: @unchecked Sendable {
     /// nil. A call replaces the listeners of an earlier start. `stop()`
     /// while a start runs makes the start return nil with nothing bound.
     func start(candidates: [UInt16]) async -> UInt16? {
-        let gen = queue.sync { () -> Int in
+        let (gen, closing) = queue.sync { () -> (Int, ListenerDrain) in
             generation += 1
-            tearDownListeners()
-            return generation
+            return (generation, tearDownListeners())
         }
+        // `cancel()` is asynchronous. A probe before the old socket is closed would find our own port busy.
+        await waitForClose(closing)
         for candidate in candidates {
             guard queue.sync(execute: { generation == gen }) else { return nil }
-            var busy = false
-            for address in addresses where !busy {
-                busy = await PortProbe.listens(
-                    port: Int(candidate), ipv6: address.contains(":"), timeout: limits.probeTimeout)
-            }
-            if busy {
+            if await isBusy(candidate) {
                 log.notice("port \(candidate, privacy: .public) is busy")
                 continue
             }
@@ -98,10 +111,49 @@ final class DomainProxy: @unchecked Sendable {
         return nil
     }
 
+    func isFree(port: UInt16) async -> Bool { await !isBusy(port) }
+
+    private func isBusy(_ port: UInt16) async -> Bool {
+        for address in addresses
+        where await PortProbe.listens(port: Int(port), ipv6: address.contains(":"), timeout: limits.probeTimeout) {
+            return true
+        }
+        return false
+    }
+
+    /// The old listeners that are closing. `queue` guards it.
+    private final class ListenerDrain: @unchecked Sendable {
+        var remaining: Int
+        var waiter: (@Sendable () -> Void)?
+        init(_ count: Int) { remaining = count }
+    }
+
+    /// Waits until every listener of `drain` is `.cancelled`, at most `closeTimeout`.
+    private func waitForClose(_ drain: ListenerDrain) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            queue.async {
+                guard drain.remaining > 0 else { return cont.resume() }
+                let timer = DispatchWorkItem { [drain] in
+                    guard let resume = drain.waiter else { return }
+                    drain.waiter = nil
+                    resume()
+                }
+                drain.waiter = { cont.resume() }
+                self.queue.asyncAfter(deadline: .now() + self.limits.closeTimeout, execute: timer)
+            }
+        }
+    }
+
     /// Cancels the listeners and every session.
     func stop() {
         queue.sync { stopOnQueue() }
     }
+
+    /// For tests: acts as if a ready listener failed.
+    func simulateListenerFailure() { queue.sync { listenerFailed() } }
+
+    /// The connections that wait to get the busy page.
+    var rejectCount: Int { queue.sync { rejects.count } }
 
     /// Called by a session, on `queue`, when it ends.
     func sessionEnded(_ session: DomainSession) {
@@ -116,12 +168,28 @@ final class DomainProxy: @unchecked Sendable {
         let open = Array(sessions.values)
         sessions = [:]
         for s in open { s.cancel() }
+        let pending = Array(rejects.values)
+        rejects = [:]
+        for c in pending { c.cancel() }
     }
 
-    private func tearDownListeners() {
-        for l in listeners { l.cancel() }
+    @discardableResult
+    private func tearDownListeners() -> ListenerDrain {
+        let drain = ListenerDrain(listeners.count)
+        for l in listeners {
+            l.stateUpdateHandler = { [drain] state in
+                guard case .cancelled = state else { return }
+                drain.remaining -= 1
+                if drain.remaining == 0, let resume = drain.waiter {
+                    drain.waiter = nil
+                    resume()
+                }
+            }
+            l.cancel()
+        }
         listeners = []
         boundPort = nil
+        return drain
     }
 
     /// What one bind attempt knows. `queue` guards it.
@@ -199,7 +267,7 @@ final class DomainProxy: @unchecked Sendable {
                 attempt.states[address] = state
                 evaluate()
             }
-            listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
+            listener.newConnectionHandler = { [weak self] connection in self?.accept(connection, generation: gen) }
             listener.start(queue: queue)
         }
         let timeout = DispatchWorkItem { finish(false) }
@@ -218,16 +286,68 @@ final class DomainProxy: @unchecked Sendable {
         onListenerFailure?()
     }
 
-    private func accept(_ connection: NWConnection) {
+    private func accept(_ connection: NWConnection, generation gen: Int) {
+        // A listener of an old start, or one that stop() cancelled, may still deliver a queued connection.
+        guard gen == generation, boundPort != nil else { return connection.cancel() }
         guard sessions.count < limits.maxSessions else {
+            guard rejects.count < limits.maxSessions else { return connection.cancel() }
+            let key = ObjectIdentifier(connection)
+            rejects[key] = connection
             connection.start(queue: queue)
-            connection.send(
-                content: DomainPage.response(.busy, headOnly: false),
-                completion: .contentProcessed { _ in connection.cancel() })
+            FinalPage(connection: connection, queue: queue, grace: limits.pageGrace) { [weak self] in
+                self?.rejects[key] = nil
+                connection.cancel()
+            }.run(DomainPage.response(.busy, headOnly: false))
             return
         }
         let session = DomainSession(client: connection, proxy: self, queue: queue, limits: limits)
         sessions[ObjectIdentifier(session)] = session
         session.start()
+    }
+}
+
+/// Sends a last page and closes the write side. It then reads and drops what
+/// the client still sends, so that the close does not reset the connection
+/// and the client can read the page. It calls `done` once, when the client
+/// closes or after `grace` seconds. It lives on `queue` only.
+final class FinalPage: @unchecked Sendable {
+    private let connection: NWConnection
+    private let queue: DispatchQueue
+    private let grace: TimeInterval
+    private var done: (() -> Void)?
+    private var timer: DispatchSourceTimer?
+
+    init(connection: NWConnection, queue: DispatchQueue, grace: TimeInterval, done: @escaping () -> Void) {
+        self.connection = connection
+        self.queue = queue
+        self.grace = grace
+        self.done = done
+    }
+
+    func run(_ page: Data) {
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + grace)
+        timer.setEventHandler { [self] in finish() }
+        timer.resume()
+        self.timer = timer
+        connection.send(
+            content: page, contentContext: .finalMessage, isComplete: true,
+            completion: .contentProcessed { [self] error in
+                if error != nil { finish() } else { drain() }
+            })
+    }
+
+    private func drain() {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 16384) { [self] _, _, complete, error in
+            if complete || error != nil { finish() } else { drain() }
+        }
+    }
+
+    private func finish() {
+        timer?.cancel()
+        timer = nil
+        guard let done else { return }
+        self.done = nil
+        done()
     }
 }

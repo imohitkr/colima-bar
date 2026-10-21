@@ -173,7 +173,8 @@ final class ColimaModel {
     var domainsEnabled = Defaults.bool(.domains) ?? false {
         didSet {
             guard domainsEnabled != oldValue else { return }
-            Defaults.set(domainsEnabled, .domains)
+            // A debug run never writes a setting.
+            if !isDebug { Defaults.set(domainsEnabled, .domains) }
             domainsSettingChanged()
         }
     }
@@ -335,10 +336,17 @@ final class ColimaModel {
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
     @ObservationIgnored private(set) var isDebug = false
     /// The proxy of container domains. It listens only while the setting is on.
-    @ObservationIgnored let domainProxy = DomainProxy()
+    @ObservationIgnored let domainProxy: any DomainProxying
     @ObservationIgnored var domainCandidates: [DomainCandidate] = []
+    /// The host ports of every running container, internal ones too.
+    @ObservationIgnored var domainPublished: Set<Int> = []
     @ObservationIgnored var domainStartToken = 0
     @ObservationIgnored var domainRebindAt: Date?
+    /// The published ports at the last start. A change gives a failed proxy a new try.
+    @ObservationIgnored var domainStartPublished: Set<Int> = []
+    @ObservationIgnored var domainRecheck: Task<Void, Never>?
+    @ObservationIgnored var domainMoveBackProbing = false
+    @ObservationIgnored var domainTimings = DomainTimings()
     /// COLIMABAR_DOMAINS=1 in a debug run: show the names, start nothing.
     @ObservationIgnored var domainsShownInDebug = false
     /// The runner of the volume transfer that runs now.
@@ -425,7 +433,14 @@ final class ColimaModel {
     /// changes a route or a context, or writes a setting. The command never
     /// calls `start()`. Assigning `profile` here runs no `didSet`.
     /// `dockerAPI` is for tests: a fake daemon instead of the socket of the profile.
-    init(profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil) {
+    /// `domainProxy` and `domainsEnabled` are for tests too: a fake proxy, and
+    /// a start value of the setting that does not read or write a default.
+    init(
+        profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil,
+        domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil
+    ) {
+        self.domainProxy = domainProxy ?? DomainProxy()
+        if let domainsEnabled { self.domainsEnabled = domainsEnabled }
         let p = named ?? Defaults.string(.profile) ?? "default"
         profile = p
         isDebug = readOnly

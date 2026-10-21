@@ -19,6 +19,7 @@ import Testing
                 .upstreamDown(host: "a.localhost", container: "web", containerPort: 3000, hostPort: 49153),
                 "HTTP/1.1 502 Bad Gateway"
             ),
+            (.selfLoop(host: "a.localhost", container: "web", hostPort: 80), "HTTP/1.1 502 Bad Gateway"),
             (.vmStopped(profile: "default"), "HTTP/1.1 503 Service Unavailable"),
             (.busy, "HTTP/1.1 503 Service Unavailable"),
         ]
@@ -90,5 +91,11 @@ import Testing
     @Test func theBadGatewayPageNamesTheContainerAndThePorts() {
         let t = text(.upstreamDown(host: "web.localhost", container: "web", containerPort: 3000, hostPort: 49153))
         #expect(t.contains("web.localhost points to the container web on port 3000 (localhost:49153)"))
+    }
+
+    @Test func theSelfLoopPageNamesTheProxyPort() {
+        let t = text(.selfLoop(host: "web.localhost", container: "web", hostPort: 8080))
+        #expect(t.contains("That is the port of this proxy."))
+        #expect(t.contains("localhost:8080"))
     }
 }

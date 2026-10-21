@@ -7,18 +7,32 @@ import Foundation
 final class TCPClient: @unchecked Sendable {
     private let fd: Int32
 
-    /// nil when the connect fails.
-    init?(port: Int) {
-        let s = socket(AF_INET, SOCK_STREAM, 0)
+    /// nil when the connect fails. With `ipv6`, it connects to ::1.
+    init?(port: Int, ipv6: Bool = false) {
+        let s = socket(ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, 0)
         guard s >= 0 else { return nil }
-        var addr = sockaddr_in()
-        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
-        addr.sin_family = sa_family_t(AF_INET)
-        addr.sin_port = UInt16(port).bigEndian
-        addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
-        let rc = withUnsafePointer(to: &addr) {
-            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                connect(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+        let rc: Int32
+        if ipv6 {
+            var addr = sockaddr_in6()
+            addr.sin6_len = UInt8(MemoryLayout<sockaddr_in6>.size)
+            addr.sin6_family = sa_family_t(AF_INET6)
+            addr.sin6_port = UInt16(port).bigEndian
+            addr.sin6_addr = in6addr_loopback
+            rc = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(s, $0, socklen_t(MemoryLayout<sockaddr_in6>.size))
+                }
+            }
+        } else {
+            var addr = sockaddr_in()
+            addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+            addr.sin_family = sa_family_t(AF_INET)
+            addr.sin_port = UInt16(port).bigEndian
+            addr.sin_addr.s_addr = UInt32(INADDR_LOOPBACK).bigEndian
+            rc = withUnsafePointer(to: &addr) {
+                $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                    connect(s, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                }
             }
         }
         guard rc == 0 else {
@@ -71,14 +85,15 @@ final class TCPClient: @unchecked Sendable {
     }
 }
 
-/// Connects to 127.0.0.1:`port`, sends the chunks and returns what the server
+/// Connects to 127.0.0.1:`port` (::1 with `ipv6`), sends the chunks and returns what the server
 /// sends back until `until` appears, the stream ends or `timeout` seconds pass.
 /// With `halfClose`, it sends the end of the stream after the chunks.
 func tcpExchange(
-    port: Int, send chunks: [Data], until marker: String? = nil, halfClose: Bool = false, timeout: TimeInterval = 20
+    port: Int, ipv6: Bool = false, send chunks: [Data], until marker: String? = nil, halfClose: Bool = false,
+    timeout: TimeInterval = 20
 ) async -> String {
     await onOwnThread {
-        guard let client = TCPClient(port: port) else { return "<no connect>" }
+        guard let client = TCPClient(port: port, ipv6: ipv6) else { return "<no connect>" }
         for chunk in chunks { client.send(chunk) }
         if halfClose { client.shutdownWrite() }
         return client.read(until: marker, timeout: timeout)

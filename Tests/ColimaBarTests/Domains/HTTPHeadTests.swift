@@ -53,15 +53,20 @@ import Testing
         #expect(try head("GET / HTTP/1.1\r\nHOST: a.localhost\r\n\r\n").host == "a.localhost")
     }
 
-    @Test func anAbsoluteTargetWinsOverTheHostHeader() throws {
-        let h = try head("GET http://api.shop.localhost:8080/x HTTP/1.1\r\nHost: evil.com\r\n\r\n")
+    @Test func anAbsoluteTargetThatDiffersFromTheHostHeaderIsMalformed() {
+        #expect(parse("GET http://api.shop.localhost/x HTTP/1.1\r\nHost: evil.com\r\n\r\n") == .failure(.malformed))
+        #expect(parse("GET http://a.localhost/ HTTP/1.1\r\nHost: b.localhost\r\n\r\n") == .failure(.malformed))
+    }
+
+    @Test func anAbsoluteTargetThatMatchesTheHostHeaderPasses() throws {
+        let h = try head("GET http://api.shop.localhost:8080/x HTTP/1.1\r\nHost: API.shop.localhost\r\n\r\n")
         #expect(h.host == "api.shop.localhost:8080")
         let noHeader = try head("GET http://a.localhost/ HTTP/1.1\r\n\r\n")
         #expect(noHeader.host == "a.localhost")
     }
 
     @Test func userInfoIsNoPartOfTheAuthority() throws {
-        let h = try head("GET http://evil.com@a.localhost/ HTTP/1.1\r\nHost: x\r\n\r\n")
+        let h = try head("GET http://evil.com@a.localhost/ HTTP/1.1\r\nHost: a.localhost\r\n\r\n")
         #expect(h.host == "a.localhost")
     }
 
