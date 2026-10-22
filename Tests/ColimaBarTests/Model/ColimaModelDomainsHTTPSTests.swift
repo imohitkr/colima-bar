@@ -535,6 +535,9 @@ import Testing
         r.model.updateDomainRoutes(try containers(web("shop", host: 5000)))
         #expect(await waitUntil { r.model.multiSANServed.contains("shop.localhost") })
         #expect(await running(r))
+        // A debounced renewal of the names may still be due: let it end before the count.
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(await running(r))
         let starts = r.proxy.httpsStarts.count
         r.model.setState(.stopped)
         r.model.updateDomainRoutes([], authoritative: false)

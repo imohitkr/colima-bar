@@ -8,8 +8,8 @@ enum DomainPage {
         /// 404, for a name under our suffix. `known` holds the names that
         /// work now, as `host` or `host:port`, ready for a link.
         case notFound(host: String, profile: String, known: [String], secure: Bool = false)
-        /// 404, with no list.
-        case foreign
+        /// 404, with no list. `suffixes` are the suffixes that work now.
+        case foreign(suffixes: [String] = [DomainName.localhost])
         /// 408
         case timeout
         /// 431
@@ -85,10 +85,15 @@ enum DomainPage {
                     .joined() + "</ul>"
             }
             return (404, "Not Found", "No container at \(host)", body)
-        case .foreign:
+        case .foreign(let suffixes):
+            let ends = suffixes.map { "." + $0 }
+            let list =
+                ends.count > 1
+                ? ends.dropLast().joined(separator: ", ") + " or " + ends[ends.count - 1] : ends.joined()
+            let names = list.isEmpty ? ".localhost" : list
             return (
                 404, "Not Found", "Unknown address",
-                p("This address is not a container name. Use a name that ends in .localhost.")
+                p("This address is not a container name. Use a name that ends in \(names).")
             )
         case .timeout:
             return (408, "Request Timeout", "Request timeout", p("The request did not arrive in time."))

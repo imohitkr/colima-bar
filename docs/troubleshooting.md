@@ -78,7 +78,7 @@ The name exists, but nothing answers on the published port. Do these steps:
 The proxy serves HTTPS with a certificate that the local certificate authority of ColimaBar signed. A warning means that your browser does not trust that authority. Do these steps:
 
 1. Open the System tab. If the caption under **Use HTTPS with a local certificate authority** says that macOS does not trust the certificate authority, click **Trust Again…** and type your password.
-2. Open `https://web.localhost` or another name of a container. The name must end in `.localhost`. An IP address, or a name outside `.localhost`, always gets a warning.
+2. Open `https://web.localhost` or another name of a container. The name must end in `.localhost` or in your custom suffix. An IP address, or any other name, always gets a warning.
 3. Recent Firefox versions can use the certificates of macOS. If yours cannot, set `security.enterprise_roots.enabled` to `true`, or import `ca.pem` in its settings. **Show Certificate** shows the file.
 4. If the toggle shows an error, turn HTTPS off and on again. This makes a new certificate authority.
 5. A name that no running container uses gets the certificate of `localhost`, so the browser warns. Start the container first.
@@ -93,7 +93,7 @@ Node.js, Python and other tools use their own list of trusted authorities, not t
 - `SSL_CERT_FILE` for Python and OpenSSL based tools.
 - `REQUESTS_CA_BUNDLE` for the Python `requests` library.
 
-The certificate is valid only for names under `.localhost`. A tool that connects to `127.0.0.1` fails the check, because the certificate authority excludes IP addresses. Use the name of the container.
+The certificate is valid only for names under `.localhost` and your custom suffix. A tool that connects to `127.0.0.1` fails the check, because the certificate authority excludes IP addresses. Use the name of the container.
 
 ## The domain links say :8080
 
@@ -108,6 +108,19 @@ Restart the container once. The proxy stays on 8080 while a container, running o
 ## The domain links say :8443
 
 Port 443 is busy, or a container, running or stopped, publishes it. The HTTPS listener then uses port 8443. The caption under **Use HTTPS with a local certificate authority** says so. ColimaBar goes back to port 443 by itself when the port is free. If a container started while HTTPS held port 443, the System tab asks you to restart that container once, like for port 80.
+
+## A custom suffix name does not resolve
+
+The caption under **Also use a custom suffix** tells the state. If it says that macOS does not use the file yet, wait a few seconds: ColimaBar checks again after 2, 5 and 15 seconds. Then click **Repair…**. If it says that the file is missing, changed or names another port, or that the DNS server could not start, click **Repair…**. ColimaBar picks a new port and writes `/etc/resolver/SUFFIX` again (it asks for your password).
+
+Other causes:
+
+- A browser with its own secure DNS (DNS over HTTPS) skips `/etc/resolver`. Turn that off for local names. `.localhost` names always work.
+- A VPN client can rewrite the DNS setup and hide resolver files while it is connected.
+- The master switch **Open containers at .localhost names** stops the DNS server. Turn it on.
+- Names of the suffix do not resolve inside containers.
+
+To check, run `scutil --dns | grep -A3 colima.internal` (use your suffix). It must show a resolver with `nameserver[0] : 127.0.0.1` and the port of `/etc/resolver/colima.internal`. If another tool owns the file, ColimaBar says so and changes nothing: choose another suffix.
 
 ## Names do not resolve in containers
 

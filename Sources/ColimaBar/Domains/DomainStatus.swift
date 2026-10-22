@@ -30,12 +30,18 @@ struct DomainStatus: Equatable, Sendable {
         var problem: String?
         /// A removal of the CA did not end. A button offers the clean-up (`.off` only).
         var offersCleanUp = false
+        /// The CA covers every name but permits a name that is not in use any more. A button offers a replacement.
+        var widerCA = false
 
         /// True when the HTTPS listener has a port that links can use.
         var listening: Bool { (phase == .running || phase == .untrusted) && port != nil }
 
         /// True when the HTTPS listener uses a port other than 443.
         var usesFallback: Bool { port.map { $0 != DomainPorts.https[0] } ?? false }
+
+        /// The line under the caption when `widerCA` is set.
+        static let widerCAText =
+            "The certificate authority still permits a name that ColimaBar does not use. Replace it to remove that name."
 
         /// The caption under the HTTPS switch. nil when there is nothing to say.
         var caption: String? {
@@ -54,11 +60,47 @@ struct DomainStatus: Equatable, Sendable {
         }
     }
 
+    /// What the System tab shows about the DNS server of the custom suffix.
+    struct DNS: Equatable, Sendable {
+        enum Phase: Equatable, Sendable {
+            case off
+            case applying
+            case running
+            /// The server runs, but macOS does not use the resolver file yet.
+            case notUsedYet
+            case failed
+        }
+
+        var phase: Phase = .off
+        var port: UInt16?
+        /// The text for `.failed` and `.notUsedYet`.
+        var problem: String?
+        /// A note after a cancel or a refusal. The state did not change.
+        var note: String?
+
+        /// The caption under the suffix field. `example` is a name that works now.
+        func caption(suffix: String?, example: String?) -> String? {
+            if let note { return note }
+            switch phase {
+            case .off: return nil
+            case .applying: return "Writing the resolver file…"
+            case .failed: return problem ?? "The DNS server could not start."
+            case .notUsedYet:
+                return problem
+                    ?? "macOS does not use /etc/resolver/\(suffix ?? "") yet. Wait a moment, or turn the suffix off and on."
+            case .running:
+                if let example { return "\(example) works on this Mac." }
+                return "Names under \(suffix ?? DomainSuffix.defaultValue) work on this Mac."
+            }
+        }
+    }
+
     var phase: Phase = .off
     var httpPort: UInt16?
     /// The text for `.failed`.
     var problem: String?
     var https = HTTPS()
+    var dns = DNS()
 
     /// True when the proxy listens on a port other than 80.
     var usesFallback: Bool { httpPort.map { $0 != DomainPorts.http[0] } ?? false }

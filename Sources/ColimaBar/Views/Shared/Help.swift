@@ -250,7 +250,7 @@ enum Help {
     static let checkUpdates =
         "Ask GitHub one time each day if a newer ColimaBar release exists. ColimaBar sends one notification for a new version. Then it shows a button at the bottom of the dashboard. ColimaBar installs an update only after you click that button."
     static let uninstallConfirm =
-        "ColimaBar opens a terminal window (iTerm or Terminal) and runs its uninstall script. The script removes the app, the login item and ColimaBar's docker routes. Docker clients then connect to Colima directly. If you turned on HTTPS for container domains, the script also removes the local certificate authority of ColimaBar, and macOS can ask for your password. Colima, your containers and your images stay."
+        "ColimaBar opens a terminal window (iTerm or Terminal) and runs its uninstall script. The script removes the app, the login item and ColimaBar's docker routes. Docker clients then connect to Colima directly. If you turned on HTTPS for container domains, the script also removes the local certificate authority of ColimaBar, and macOS can ask for your password. It removes the file that ColimaBar added in /etc/resolver, which needs sudo. Colima, your containers and your images stay."
     static func version(_ v: String) -> String { "ColimaBar \(v). Click to check for a new version." }
     static func install(_ v: String) -> String {
         "ColimaBar \(v) is available. Click to download it, check it, replace this copy and restart. ColimaBar asks first."
@@ -404,11 +404,19 @@ enum Help {
     }
     static let domainsDebug = "A debug run does not start the proxy."
     static let domainsHTTPS =
-        "Serve the names over HTTPS too. ColimaBar makes a certificate authority that works only for .localhost names, and only for websites. macOS asks for your password to trust it. Turn this off to remove it."
+        "Serve the names over HTTPS too. ColimaBar makes a certificate authority that works only for .localhost names and your custom suffix, and only for websites. macOS asks for your password to trust it. Turn this off to remove it."
     static let domainsTrustAgain =
-        "Add the certificate authority to your login keychain and trust it again. macOS asks for your password."
+        "Trust the certificate authority again. If it does not cover your names, ColimaBar replaces it. macOS then asks for your password twice: to remove the old one and to trust the new one."
+    static let domainsReplaceCA =
+        "Replace the certificate authority with one that permits only the names in use. macOS asks for your password twice: to remove the old one and to trust the new one. It needs the switch for container domains on."
     static let domainsDeleteCA =
         "Remove the old certificate authority from your login keychain. A removal did not finish. macOS asks for your password."
+    static let domainSuffix =
+        "Also answer for names such as web.shop.colima.internal. ColimaBar runs a small DNS server on this Mac and adds the file /etc/resolver/SUFFIX. macOS asks for an administrator password to add it and to remove it. With HTTPS on, a change or a removal also replaces the certificate authority, and macOS asks for your password twice more."
+    static let domainSuffixApply =
+        "Write the resolver file for this suffix. macOS asks for an administrator password. With HTTPS on, macOS also asks for your password twice to replace the certificate authority."
+    static let domainSuffixRepair =
+        "Pick a new port for the DNS server and write the resolver file again. macOS asks for an administrator password."
     static let domainsShowCA =
         "Show the certificate file in Finder. Node.js, Python and other tools with their own trust store need it. For Node.js, set NODE_EXTRA_CA_CERTS to its path."
 

@@ -12,7 +12,7 @@ import Testing
         let cases: [(DomainPage.Kind, String)] = [
             (.badRequest, "HTTP/1.1 400 Bad Request"),
             (.notFound(host: "a.localhost", profile: "default", known: []), "HTTP/1.1 404 Not Found"),
-            (.foreign, "HTTP/1.1 404 Not Found"),
+            (.foreign(), "HTTP/1.1 404 Not Found"),
             (.timeout, "HTTP/1.1 408 Request Timeout"),
             (.headTooLarge, "HTTP/1.1 431 Request Header Fields Too Large"),
             (
@@ -66,7 +66,7 @@ import Testing
     }
 
     @Test func aForeignHostGetsNoList() {
-        let t = text(.foreign)
+        let t = text(.foreign())
         #expect(t.contains("Unknown address"))
         #expect(!t.contains("Names that work now"))
     }
@@ -103,5 +103,12 @@ import Testing
         let t = text(.selfLoop(host: "web.localhost", container: "web", hostPort: 8080))
         #expect(t.contains("That is the port of this proxy."))
         #expect(t.contains("localhost:8080"))
+    }
+
+    @Test func theForeignPageNamesTheActiveSuffixes() {
+        #expect(text(.foreign()).contains("ends in .localhost."))
+        let two = text(.foreign(suffixes: ["localhost", "colima.internal"]))
+        #expect(two.contains("ends in .localhost or .colima.internal."))
+        #expect(text(.foreign(suffixes: ["a", "b", "c"])).contains("ends in .a, .b or .c."))
     }
 }

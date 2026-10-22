@@ -407,4 +407,23 @@ import Testing
         #expect(running.routes.count == 300)
         #expect(running.rememberedNames.count == DomainRoutes.rememberedCap)
     }
+
+    @Test func twoSuffixesResolveTheSameRoute() {
+        let t = build([compose("a")], suffixes: ["localhost", "colima.internal"])
+        for host in ["web.shop.localhost", "web.shop.colima.internal", "api.web.shop.colima.internal"] {
+            if case .route(let route) = t.resolve(host: host) {
+                #expect(route.containerID == "a")
+            } else {
+                Issue.record("no route for \(host)")
+            }
+        }
+        #expect(t.resolve(host: "web.shop.example.com") == .foreign)
+        #expect(t.resolve(host: "colima.internal") == .unknown(relative: ""))
+    }
+
+    @Test func aLabelNameUnderTheCustomSuffixBecomesRelative() {
+        let named = compose("a", domains: .names([.init(name: "admin.shop.colima.internal", containerPort: nil)]))
+        let t = build([named], suffixes: ["localhost", "colima.internal"])
+        #expect(t.routes["admin.shop"]?.containerID == "a")
+    }
 }

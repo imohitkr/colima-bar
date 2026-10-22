@@ -97,7 +97,7 @@ final class DomainSession: @unchecked Sendable {
         let table = proxy.routes
         switch table.resolve(host: request.host ?? "") {
         case .foreign:
-            respond(.foreign, headOnly: request.isHead)
+            respond(.foreign(suffixes: table.suffixes), headOnly: request.isHead)
         case .unknown:
             let host = request.host.flatMap(DomainName.normalizedHost) ?? ""
             let own = isTLS ? proxy.httpsPortOnQueue : proxy.portOnQueue

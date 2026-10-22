@@ -20,6 +20,8 @@ struct DomainTimings: Sendable {
     var multiSANRenew: TimeInterval = 29 * 86400
     /// The least time between two checks if macOS still trusts the certificate authority.
     var trustRecheck: TimeInterval = 60
+    /// The waits before each new check of the system resolver while macOS does not use the resolver file yet.
+    var dnsRecheck: [TimeInterval] = [2, 5, 15]
 
     /// The wait before try `attempt` (0 is the first) of a failed proxy.
     func failureDelay(attempt: Int) -> TimeInterval {
@@ -35,11 +37,17 @@ extension ColimaModel {
     /// A debug run reads only `domainsShownInDebug`: the saved setting is for the real app.
     var domainsActive: Bool { isDebug ? domainsShownInDebug : domainsEnabled }
 
-    /// The suffixes that name a container. The custom suffix of a later version adds to it.
-    var activeDomainSuffixes: [String] { [DomainName.localhost] }
+    /// The suffixes that name a container: `localhost` and the custom suffix.
+    var activeDomainSuffixes: [String] { [DomainName.localhost] + [domainSuffix].compactMap { $0 } }
 
-    /// The suffix that links use.
-    var primaryDomainSuffix: String { activeDomainSuffixes.first ?? DomainName.localhost }
+    /// The suffix that links use: the custom one while its DNS server works.
+    /// HTTPS links use it only if the CA covers it, so a link never shows a
+    /// certificate warning that a new CA would fix.
+    var primaryDomainSuffix: String {
+        guard let suffix = domainSuffix, domainStatus.dns.phase == .running else { return DomainName.localhost }
+        if domainStatus.https.phase == .running, !(tlsCA?.covers([suffix]) ?? false) { return DomainName.localhost }
+        return suffix
+    }
 
     /// nil while the proxy does not listen, so a link never reaches another
     /// service on port 80. A debug run shows links with port 80.
@@ -162,11 +170,19 @@ extension ColimaModel {
         if domainsEnabled {
             rebuildDomainRoutes()
             startDomainProxy()
-            Task { await resumeHTTPS() }
+            Task {
+                await resumeHTTPS()
+                // This follows the click on the master switch, so a dialog is fine.
+                // A CA that a cancel or a master switch off left too wide goes now.
+                if caIsWiderThanNeeded { await replaceCAForSuffixes() }
+            }
+            if domainSuffix != nil { Task { await startDNSResponder() } }
         } else {
             // The master switch off stops HTTPS but keeps the certificate authority.
+            // It stops the DNS server too, but keeps the resolver file (no prompt).
             tearDownHTTPS()
             if httpsSetupTask == nil { setHTTPSStatus(.init(phase: .off)) }
+            stopDNSResponder()
             stopDomainProxy()
             rebuildDomainRoutes()
         }
@@ -244,7 +260,10 @@ extension ColimaModel {
         domainRetry = nil
         domainRetryCount = 0
         domainProxy.stop()
-        setDomainStatus(DomainStatus())
+        // The DNS server has its own state (`stopDNSResponder`).
+        var status = DomainStatus()
+        status.dns = domainStatus.dns
+        setDomainStatus(status)
     }
 
     /// A container publishes the port of the proxy now. Move to another port,
@@ -306,6 +325,7 @@ extension ColimaModel {
     func domainsAfterWake() {
         guard !isDebug, domainsEnabled else { return }
         httpsAfterWake()
+        dnsAfterWake()
         guard domainStatus.phase != .starting else { return }
         if domainProxy.port == nil {
             startDomainProxy()

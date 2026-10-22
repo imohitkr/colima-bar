@@ -167,6 +167,7 @@ extension ColimaModel {
         }
         lines.append("Domain proxy: \(domainStatusText)")
         lines.append("Domain HTTPS: \(httpsStatusText)")
+        lines.append("Custom suffix: \(domainSuffixStatusText)")
         lines.append("Colima folder: \(Paths.colimaDir)")
         lines.append("Lima folder: \(Paths.limaDir)")
         lines += DiagnosticsProbe.environmentNames(ProcessInfo.processInfo.environment)

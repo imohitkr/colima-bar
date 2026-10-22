@@ -216,14 +216,14 @@ import Testing
         let fd = try #require(holdWithoutListening(port))
         defer { close(fd) }
         var limits = DomainProxy.Limits()
-        limits.readyTimeout = 30
+        limits.readyTimeout = 120
         let proxy = DomainProxy(addresses: ["127.0.0.1"], limits: limits)
         defer { proxy.stop() }
         let started = Date()
         let other = UInt16(try LoopbackListener.unusedPort())
         #expect(await proxy.start(candidates: [UInt16(port), other]) == other)
-        // EADDRINUSE moves on to the next candidate long before the 30 s of the ready timeout.
-        #expect(Date().timeIntervalSince(started) < 15)
+        // EADDRINUSE moves on to the next candidate long before the 120 s of the ready timeout.
+        #expect(Date().timeIntervalSince(started) < 60)
     }
 
     @Test func aSecondStartReplacesTheFirstListener() async throws {

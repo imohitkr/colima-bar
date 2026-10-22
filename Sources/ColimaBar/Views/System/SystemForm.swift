@@ -10,6 +10,9 @@ final class SystemForm {
     var loginEnabled = LoginItem.isEnabled
     var loginNeedsApproval = false  // filled in off the main thread (runs launchctl)
     var isLinking = false
+    /// The custom suffix field of the Domains section.
+    var suffixText = ""
+    var suffixEditing = false
     var isCustomIdle = false  // "Custom" picked in the auto-stop picker
     var customMinutes = ""
     let shortcut = ShortcutRecording()

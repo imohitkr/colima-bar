@@ -181,6 +181,8 @@ final class ColimaModel {
     /// HTTPS for container domains (`ColimaModel+DomainsHTTPS`). Off by default.
     /// It changes only through `setHTTPS`.
     private(set) var httpsEnabled = false
+    /// The custom suffix with a resolver file of ColimaBar (`ColimaModel+DomainSuffix`), or nil.
+    private(set) var domainSuffix: String?
     private(set) var domainRoutes = DomainRoutes.empty
     private(set) var domainStatus = DomainStatus()
     /// The containers whose port the proxy held when they started. They need a restart.
@@ -369,6 +371,22 @@ final class ColimaModel {
     @ObservationIgnored var domainsShownInDebug = false
     /// The disk, keychain and TLS work of HTTPS. A test gives it a fake.
     @ObservationIgnored let domainTLS: any DomainTLSServicing
+    /// The DNS server of the custom suffix. A test gives it a fake.
+    @ObservationIgnored var dnsResponder: any DNSServing
+    /// Runs `osascript` for the resolver file. A test gives it a fake, and the system runner refuses in a test process.
+    @ObservationIgnored var resolverRun: ResolverInstaller.Runner = ResolverInstaller.systemRun
+    /// The folder of the resolver files. A test process points it at a folder that does not exist.
+    @ObservationIgnored var resolverDir = ResolverFile.dir
+    /// Looks up a name through the system resolver and reports whether it gives 127.0.0.1.
+    @ObservationIgnored var resolverCheck: @Sendable (String) async -> Bool = {
+        await LoopbackLookup.resolvesToLoopback($0)
+    }
+    /// True when nothing holds this UDP port.
+    @ObservationIgnored var dnsPortFree: @Sendable (Int) -> Bool = { DNSResponder.isFree(port: $0) }
+    @ObservationIgnored var dnsStartToken = 0
+    @ObservationIgnored var dnsRetry: Task<Void, Never>?
+    /// The delayed checks of the system resolver while the phase is `.notUsedYet`.
+    @ObservationIgnored var dnsRecheck: Task<Void, Never>?
     @ObservationIgnored var tlsCA: LocalCA?
     @ObservationIgnored var tlsProvider: TLSIdentityProvider?
     @ObservationIgnored var leafCache: LeafCache?
@@ -486,17 +504,25 @@ final class ColimaModel {
     init(
         profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil,
         domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil, domainsStore: UserDefaults? = nil,
-        httpsEnabled: Bool? = nil, domainTLS: (any DomainTLSServicing)? = nil
+        httpsEnabled: Bool? = nil, domainTLS: (any DomainTLSServicing)? = nil, domainSuffix: String? = nil
     ) {
         let inTest = TestProcess.isRunning
         self.domainProxy = domainProxy ?? (inTest ? InertDomainProxy() : DomainProxy())
         self.domainTLS = domainTLS ?? (inTest ? InertDomainTLS() : SystemDomainTLS())
+        dnsResponder = inTest ? InertDNSResponder() : DNSResponder()
+        if inTest {
+            resolverDir = NSTemporaryDirectory() + "colimabar-no-resolver-\(getpid())"
+            resolverCheck = { _ in false }
+            dnsPortFree = { _ in false }
+        }
         let store = domainsStore ?? (inTest ? TestProcess.emptyStore() : .standard)
         self.domainsStore = store
         self.domainsEnabled =
             domainsEnabled ?? (store.object(forKey: Defaults.Key.domains.rawValue) as? Bool) ?? false
         self.httpsEnabled =
             httpsEnabled ?? (store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool) ?? false
+        self.domainSuffix = (domainSuffix ?? store.string(forKey: Defaults.Key.domainSuffix.rawValue))
+            .flatMap(DomainSuffix.valid)
         let p = named ?? Defaults.string(.profile) ?? "default"
         profile = p
         isDebug = readOnly
@@ -547,6 +573,7 @@ final class ColimaModel {
             domainTLS.cleanStale()
             if domainsEnabled { startDomainProxy(retryFirst: true) }
             startHTTPSAtLaunch()
+            if domainsEnabled, domainSuffix != nil { Task { await startDNSResponder() } }
         } else {
             setDomainStatus(DomainStatus(phase: .debugRun))
         }
@@ -638,6 +665,8 @@ final class ColimaModel {
         if !isDebug {
             invalidateDomainTasks()
             stopHTTPSForQuit()
+            invalidateDNSTasks()
+            dnsResponder.stop()
             domainProxy.stop()
             profileProxies.shutdown()
             AppStatusFile.removeIfOwned()
@@ -1912,6 +1941,7 @@ final class ColimaModel {
     func setDomainRoutes(_ routes: DomainRoutes) { set(\.domainRoutes, routes) }
     func setDomainStatus(_ status: DomainStatus) { set(\.domainStatus, status) }
     func setDomainRestartHints(_ hints: [DomainRestartHint]) { set(\.domainRestartHints, hints) }
+    func setDomainSuffixValue(_ suffix: String?) { set(\.domainSuffix, suffix) }
     func setHTTPSEnabledFlag(_ on: Bool) { set(\.httpsEnabled, on) }
     func setLogSizesChecking(_ on: Bool) { set(\.logSizesChecking, on) }
     func setDiskImage(_ size: DiskImageSize?) { set(\.diskImage, size) }
