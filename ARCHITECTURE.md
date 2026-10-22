@@ -12,7 +12,7 @@ ColimaBar is a menu bar app for [Colima](https://github.com/abiosoft/colima). It
 
 It also takes `colimabar://` links, a keyboard shortcut and the `colimabar` command.
 
-ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit, Security for the local certificate authority of HTTPS, Network for the proxy of container domains, SystemConfiguration for the network watch, Carbon HIToolbox for the keyboard shortcut; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 14 or later.
+ColimaBar is one native process. It uses Swift 6.4, SwiftPM and Apple frameworks only (AppKit, SwiftUI, Observation, UserNotifications, ServiceManagement, IOKit, CryptoKit, Security for the local certificate authority of HTTPS, Network for the proxy of container domains, SystemConfiguration for the network watch, Carbon HIToolbox for the keyboard shortcut; `notify` is part of libSystem). It has no third-party dependencies. It runs on Apple silicon with macOS 15 or later.
 
 ColimaBar gets its data from these sources:
 

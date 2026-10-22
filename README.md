@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml"><img src="https://github.com/imohitkr/colima-bar/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <img src="https://img.shields.io/badge/macOS-14%2B-black?logo=apple" alt="macOS 14+">
+  <img src="https://img.shields.io/badge/macOS-15%2B-black?logo=apple" alt="macOS 15+">
   <img src="https://img.shields.io/badge/Apple%20silicon-only-black?logo=apple" alt="Apple silicon only">
   <img src="https://img.shields.io/badge/Swift-6.4-F05138?logo=swift&logoColor=white" alt="Swift 6.4">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
@@ -81,7 +81,7 @@
 
 ## Install
 
-You need a Mac with Apple silicon, macOS 14 or later, and [Colima](https://github.com/abiosoft/colima) (`brew install colima docker`).
+You need a Mac with Apple silicon, macOS 15 or later, and [Colima](https://github.com/abiosoft/colima) (`brew install colima docker`).
 
 **Homebrew (recommended).** Run this command in Terminal:
 

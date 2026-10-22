@@ -7,7 +7,7 @@ This page tells you how to install, verify, build and update ColimaBar.
 ## Requirements
 
 - A Mac with Apple silicon
-- macOS 14 or later
+- macOS 15 or later
 - [Colima](https://github.com/abiosoft/colima). To install it, run `brew install colima docker`.
 
 ## Homebrew (recommended)
@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/imohitkr/colima-bar/main/scripts/in
 
 The installer does these steps:
 
-1. It checks that the Mac has Apple silicon and macOS 14 or later.
+1. It checks that the Mac has Apple silicon and macOS 15 or later.
 2. It downloads `ColimaBar.zip` from the latest release.
 3. It verifies the download, if it can. See [Verify a download](#verify-a-download).
 4. It quits a running ColimaBar.

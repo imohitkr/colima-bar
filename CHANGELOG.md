@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Changed
+
+- ColimaBar now needs macOS 15 or later.
+
 ## [0.14.0] - 2026-10-22
 
 ### Added

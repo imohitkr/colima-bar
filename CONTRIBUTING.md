@@ -7,7 +7,7 @@ All contributors must follow the [Code of Conduct](CODE_OF_CONDUCT.md). To repor
 ## Requirements
 
 - A Mac with Apple silicon
-- macOS 14 or later
+- macOS 15 or later
 - Swift 6.4. Use the Xcode Command Line Tools with Swift 6.4, or install Swift 6.4 with [swiftly](https://www.swift.org/install/macos/). You do not need Xcode. To check the version, run `swift --version`.
 - [Colima](https://github.com/abiosoft/colima) and the docker CLI, for manual tests. To install them, run `brew install colima docker`.
 

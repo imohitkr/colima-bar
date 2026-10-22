@@ -6,8 +6,7 @@ import UniformTypeIdentifiers
 /// no extra permission for the Desktop.
 @MainActor
 enum VolumeBackupPanel {
-    /// `UTType.tarArchive` needs macOS 15. The app runs on macOS 14.
-    private static let tarType = UTType(filenameExtension: "tar") ?? .data
+    private static let tarType = UTType.tarArchive
 
     // MARK: - Back up
 

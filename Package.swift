@@ -20,7 +20,7 @@ let testSettings: [SwiftSetting] =
 
 let package = Package(
     name: "ColimaBar",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v15)],
     targets: [
         .executableTarget(
             name: "ColimaBar",

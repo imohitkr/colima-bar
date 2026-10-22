@@ -1,7 +1,7 @@
 ColimaBar
 =========
 
-Requirements: a Mac with Apple silicon, macOS 14 or later, and Colima.
+Requirements: a Mac with Apple silicon, macOS 15 or later, and Colima.
 To install Colima, run: brew install colima docker
 
 1. Drag ColimaBar into the Applications folder.
