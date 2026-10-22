@@ -164,15 +164,6 @@ import Testing
         #expect(cache.leafCount == 1)
     }
 
-    @Test func aResetDropsTheLeavesAndSignsWithTheNewCA() throws {
-        let (cache, _, _) = try rig()
-        _ = cache.identity(forSNI: "a.localhost")
-        let next = try LocalCA.create(permitted: ["localhost"])
-        cache.reset(ca: next, suffixes: ["localhost"])
-        _ = cache.identity(forSNI: "a.localhost")
-        #expect(cache.mintedCount == 2)
-    }
-
     @Test func aNewEpochMakesANewCertificateAndTheOldOnesGoAfterwards() throws {
         let (cache, _, _) = try rig()
         _ = cache.multiSANIdentity(names: ["a.localhost"], epoch: 1)
@@ -201,20 +192,30 @@ import Testing
         #expect(cache.mintedCount == 1)
     }
 
-    @Test func resetUsesTheNewSuffixes() throws {
-        let (cache, _, _) = try rig()
+    @Test func theSuffixesDecideTheLeafOfACustomName() throws {
         #expect(LeafCache.mintName(sni: "a.dev.test", suffixes: ["localhost"], resolves: { $0 }) == "localhost")
         #expect(
             LeafCache.mintName(sni: "a.dev.test", suffixes: ["localhost", "dev.test"], resolves: { $0 })
                 == "a.dev.test")
-        _ = cache.identity(forSNI: "a.dev.test")  // before: the localhost leaf
-        let before = cache.mintedCount
-        let next = try LocalCA.create(permitted: ["localhost", "dev.test"])
-        cache.reset(ca: next, suffixes: ["localhost", "dev.test"])
+        let (cache, _, _) = try rig(suffixes: ["localhost", "dev.test"])
         #expect(cache.identity(forSNI: "a.dev.test") != nil)
-        #expect(cache.mintedCount == before + 1)
+        #expect(cache.mintedCount == 1)
         _ = cache.identity(forSNI: "a.dev.test")
-        #expect(cache.mintedCount == before + 1)  // cached under its own name
+        #expect(cache.mintedCount == 1)  // cached under its own name
+    }
+
+    @Test func aFailedMintReturnsNilAndStoresNothing() throws {
+        // A CA whose key is a public key cannot sign.
+        let real = try LocalCA.create(permitted: ["localhost"])
+        let publicKey = try #require(SecKeyCopyPublicKey(real.key))
+        let broken = LocalCA(
+            certificate: real.certificate, der: real.der, key: publicKey, publicX963: real.publicX963,
+            name: real.name, keyID: real.keyID, permitted: real.permitted)
+        let cache = LeafCache(ca: broken, suffixes: ["localhost"], resolves: { $0 })
+        #expect(cache.identity(forSNI: "a.localhost") == nil)
+        #expect(cache.multiSANIdentity(names: ["a.localhost"]) == nil)
+        #expect(cache.mintedCount == 0)
+        #expect(cache.leafCount == 0)
     }
 
     @Test func aRouteUnderTheCustomSuffixGetsItsOwnLeaf() {

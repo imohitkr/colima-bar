@@ -126,6 +126,18 @@ import Testing
         #expect(r.model.domainURL("web.shop")?.absoluteString == "https://web.shop.localhost/")
     }
 
+    @Test func theIdentityTestRunsOnceUntilHTTPSIsTurnedOff() async throws {
+        let r = try rig()
+        await turnOn(r)
+        await r.model.startHTTPS()  // a second start, as a rebind makes it
+        #expect(await running(r))
+        #expect(r.tls.events.filter { $0 == "identityTest" }.count == 1)
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        await turnOn(r)
+        #expect(r.tls.events.filter { $0 == "identityTest" }.count == 2)
+    }
+
     @Test func aSecondClickDuringTheDialogAsksOnce() async throws {
         let r = try rig()
         r.model.setHTTPS(true)

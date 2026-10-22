@@ -2,16 +2,13 @@ import CommonCrypto
 import Foundation
 import Security
 
+@testable import ColimaBar
+
 /// A self-signed TLS server identity for a test, built in memory. No keychain
-/// and no file: the key is not permanent, and `SecIdentityCreate` joins it to
+/// and no file: the key is not permanent, and `PKCS12.identity` joins it to
 /// the certificate. The certificate is for `localhost`. Nothing trusts it, so
 /// a client must accept it by its own verify block, like the proxy does.
 enum SelfSignedIdentity {
-    @_silgen_name("SecIdentityCreate")
-    private static func secIdentityCreate(_ a: CFAllocator?, _ cert: SecCertificate, _ key: SecKey) -> Unmanaged<
-        SecIdentity
-    >?
-
     static func make(commonName: String = "localhost") -> SecIdentity? {
         var error: Unmanaged<CFError>?
         let attributes: [CFString: Any] = [
@@ -22,7 +19,7 @@ enum SelfSignedIdentity {
             let der = try? certificate(key: key, commonName: commonName),
             let cert = SecCertificateCreateWithData(nil, Data(der) as CFData)
         else { return nil }
-        return secIdentityCreate(nil, cert, key)?.takeRetainedValue()
+        return try? PKCS12.identity(certificate: cert, key: key)
     }
 
     // MARK: - DER

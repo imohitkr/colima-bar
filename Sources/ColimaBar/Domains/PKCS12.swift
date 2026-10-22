@@ -6,7 +6,8 @@ import Security
 /// keychain. It builds a PKCS#12 file in memory and imports it with
 /// `kSecImportToMemoryOnly`, so nothing is written anywhere.
 enum PKCS12 {
-    enum Failure: Error { case key, random, importFailed(OSStatus) }
+    /// The cases carry status codes only, never key material, so a log may show them.
+    enum Failure: Error { case key, random, importFailed(OSStatus), derivation(Int32), cipher(Int32) }
 
     /// The identity of `certificate` and the P-256 key `key`. The key must
     /// be able to export itself, which a key of `LocalCA.newKey` can.
@@ -36,42 +37,52 @@ enum PKCS12 {
             throw error?.takeRetainedValue() ?? Failure.key
         }
         // A P-256 private key is `04 || X || Y || K`.
-        let x963 = [UInt8](external)
+        var x963 = [UInt8](external)
         guard x963.count == 97, x963[0] == 4 else { throw Failure.key }
         let publicPart = Array(x963[0..<65])
-        let scalar = Array(x963[65..<97])
+        var scalar = Array(x963[65..<97])
+        defer {
+            wipe(&scalar)
+            wipe(&x963)
+        }
         let certificateDER = [UInt8](SecCertificateCopyData(certificate) as Data)
-        return build(
+        return try build(
             certificate: certificateDER, scalar: scalar, publicPoint: publicPart,
             keyID: X509Builder.keyID(publicPart), password: password)
     }
 
     static func build(
         certificate: [UInt8], scalar: [UInt8], publicPoint: [UInt8], keyID: [UInt8], password: String,
-        salt: [UInt8] = []
-    ) -> [UInt8] {
-        let ecPrivateKey = DER.seq(DER.int(1), DER.octets(scalar), DER.ctx(1, DER.bits(publicPoint)))
-        let pkcs8 = DER.seq(
+        salt: [UInt8]? = nil
+    ) throws -> [UInt8] {
+        var ecPrivateKey = DER.seq(DER.int(1), DER.octets(scalar), DER.ctx(1, DER.bits(publicPoint)))
+        var pkcs8 = DER.seq(
             DER.int(0), DER.seq(DER.oid("1.2.840.10045.2.1"), DER.oid("1.2.840.10045.3.1.7")),
             DER.octets(ecPrivateKey))
+        defer {
+            wipe(&ecPrivateKey)
+            wipe(&pkcs8)
+        }
         let localKeyID = DER.seq(DER.oid("1.2.840.113549.1.9.21"), DER.set(DER.octets(keyID)))
         let keyBag = DER.seq(
-            DER.oid("1.2.840.113549.1.12.10.1.2"), DER.ctx(0, shroud(pkcs8, password: password)), DER.set(localKeyID))
+            DER.oid("1.2.840.113549.1.12.10.1.2"), DER.ctx(0, try shroud(pkcs8, password: password)),
+            DER.set(localKeyID))
         let certBag = DER.seq(
             DER.oid("1.2.840.113549.1.12.10.1.3"),
             DER.ctx(0, DER.seq(DER.oid("1.2.840.113549.1.9.22.1"), DER.ctx(0, DER.octets(certificate)))),
             DER.set(localKeyID))
         let safeContents = DER.seq(keyBag, certBag)
         let authenticatedSafe = DER.seq(DER.seq(DER.oid("1.2.840.113549.1.7.1"), DER.ctx(0, DER.octets(safeContents))))
-        let macSalt = salt.isEmpty ? (try? randomBytes(16)) ?? [UInt8](repeating: 7, count: 16) : salt
+        let macSalt = try salt ?? randomBytes(16)
         let iterations = 1
-        let macKey = kdf(password: password, salt: macSalt, iterations: iterations, id: 3, length: 32)
+        var macKey = kdf(password: password, salt: macSalt, iterations: iterations, id: 3, length: 32)
         var digest = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
         macKey.withUnsafeBytes { k in
             authenticatedSafe.withUnsafeBytes { m in
                 CCHmac(CCHmacAlgorithm(kCCHmacAlgSHA256), k.baseAddress, k.count, m.baseAddress, m.count, &digest)
             }
         }
+        wipe(&macKey)
         let macData = DER.seq(
             DER.seq(DER.seq(DER.oid("2.16.840.1.101.3.4.2.1"), DER.tlv(5, [])), DER.octets(digest)),
             DER.octets(macSalt), DER.int(iterations))
@@ -80,25 +91,27 @@ enum PKCS12 {
     }
 
     /// An EncryptedPrivateKeyInfo with PBES2: PBKDF2 with HMAC-SHA256 and AES-256-CBC.
-    static func shroud(_ plain: [UInt8], password: String) -> [UInt8] {
-        let salt = (try? randomBytes(16)) ?? [UInt8](repeating: 3, count: 16)
-        let iv = (try? randomBytes(16)) ?? [UInt8](repeating: 5, count: 16)
+    static func shroud(_ plain: [UInt8], password: String) throws -> [UInt8] {
+        let salt = try randomBytes(16)
+        let iv = try randomBytes(16)
         let iterations = 2048
         var aesKey = [UInt8](repeating: 0, count: 32)
+        defer { wipe(&aesKey) }
         let pw = Array(password.utf8)
-        pw.withUnsafeBufferPointer { p in
+        let derived = pw.withUnsafeBufferPointer { p in
             p.withMemoryRebound(to: Int8.self) { pwc in
-                _ = CCKeyDerivationPBKDF(
+                CCKeyDerivationPBKDF(
                     CCPBKDFAlgorithm(kCCPBKDF2), pwc.baseAddress, pwc.count, salt, salt.count,
                     CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256), UInt32(iterations), &aesKey, aesKey.count)
             }
         }
+        guard derived == Int32(kCCSuccess) else { throw Failure.derivation(derived) }
         var encrypted = [UInt8](repeating: 0, count: plain.count + kCCBlockSizeAES128)
         var written = 0
         let status = CCCrypt(
             CCOperation(kCCEncrypt), CCAlgorithm(kCCAlgorithmAES), CCOptions(kCCOptionPKCS7Padding), aesKey,
             aesKey.count, iv, plain, plain.count, &encrypted, encrypted.count, &written)
-        precondition(status == kCCSuccess, "AES cannot fail with these sizes")
+        guard status == Int32(kCCSuccess) else { throw Failure.cipher(status) }
         encrypted = Array(encrypted.prefix(written))
         let kdfParams = DER.seq(
             DER.oid("1.2.840.113549.1.5.12"),
@@ -114,6 +127,11 @@ enum PKCS12 {
         var bytes = [UInt8](repeating: 0, count: count)
         guard SecRandomCopyBytes(kSecRandomDefault, count, &bytes) == errSecSuccess else { throw Failure.random }
         return bytes
+    }
+
+    /// Zeroes `bytes`. `memset_s` is not removed as a dead store.
+    static func wipe(_ bytes: inout [UInt8]) {
+        bytes.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) }
     }
 
     static func randomPassword() throws -> String { Data(try randomBytes(24)).base64EncodedString() }

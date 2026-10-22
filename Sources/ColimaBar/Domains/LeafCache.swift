@@ -100,16 +100,6 @@ final class LeafCache: @unchecked Sendable {
         return identity(named: Self.multiPrefix(epoch) + sorted.joined(separator: ","), names: sorted)
     }
 
-    /// Drops every leaf and signs the next ones with `ca`.
-    func reset(ca: LocalCA, suffixes: [String]) {
-        mintLock.withLock {
-            lock.withLock {
-                setup = Setup(ca: ca, suffixes: suffixes)
-                table.entries = [:]
-            }
-        }
-    }
-
     /// Drops the certificates of the fallback mode, except the ones of `epoch`.
     /// Call it after the listener of that epoch runs, so that the old
     /// listener never serves a certificate that is gone.
@@ -140,14 +130,22 @@ final class LeafCache: @unchecked Sendable {
     /// Signs a leaf and stores it. `mintLock` is held.
     private func mint(_ key: String, _ names: [String], _ current: Date) -> sec_identity_t? {
         let ca = lock.withLock { setup.ca }
-        guard let leaf = try? ca.mintLeaf(names: names, now: current),
-            let id = try? PKCS12.identity(certificate: leaf.certificate, key: leaf.key)
-        else {
-            log.error("a leaf could not be made")
+        let leaf: (certificate: SecCertificate, key: SecKey, notAfter: Date)
+        do {
+            leaf = try ca.mintLeaf(names: names, now: current)
+        } catch {
+            log.error("a leaf could not be signed: \(TLSIdentities.logText(error), privacy: .public)")
+            return nil
+        }
+        let id: SecIdentity
+        do {
+            id = try PKCS12.identity(certificate: leaf.certificate, key: leaf.key)
+        } catch {
+            log.error("a leaf could not be made an identity: \(TLSIdentities.logText(error), privacy: .public)")
             return nil
         }
         guard let secIdentity = sec_identity_create(id) else {
-            log.error("a leaf could not be made")
+            log.error("a leaf identity could not be wrapped for Network.framework")
             return nil
         }
         lock.withLock {
