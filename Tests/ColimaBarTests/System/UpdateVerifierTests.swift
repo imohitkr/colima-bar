@@ -32,6 +32,29 @@ import Testing
         #expect(problem(plist(), running: "1.0.0") != nil)
     }
 
+    @Test func aReleaseThatNeedsANewerMacOSIsAProblem() {
+        func os(_ major: Int, _ minor: Int = 0, _ patch: Int = 0) -> OperatingSystemVersion {
+            OperatingSystemVersion(majorVersion: major, minorVersion: minor, patchVersion: patch)
+        }
+        func problem(minimum: Any?, on: OperatingSystemVersion) -> String? {
+            var p = plist()
+            if let minimum { p["LSMinimumSystemVersion"] = minimum }
+            return UpdateVerifier.plistProblem(p, tag: "v0.9.1", running: "0.9.0", os: on)
+        }
+        #expect(problem(minimum: nil, on: os(14)) == nil)  // no key: fine
+        #expect(problem(minimum: "15.0", on: os(15)) == nil)
+        #expect(problem(minimum: "15", on: os(15, 3)) == nil)
+        #expect(problem(minimum: "15.1.2", on: os(15, 1, 2)) == nil)
+        #expect(problem(minimum: "15.1.2", on: os(26)) == nil)
+        #expect(problem(minimum: "15.0", on: os(14, 8, 9))?.contains("needs macOS 15.0 or later") == true)
+        #expect(problem(minimum: "15", on: os(14))?.contains("needs macOS 15.0 or later") == true)
+        #expect(problem(minimum: "15.1.2", on: os(15, 1, 1))?.contains("needs macOS 15.1.2 or later") == true)
+        for bad in ["", "x", "15.", ".5", "15.x", "1.2.3.4", "-1", "15 "] {
+            #expect(problem(minimum: bad, on: os(26)) != nil, "\(bad)")
+        }
+        #expect(problem(minimum: 15, on: os(26)) != nil)  // not a string
+    }
+
     // MARK: download
 
     @Test func checksTheSizeAndTheDigest() throws {

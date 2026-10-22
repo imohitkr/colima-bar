@@ -74,8 +74,35 @@ enum UpdateVerifier {
         }
     }
 
+    /// The version in an `LSMinimumSystemVersion` value such as "15", "15.0"
+    /// or "15.1.2", or nil if it is not 1 to 3 numbers with dots.
+    static func parseSystemVersion(_ text: String) -> OperatingSystemVersion? {
+        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
+        guard (1...3).contains(parts.count) else { return nil }
+        var numbers: [Int] = []
+        for part in parts {
+            guard !part.isEmpty, part.allSatisfy(\.isASCII), part.allSatisfy(\.isNumber), let n = Int(part) else {
+                return nil
+            }
+            numbers.append(n)
+        }
+        numbers += Array(repeating: 0, count: 3 - numbers.count)
+        return OperatingSystemVersion(majorVersion: numbers[0], minorVersion: numbers[1], patchVersion: numbers[2])
+    }
+
+    /// True if `os` is `minimum` or newer.
+    static func isAtLeast(_ os: OperatingSystemVersion, _ minimum: OperatingSystemVersion) -> Bool {
+        (os.majorVersion, os.minorVersion, os.patchVersion)
+            >= (minimum.majorVersion, minimum.minorVersion, minimum.patchVersion)
+    }
+
     /// Step 5: the problem with the Info.plist of the unpacked app, or nil.
-    static func plistProblem(_ plist: [String: Any]?, tag: String, running: String) -> String? {
+    /// `os` is the macOS that runs ColimaBar: a release that needs a newer
+    /// macOS must not replace a copy that works.
+    static func plistProblem(
+        _ plist: [String: Any]?, tag: String, running: String,
+        os: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+    ) -> String? {
         guard let plist else { return "the Info.plist cannot be read" }
         guard plist["CFBundleIdentifier"] as? String == bundleID else {
             return "the bundle identifier is not \(bundleID)"
@@ -84,6 +111,17 @@ enum UpdateVerifier {
         let version = plist["CFBundleShortVersionString"] as? String
         guard let version, version == Version.strip(tag) else { return "the version is not \(Version.strip(tag))" }
         guard Version.isNewer(version, than: running) else { return "the version is not newer than \(running)" }
+        if let raw = plist["LSMinimumSystemVersion"] {
+            guard let text = raw as? String, let minimum = parseSystemVersion(text) else {
+                return "the minimum macOS version is not readable"
+            }
+            if !isAtLeast(os, minimum) {
+                let name =
+                    "\(minimum.majorVersion).\(minimum.minorVersion)"
+                    + (minimum.patchVersion > 0 ? ".\(minimum.patchVersion)" : "")
+                return "it needs macOS \(name) or later, and this Mac has \(os.majorVersion).\(os.minorVersion)"
+            }
+        }
         return nil
     }
 
