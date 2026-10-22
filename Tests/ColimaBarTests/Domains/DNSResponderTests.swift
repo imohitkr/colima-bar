@@ -208,7 +208,12 @@ import Testing
         defer { r.stop() }
         let port = try await started(r)
         #expect(await r.start(port: port))
-        #expect(await exchange(query("a.colima.internal"), port: port) != nil)
+        // UDP can drop the first query while the new listener settles; a resolver asks again too.
+        var reply: [UInt8]?
+        for _ in 0..<3 where reply == nil {
+            reply = await exchange(query("a.colima.internal"), port: port)
+        }
+        #expect(reply != nil)
     }
 
     @Test func itBindsLoopbackOnly() async throws {
