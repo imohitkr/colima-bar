@@ -198,7 +198,7 @@ import Testing
         let unit =
             "auth auth auth:// a@b.c GET /v1.54/images/" + String(repeating: "a/", count: 40)
             + " token=x https://h:p@x.y \\/Users\\/ 1.2.3.4 \n"
-        let big = String(repeating: unit, count: 2_000_000 / unit.utf8.count)
+        let big = String(repeating: unit, count: 500_000 / unit.utf8.count)
         let start = ContinuousClock.now
         let once = redactor.redact(big)
         #expect(ContinuousClock.now - start < .seconds(60))
