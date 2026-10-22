@@ -182,12 +182,15 @@ own_resolver_files() {
 # remove_resolver_files DIR -> removes our files of own_resolver_files DIR
 # with sudo (/etc needs it, as for /var/run). A failure only prints a hint.
 remove_resolver_files() {
-  local f
+  local f found=0
   while IFS= read -r f; do
     [ -n "$f" ] || continue
+    found=1
     echo "Removing $f (needs sudo)"
     sudo rm -f "$f" || echo "Could not remove $f. Remove it by hand." >&2
   done < <(own_resolver_files "$1")
+  # rmdir removes only an empty folder, so a folder with other files stays.
+  if [ "$found" = 1 ]; then sudo rmdir "$1" 2>/dev/null || true; fi
   return 0
 }
 

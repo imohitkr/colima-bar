@@ -42,7 +42,8 @@ enum ResolverFile {
     static func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
     /// The /bin/sh text that installs `new` (exit 3 for a foreign file or a
-    /// link), then removes `old` (only if ours, a regular file). The new file
+    /// link), then removes `old` (only if ours, a regular file; a failed removal is not an error).
+    /// A removal without a new file also removes the folder when it is empty. The new file
     /// goes first, so a failure never leaves the user without a file. nil when a suffix
     /// or the port is not valid: nothing reaches a shell then.
     static func shellCommand(dir: String = dir, new: String?, old: String?, port: Int) -> String? {
@@ -68,7 +69,12 @@ enum ResolverFile {
             "  [ \"$(/usr/bin/id -u)\" -ne 0 ] || /usr/sbin/chown root:wheel \"$T\"",
             "  /bin/mv -f \"$T\" \"$D/$N\"; T=''",
             "fi",
-            "if [ -n \"$O\" ] && [ \"$O\" != \"$N\" ] && ours \"$D/$O\"; then /bin/rm -f \"$D/$O\"; fi",
+            // The new file is in place: a failed removal of the old file is no failure. A removal
+            // without a new file also removes the folder, but rmdir removes an empty folder and no other.
+            "if [ -n \"$O\" ] && [ \"$O\" != \"$N\" ] && ours \"$D/$O\"; then",
+            "  /bin/rm -f \"$D/$O\" || :",
+            "  [ -n \"$N\" ] || /bin/rmdir \"$D\" 2>/dev/null || :",
+            "fi",
         ].joined(separator: "\n")
     }
 

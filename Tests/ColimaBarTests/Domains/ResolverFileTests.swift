@@ -183,6 +183,44 @@ import Testing
         #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: b.path("c.test"))) != nil)
     }
 
+    @Test func removingOurLastFileRemovesTheEmptyFolderAndNoOther() async throws {
+        let b = try box()
+        defer { cleanup(b) }
+        try ResolverFile.content(port: 25000).write(toFile: b.path("a.test"), atomically: true, encoding: .utf8)
+        try ResolverFile.content(port: 25000).write(toFile: b.path("b.test"), atomically: true, encoding: .utf8)
+        let first = try #require(ResolverFile.shellCommand(dir: b.dir, new: nil, old: "a.test", port: 0))
+        #expect(try await run(first).status == 0)
+        #expect(FileManager.default.fileExists(atPath: b.dir))
+        let last = try #require(ResolverFile.shellCommand(dir: b.dir, new: nil, old: "b.test", port: 0))
+        #expect(try await run(last).status == 0)
+        #expect(!FileManager.default.fileExists(atPath: b.dir))
+        // A folder with a foreign file stays, and a folder that held no file of ours stays.
+        let other = try box()
+        defer { cleanup(other) }
+        try "keep\n".write(toFile: other.path("x.test"), atomically: true, encoding: .utf8)
+        try ResolverFile.content(port: 25000).write(toFile: other.path("a.test"), atomically: true, encoding: .utf8)
+        let removal = try #require(ResolverFile.shellCommand(dir: other.dir, new: nil, old: "a.test", port: 0))
+        #expect(try await run(removal).status == 0)
+        #expect(text(other.path("x.test")) == "keep\n")
+        let empty = try box()
+        defer { cleanup(empty) }
+        let nothing = try #require(ResolverFile.shellCommand(dir: empty.dir, new: nil, old: "a.test", port: 0))
+        #expect(try await run(nothing).status == 0)
+        #expect(FileManager.default.fileExists(atPath: empty.dir))
+    }
+
+    @Test func aFailedRemovalOfTheOldFileAfterTheNewFileIsNoFailure() async throws {
+        let b = try box()
+        defer { cleanup(b) }
+        try ResolverFile.content(port: 25000).write(toFile: b.path("old.test"), atomically: true, encoding: .utf8)
+        // An immutable file: rm fails, the folder stays writable.
+        #expect(chflags(b.path("old.test"), UInt32(UF_IMMUTABLE)) == 0)
+        defer { chflags(b.path("old.test"), 0) }
+        let cmd = try #require(ResolverFile.shellCommand(dir: b.dir, new: "new.test", old: "old.test", port: 26000))
+        #expect(try await run(cmd).status == 0)
+        #expect(text(b.path("new.test")) == ResolverFile.content(port: 26000))
+    }
+
     @Test func theMarkerSurvivesTheShellRoundTrip() async throws {
         // The marker has parentheses, dots and spaces: the file must still be ours.
         let b = try box()

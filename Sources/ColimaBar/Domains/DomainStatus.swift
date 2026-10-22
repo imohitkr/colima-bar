@@ -30,12 +30,18 @@ struct DomainStatus: Equatable, Sendable {
         var problem: String?
         /// A removal of the CA did not end. A button offers the clean-up (`.off` only).
         var offersCleanUp = false
+        /// The CA covers every name but permits a name that is not in use any more. A button offers a replacement.
+        var widerCA = false
 
         /// True when the HTTPS listener has a port that links can use.
         var listening: Bool { (phase == .running || phase == .untrusted) && port != nil }
 
         /// True when the HTTPS listener uses a port other than 443.
         var usesFallback: Bool { port.map { $0 != DomainPorts.https[0] } ?? false }
+
+        /// The line under the caption when `widerCA` is set.
+        static let widerCAText =
+            "The certificate authority still permits a name that ColimaBar does not use. Replace it to remove that name."
 
         /// The caption under the HTTPS switch. nil when there is nothing to say.
         var caption: String? {

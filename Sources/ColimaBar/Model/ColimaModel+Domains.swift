@@ -170,7 +170,12 @@ extension ColimaModel {
         if domainsEnabled {
             rebuildDomainRoutes()
             startDomainProxy()
-            Task { await resumeHTTPS() }
+            Task {
+                await resumeHTTPS()
+                // This follows the click on the master switch, so a dialog is fine.
+                // A CA that a cancel or a master switch off left too wide goes now.
+                if caIsWiderThanNeeded { await replaceCAForSuffixes() }
+            }
             if domainSuffix != nil { Task { await startDNSResponder() } }
         } else {
             // The master switch off stops HTTPS but keeps the certificate authority.

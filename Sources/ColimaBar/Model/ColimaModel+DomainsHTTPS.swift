@@ -16,9 +16,17 @@ extension ColimaModel {
         }
     }
 
+    /// True when the CA covers every active name and permits one more (for
+    /// example a suffix that is gone). A cancelled or skipped replacement leaves such a CA.
+    var caIsWiderThanNeeded: Bool {
+        guard !isDebug, httpsEnabled, let ca = tlsCA else { return false }
+        return ca.covers(activeDomainSuffixes) && Set(ca.permitted) != Set(activeDomainSuffixes)
+    }
+
     func setHTTPSStatus(_ https: DomainStatus.HTTPS) {
         var status = domainStatus
         status.https = https
+        status.https.widerCA = caIsWiderThanNeeded
         setDomainStatus(status)
     }
 
@@ -62,14 +70,14 @@ extension ColimaModel {
 
     /// Closes the popover before a dialog. It returns true when a dashboard was open,
     /// so the flow can bring it back with `restoreDashboard(ifOpen:)`.
-    private func closeDashboardForDialog() -> Bool {
+    func closeDashboardForDialog() -> Bool {
         let wasOpen = visibleCount > 0
         dismissPopover()
         return wasOpen
     }
 
     /// After a dialog, with any outcome: shows the dashboard again, key and focused.
-    private func restoreDashboard(ifOpen wasOpen: Bool) {
+    func restoreDashboard(ifOpen wasOpen: Bool) {
         if wasOpen { restoreDashboard() }
     }
 
@@ -242,7 +250,8 @@ extension ColimaModel {
                 return setHTTPSStatus(
                     .init(
                         phase: .untrusted,
-                        problem: "ColimaBar did not replace the certificate authority. \(Self.needsNewCAText)"))
+                        problem: "ColimaBar did not replace the certificate authority. "
+                            + (old.covers(suffixes) ? Self.keptOldCAText : Self.needsNewCAText)))
             }
             tlsCA = nil
             let prepared = await Self.blocking { Result { try services.prepareCA(permitted: suffixes) } }
@@ -265,21 +274,29 @@ extension ColimaModel {
     /// does: two dialogs. A CA that permits a name that is gone is replaced
     /// too, so the CA never covers a suffix without a resolver. A cancel keeps
     /// the old CA. It needs the master switch on, because a dialog must
-    /// follow a click.
-    func replaceCAForSuffixes() async {
-        guard !isDebug, domainsEnabled, httpsEnabled else { return }
+    /// follow a click. `carried` is true when the caller closed the dashboard
+    /// already: this call brings it back, with any outcome.
+    func replaceCAForSuffixes(reopening carried: Bool = false) async {
+        if await !replaceCAIfNeeded(carried: carried) { restoreDashboard(ifOpen: carried) }
+    }
+
+    /// True when a replacement ran: it restores the dashboard itself.
+    private func replaceCAIfNeeded(carried: Bool) async -> Bool {
+        guard !isDebug, domainsEnabled, httpsEnabled else { return false }
         while let running = httpsSetupTask { await running.value }
-        guard httpsEnabled, domainsEnabled, let old = tlsCA ?? domainTLS.loadCA() else { return }
+        guard httpsEnabled, domainsEnabled, let old = tlsCA ?? domainTLS.loadCA() else { return false }
         tlsCA = old
         let suffixes = activeDomainSuffixes
         if Set(old.permitted) == Set(suffixes) {
             if !domainStatus.https.listening { await startHTTPS() }
-            return
+            return false
         }
         // Stops a listener whose CA lacks a name, and keeps `.untrusted` with the reason.
         await startHTTPS()
-        guard httpsSetupTask == nil, httpsEnabled else { return }
-        reissueCA(old: old, restore: closeDashboardForDialog())
+        guard httpsSetupTask == nil, httpsEnabled else { return false }
+        // A dashboard that the caller closed stays closed: the new flow restores it.
+        let wasOpen = carried || closeDashboardForDialog()
+        reissueCA(old: old, restore: wasOpen)
         while let running = httpsSetupTask { await running.value }
         // A cancelled replacement leaves a CA that still covers every name: run with it.
         if httpsEnabled, domainStatus.https.phase == .untrusted, tlsCA?.covers(suffixes) ?? false,
@@ -287,7 +304,11 @@ extension ColimaModel {
         {
             await startHTTPS()
         }
+        return true
     }
+
+    /// The text for an old CA that stays and still covers every active name.
+    nonisolated static let keptOldCAText = "The old one still works for your names."
 
     /// The text for a CA that does not permit the active suffixes.
     nonisolated static let needsNewCAText =

@@ -17,12 +17,13 @@ import Testing
         let store: UserDefaults
         let dir: String
         let dialogs: Counter
+        let restores: Counter
         func file(_ suffix: String) -> String { "\(dir)/\(suffix)" }
     }
 
     private func rig(
         suffix: String? = nil, port: Int? = 25000, domains: Bool = true, https: Bool = false, ca: Bool = false,
-        file: Bool = true, resolves: Bool = true
+        file: Bool = true, resolves: Bool = true, dashboardOpen: Bool = false
     ) throws -> Rig {
         let dns = FakeDNSResponder()
         let runner = FakeResolverRunner()
@@ -45,6 +46,9 @@ import Testing
         model.setState(.running)
         let dialogs = Counter()
         model.dismissPopover = { dialogs.add() }
+        let restores = Counter()
+        model.restoreDashboard = { restores.add() }
+        if dashboardOpen { model.visibleCount = 1 }
         if let suffix, file {
             try ResolverFile.content(port: port ?? 25000).write(
                 toFile: "\(dir)/\(suffix)", atomically: true, encoding: .utf8)
@@ -59,7 +63,8 @@ import Testing
                 toFile: "\(dir)/\(name)", atomically: true, encoding: .utf8)
         }
         return Rig(
-            model: model, dns: dns, runner: runner, tls: tls, proxy: proxy, store: store, dir: dir, dialogs: dialogs)
+            model: model, dns: dns, runner: runner, tls: tls, proxy: proxy, store: store, dir: dir, dialogs: dialogs,
+            restores: restores)
     }
 
     private func web(_ id: String) -> String {
@@ -710,5 +715,130 @@ import Testing
         r.model.tlsCA = try LocalCA.create(permitted: ["localhost"])
         #expect(r.model.primaryDomainSuffix == "localhost")
         #expect(r.model.domainURL("web.shop")?.host == "web.shop.localhost")
+    }
+
+    // MARK: Dashboard after a dialog
+
+    @Test func applyingBringsTheDashboardBackAfterThePasswordDialog() async throws {
+        let r = try rig(dashboardOpen: true)
+        await r.model.applySuffix("dev.test")
+        #expect(r.dialogs.value == 1 && r.restores.value == 1)
+        // A cancelled dialog restores it too.
+        let c = try rig(dashboardOpen: true)
+        c.runner.queue(Shell.Result(status: 1, out: "User canceled. (-128)"))
+        await c.model.applySuffix("dev.test")
+        #expect(c.dialogs.value == 1 && c.restores.value == 1)
+        // A dashboard that was closed stays closed.
+        let closed = try rig()
+        await closed.model.applySuffix("dev.test")
+        #expect(closed.restores.value == 0)
+    }
+
+    @Test func removingAndRepairingBringTheDashboardBack() async throws {
+        let r = try rig(suffix: "colima.internal", dashboardOpen: true)
+        await r.model.removeSuffix()
+        #expect(r.restores.value == 1)
+        let f = try rig(suffix: "colima.internal", dashboardOpen: true)
+        f.model.setDNSStatus(DomainStatus.DNS(phase: .failed, problem: "x"))
+        await f.model.repairDNS()
+        #expect(f.dialogs.value == 1 && f.restores.value == 1)
+        let failed = try rig(suffix: "colima.internal", dashboardOpen: true)
+        failed.runner.queue(Shell.Result(status: 1, out: "boom"))
+        await failed.model.removeSuffix()
+        #expect(failed.restores.value == 1)
+    }
+
+    @Test func aSuffixChangeWithHTTPSOnClosesAndRestoresTheDashboardOnce() async throws {
+        let r = try rig(suffix: "colima.internal", https: true, ca: true, dashboardOpen: true)
+        await r.model.startHTTPS()
+        await r.model.applySuffix("dev.test")
+        #expect(r.dialogs.value == 1 && r.restores.value == 1)
+        #expect(r.model.domainStatus.https.phase == .running)
+        // A cancelled replacement restores it too.
+        let c = try rig(suffix: "colima.internal", https: true, ca: true, dashboardOpen: true)
+        await c.model.startHTTPS()
+        c.tls.uninstallOutcome = .cancelled
+        await c.model.removeSuffix()
+        #expect(c.dialogs.value == 1 && c.restores.value == 1)
+        // No replacement is needed: the dashboard still comes back.
+        let same = try rig(https: true, ca: true, dashboardOpen: true)
+        await same.model.startHTTPS()
+        await same.model.replaceCAForSuffixes(reopening: true)
+        #expect(same.restores.value == 1 && same.dialogs.value == 0)
+    }
+
+    // MARK: A CA that is wider than the names
+
+    @Test func aCancelledTighteningOffersAReplacementAndNamesTheOldCA() async throws {
+        let r = try await httpsRig(suffix: "colima.internal")
+        r.tls.uninstallOutcome = .cancelled
+        await r.model.removeSuffix()
+        #expect(r.model.domainStatus.https.widerCA)
+        #expect(r.model.caIsWiderThanNeeded)
+        // The user clicks Replace and agrees this time.
+        r.tls.uninstallOutcome = .done
+        await r.model.replaceCAForSuffixes()
+        #expect(!r.model.domainStatus.https.widerCA)
+        #expect(r.tls.ca?.permitted == ["localhost"])
+        #expect(r.model.domainStatus.https.phase == .running)
+    }
+
+    @Test func theNoteOfAKeptOldCAHoldsNoFalseClaim() async throws {
+        // The old CA covers the names, so the note must not say it does not.
+        let r = try await httpsRig(suffix: "colima.internal")
+        r.tls.uninstallOutcome = .failed(1)
+        await r.model.removeSuffix()
+        let https = r.model.domainStatus.https
+        #expect(https.phase == .running || https.phase == .untrusted)
+        let stillWider = r.model.domainStatus.https.widerCA
+        #expect(stillWider)
+        // A narrower CA keeps the text that asks for a new one.
+        let n = try await httpsRig()
+        n.tls.uninstallOutcome = .failed(1)
+        await n.model.applySuffix("dev.test")
+        #expect(n.model.domainStatus.https.problem?.hasSuffix(ColimaModel.needsNewCAText) == true)
+        let text = try #require(n.model.domainStatus.https.problem)
+        #expect(!text.contains(ColimaModel.keptOldCAText))
+    }
+
+    @Test func aWiderCAWithTheMasterSwitchOffWaitsForTheSwitchAndThenIsReplaced() async throws {
+        let r = try rig(suffix: nil, domains: false, https: true, ca: false)
+        r.tls.ca = try LocalCA.create(permitted: ["localhost", "gone.test"])
+        await r.model.removeSuffix()
+        #expect(r.tls.events.isEmpty)
+        r.model.domainsEnabled = true
+        #expect(await waitUntil { r.tls.ca?.permitted == ["localhost"] })
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .running })
+        #expect(!r.model.domainStatus.https.widerCA)
+    }
+
+    @Test func aReplacementNeedsTheMasterSwitchAndAnExactCA() async throws {
+        let r = try rig(domains: false, https: true, ca: true)
+        await r.model.replaceCAForSuffixes()
+        #expect(r.tls.events.isEmpty)
+        let exact = try await httpsRig()
+        #expect(!exact.model.caIsWiderThanNeeded && !exact.model.domainStatus.https.widerCA)
+        let before = exact.tls.events.count
+        await exact.model.replaceCAForSuffixes()
+        #expect(exact.tls.events.count == before)
+    }
+
+    // MARK: The server after a cancel
+
+    @Test func aCancelledPromptLeavesTheServerRunning() async throws {
+        let r = try rig(suffix: "colima.internal")
+        await r.model.startDNSResponder()
+        #expect(r.dns.port != nil)
+        r.runner.queue(Shell.Result(status: 1, out: "User canceled. (-128)"))
+        await r.model.applySuffix("dev.test")
+        #expect(r.model.domainSuffix == "colima.internal" && r.dns.port != nil)
+        // The server was not running (the start waited for the write): the cancel starts it.
+        let s = try rig(suffix: "colima.internal")
+        #expect(s.dns.port == nil)
+        s.runner.queue(Shell.Result(status: 1, out: "User canceled. (-128)"))
+        await s.model.removeSuffix()
+        #expect(s.dns.port != nil)
+        #expect(s.model.domainStatus.dns.phase == .running)
+        #expect(s.model.domainStatus.dns.note?.hasPrefix("You cancelled") == true)
     }
 }

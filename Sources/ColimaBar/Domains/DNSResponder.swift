@@ -211,10 +211,18 @@ final class DNSResponder: DNSServing, @unchecked Sendable {
             guard let self, let flow else { return }
             guard let data, error == nil else { return flow.connection.cancel() }
             flow.handled += 1
-            guard flow.handled <= maxMessagesPerFlow else { return flow.connection.cancel() }
+            // The last message of the flow gets its answer. The close follows the send.
+            let last = flow.handled >= maxMessagesPerFlow
             if !data.isEmpty, let reply = DNSMessage.response(to: [UInt8](data), zone: zone) {
+                if last {
+                    flow.connection.send(
+                        content: Data(reply),
+                        completion: .contentProcessed { [weak flow] _ in flow?.connection.cancel() })
+                    return
+                }
                 flow.connection.send(content: Data(reply), completion: .idempotent)
             }
+            if last { return flow.connection.cancel() }
             arm(flow)
         }
     }

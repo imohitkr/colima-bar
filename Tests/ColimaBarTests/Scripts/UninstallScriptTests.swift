@@ -406,6 +406,15 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: dir + "/.colima.internal.colimabar-tmp"))
         #expect(FileManager.default.fileExists(atPath: dir + "/test"))
         #expect(sb.calls.filter { $0.hasPrefix("sudo rm -f ") }.count == 2)
+        // The folder holds a foreign file: rmdir leaves it.
+        #expect(FileManager.default.fileExists(atPath: dir))
+        try FileManager.default.removeItem(atPath: dir + "/test")
+        try ResolverFile.content(port: 25000).write(toFile: dir + "/colima.internal", atomically: true, encoding: .utf8)
+        let emptied = try await call(sb, "remove_resolver_files '\(dir)'")
+        #expect(emptied.status == 0)
+        #expect(sb.calls.contains("sudo rmdir \(dir)"))
+        #expect(!FileManager.default.fileExists(atPath: dir))
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         // A failing sudo only prints a hint.
         try ResolverFile.content(port: 1).write(toFile: dir + "/again.test", atomically: true, encoding: .utf8)
         try sb.stub("sudo", "exit 1")

@@ -199,11 +199,14 @@ extension ColimaModel {
         guard let port = storedDNSPort ?? Self.pickDNSPort(isFree: dnsPortFree) else {
             return setDNSStatus(noting(before, "ColimaBar found no free port for the DNS server."))
         }
-        dismissPopover()
+        let wasOpen = closeDashboardForDialog()
         setDNSStatus(DomainStatus.DNS(phase: .applying))
         let old = domainSuffix
         let outcome = await ResolverInstaller.apply(
             new: suffix, old: old, port: port, dir: resolverDir, run: resolverRun)
+        // With HTTPS on, the CA flow follows and brings the dashboard back at its end.
+        let caFollows = outcome == .done && httpsEnabled
+        if !caFollows { restoreDashboard(ifOpen: wasOpen) }
         guard await finishResolverWrite(outcome, before: before, suffix: suffix) else { return }
         domainsStore.set(suffix, forKey: Defaults.Key.domainSuffix.rawValue)
         domainsStore.set(port, forKey: Defaults.Key.domainDNSPort.rawValue)
@@ -212,16 +215,18 @@ extension ColimaModel {
         rebuildDomainRoutes()
         await startDNSResponder()
         // The CA must permit the new suffix. With HTTPS on, this asks to replace it.
-        if httpsEnabled { await replaceCAForSuffixes() }
+        if httpsEnabled { await replaceCAForSuffixes(reopening: wasOpen) }
     }
 
     /// Turns the suffix off: one administrator prompt removes the file. A cancel keeps the state.
     func removeSuffix() async {
         guard !isDebug, let old = domainSuffix, domainStatus.dns.phase != .applying else { return }
         let before = domainStatus.dns
-        dismissPopover()
+        let wasOpen = closeDashboardForDialog()
         setDNSStatus(DomainStatus.DNS(phase: .applying))
         let outcome = await ResolverInstaller.apply(new: nil, old: old, port: 0, dir: resolverDir, run: resolverRun)
+        let caFollows = outcome == .done && httpsEnabled
+        if !caFollows { restoreDashboard(ifOpen: wasOpen) }
         guard await finishResolverWrite(outcome, before: before, suffix: old) else { return }
         invalidateDNSTasks()
         dnsResponder.stop()
@@ -231,7 +236,7 @@ extension ColimaModel {
         setDNSStatus(DomainStatus.DNS())
         rebuildDomainRoutes()
         // The CA must never cover a suffix whose resolver is gone.
-        if httpsEnabled { await replaceCAForSuffixes() }
+        if httpsEnabled { await replaceCAForSuffixes(reopening: wasOpen) }
     }
 
     /// Picks a new port for the server and writes the resolver file again.
@@ -250,10 +255,11 @@ extension ColimaModel {
         guard let port = Self.pickDNSPort(isFree: dnsPortFree) else {
             return setDNSStatus(noting(before, "ColimaBar found no free port for the DNS server."))
         }
-        dismissPopover()
+        let wasOpen = closeDashboardForDialog()
         setDNSStatus(DomainStatus.DNS(phase: .applying))
         let outcome = await ResolverInstaller.apply(
             new: suffix, old: nil, port: port, dir: resolverDir, run: resolverRun)
+        restoreDashboard(ifOpen: wasOpen)
         guard await finishResolverWrite(outcome, before: before, suffix: suffix) else { return }
         domainsStore.set(port, forKey: Defaults.Key.domainDNSPort.rawValue)
         invalidateDNSTasks()
@@ -278,6 +284,16 @@ extension ColimaModel {
                 noting(before, "The file /etc/resolver/\(suffix) belongs to another tool. Choose another suffix."))
         case .failed(let text):
             setDNSStatus(noting(before, "ColimaBar could not write the resolver file: \(text)"))
+        }
+        // The write paused the server (or a start waited for it). Nothing changed, so run it again.
+        if domainsEnabled, domainSuffix != nil, dnsResponder.port == nil {
+            let note = domainStatus.dns.note
+            await startDNSResponder()
+            if let note {
+                var dns = domainStatus.dns
+                dns.note = note
+                setDNSStatus(dns)
+            }
         }
         return false
     }

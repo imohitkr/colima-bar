@@ -407,6 +407,8 @@ enum Help {
         "Serve the names over HTTPS too. ColimaBar makes a certificate authority that works only for .localhost names and your custom suffix, and only for websites. macOS asks for your password to trust it. Turn this off to remove it."
     static let domainsTrustAgain =
         "Trust the certificate authority again. If it does not cover your names, ColimaBar replaces it. macOS then asks for your password twice: to remove the old one and to trust the new one."
+    static let domainsReplaceCA =
+        "Replace the certificate authority with one that permits only the names in use. macOS asks for your password twice: to remove the old one and to trust the new one. It needs the switch for container domains on."
     static let domainsDeleteCA =
         "Remove the old certificate authority from your login keychain. A removal did not finish. macOS asks for your password."
     static let domainSuffix =

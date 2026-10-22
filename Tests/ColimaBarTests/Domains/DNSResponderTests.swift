@@ -120,6 +120,16 @@ import Testing
         #expect(await waitUntil { r.flowCount == 0 })
     }
 
+    @Test func theLastMessageOfAFlowGetsItsAnswerAndThenTheFlowCloses() async throws {
+        let r = DNSResponder(unchecked: "127.0.0.1", idleTimeout: 30)
+        defer { r.stop() }
+        let port = try await started(r)
+        let packets = (0..<r.maxMessagesPerFlow).map { query("n\($0).colima.internal", id: UInt16(2000 + $0)) }
+        #expect(await exchangeMany(packets, port: port).count == r.maxMessagesPerFlow)
+        // The close follows the send, not the idle timer.
+        #expect(await waitUntil { r.flowCount == 0 })
+    }
+
     @Test func aBadPacketDoesNotEndTheFlow() async throws {
         let r = DNSResponder()
         defer { r.stop() }

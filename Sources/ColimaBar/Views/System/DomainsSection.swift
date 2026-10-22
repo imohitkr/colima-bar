@@ -44,6 +44,18 @@ struct DomainsSection: View {
                 )
                 .padding(.leading, 44)
         }
+        if model.domainStatus.https.widerCA, model.domainStatus.https.phase != .settingUp,
+            model.domainStatus.https.phase != .removing
+        {
+            Text(DomainStatus.HTTPS.widerCAText)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.leading, 44)
+            Button("Replace Certificate…") { Task { await model.replaceCAForSuffixes() } }
+                .hint(Help.domainsReplaceCA)
+                .disabled(model.isDebug || !model.domainsEnabled)
+                .padding(.leading, 44)
+        }
         if model.domainStatus.https.phase == .untrusted {
             Button("Trust Again…") { model.trustCAAgain() }
                 .hint(Help.domainsTrustAgain)
