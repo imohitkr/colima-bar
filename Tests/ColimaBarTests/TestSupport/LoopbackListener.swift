@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import os
 
 /// A TCP listener on 127.0.0.1 with a port that the system picks. It stands
 /// in for a forwarded port. The test never leaves the loopback interface.
@@ -130,13 +131,17 @@ final class LoopbackListener: @unchecked Sendable {
     /// A port that nothing listens on: it was free a moment ago. It is below
     /// the ephemeral range (49152 and up), so a listener of a parallel test,
     /// which binds port 0, cannot get it before the probe.
+    /// A port goes to one caller only, so two parallel tests never share one.
     static func unusedPort() throws -> Int {
-        for _ in 0..<50 {
+        for _ in 0..<200 {
             let port = Int.random(in: 20000..<49152)
+            guard handedOut.withLock({ $0.insert(port).inserted }) else { continue }
             if isFree(port) { return port }
         }
         throw POSIXError(.EADDRINUSE)
     }
+
+    private static let handedOut = OSAllocatedUnfairLock(initialState: Set<Int>())
 
     private static func isFree(_ port: Int) -> Bool {
         let s = socket(AF_INET, SOCK_STREAM, 0)

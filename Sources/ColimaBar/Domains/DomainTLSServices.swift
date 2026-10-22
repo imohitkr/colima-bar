@@ -50,7 +50,7 @@ final class SystemDomainTLS: DomainTLSServicing, @unchecked Sendable {
         return ca
     }
 
-    func removeCAFiles() { LocalCAStore.remove(dir: directory) }
+    func removeCAFiles() { LocalCAStore.remove(dir: directory, removingEmptyParent: true) }
     func uninstallLeftovers() -> TrustStore.Outcome { TrustStore.removeLabelled() }
     func install(_ ca: LocalCA) -> TrustStore.Outcome { TrustStore.install(ca) }
     func uninstall(_ ca: LocalCA) -> TrustStore.Outcome { TrustStore.remove(ca) }

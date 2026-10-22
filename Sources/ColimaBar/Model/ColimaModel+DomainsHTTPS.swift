@@ -60,15 +60,31 @@ extension ColimaModel {
         }
     }
 
+    /// Closes the popover before a dialog. It returns true when a dashboard was open,
+    /// so the flow can bring it back with `restoreDashboard(ifOpen:)`.
+    private func closeDashboardForDialog() -> Bool {
+        let wasOpen = visibleCount > 0
+        dismissPopover()
+        return wasOpen
+    }
+
+    /// After a dialog, with any outcome: shows the dashboard again, key and focused.
+    private func restoreDashboard(ifOpen wasOpen: Bool) {
+        if wasOpen { restoreDashboard() }
+    }
+
     /// Makes or loads the CA, trusts it (one dialog) and starts the listener.
     private func enableHTTPS() {
-        dismissPopover()
+        let wasOpen = closeDashboardForDialog()
         invalidateHTTPSTasks()
         setHTTPSStatus(.init(phase: .settingUp))
         let services = domainTLS
         let suffixes = activeDomainSuffixes
         httpsSetupTask = Task {
-            defer { httpsSetupTask = nil }
+            defer {
+                httpsSetupTask = nil
+                restoreDashboard(ifOpen: wasOpen)
+            }
             let prepared = await Self.blocking { Result { try services.prepareCA(permitted: suffixes) } }
             guard !Task.isCancelled else { return }
             guard case .success(let ca) = prepared else {
@@ -119,7 +135,7 @@ extension ColimaModel {
     /// certificate. If the files are gone, the certificates with the label of
     /// the CA go instead.
     private func disableHTTPS() {
-        dismissPopover()
+        let wasOpen = closeDashboardForDialog()
         tearDownHTTPS()
         let ca = tlsCA ?? domainTLS.loadCA()
         tlsCA = nil
@@ -127,7 +143,7 @@ extension ColimaModel {
         domainTLS.removeCAFiles()
         // The routes forget the names that the certificates served.
         rebuildDomainRoutes()
-        removeCertificate(of: ca)
+        removeCertificate(of: ca, restore: wasOpen)
     }
 
     /// The text of a removal that macOS did not finish.
@@ -139,20 +155,22 @@ extension ColimaModel {
     /// the certificates with the label of the CA (one dialog for each).
     func cleanUpLeftoverCA() {
         guard !isDebug, !httpsEnabled, httpsSetupTask == nil, domainStatus.https.offersCleanUp else { return }
-        dismissPopover()
-        removeCertificate(of: nil)
+        removeCertificate(of: nil, restore: closeDashboardForDialog())
     }
 
     /// Asks macOS to remove the trust and the certificate of `ca`, or the
     /// certificates with the label of the CA when `ca` is nil. The marker
     /// stays from before the dialog until its outcome. It runs inside
     /// `httpsSetupTask`.
-    private func removeCertificate(of ca: LocalCA?) {
+    private func removeCertificate(of ca: LocalCA?, restore wasOpen: Bool) {
         setHTTPSRemovalPending(true)
         setHTTPSStatus(.init(phase: .removing))
         let services = domainTLS
         httpsSetupTask = Task {
-            defer { httpsSetupTask = nil }
+            defer {
+                httpsSetupTask = nil
+                restoreDashboard(ifOpen: wasOpen)
+            }
             let outcome = await Self.blocking { ca.map { services.uninstall($0) } ?? services.uninstallLeftovers() }
             guard !Task.isCancelled else { return }
             setHTTPSRemovalPending(false)
@@ -182,12 +200,15 @@ extension ColimaModel {
         guard !isDebug, httpsEnabled, httpsSetupTask == nil, domainStatus.https.phase == .untrusted,
             let ca = tlsCA ?? domainTLS.loadCA()
         else { return }
-        dismissPopover()
+        let wasOpen = closeDashboardForDialog()
         let services = domainTLS
         let token = httpsStartToken
         if ca.covers(activeDomainSuffixes) {
             httpsSetupTask = Task {
-                defer { httpsSetupTask = nil }
+                defer {
+                    httpsSetupTask = nil
+                    restoreDashboard(ifOpen: wasOpen)
+                }
                 let outcome = await Self.blocking { services.install(ca) }
                 guard !Task.isCancelled, outcome == .done else { return }
                 let trusted = await Self.blocking { services.isTrusted(ca) }
@@ -195,7 +216,7 @@ extension ColimaModel {
                 applyHTTPSTrust(trusted, token: token)
             }
         } else {
-            reissueCA(old: ca)
+            reissueCA(old: ca, restore: wasOpen)
         }
     }
 
@@ -204,13 +225,16 @@ extension ColimaModel {
     /// CA stays installed with its files. If the user cancels the second
     /// dialog, the new files go and HTTPS is off. It never leaves the old files
     /// without the old CA, or a CA in the keychain without its files.
-    private func reissueCA(old: LocalCA) {
+    private func reissueCA(old: LocalCA, restore wasOpen: Bool) {
         tearDownHTTPS()
         setHTTPSStatus(.init(phase: .settingUp))
         let services = domainTLS
         let suffixes = activeDomainSuffixes
         httpsSetupTask = Task {
-            defer { httpsSetupTask = nil }
+            defer {
+                httpsSetupTask = nil
+                restoreDashboard(ifOpen: wasOpen)
+            }
             let removed = await Self.blocking { services.uninstall(old) }
             guard !Task.isCancelled else { return }
             guard removed == .done else {

@@ -18,6 +18,8 @@ enum LocalCAStore {
     /// symlink, the owner is not this user, or the key or the certificate
     /// has a mode other than 0600.
     static func load(dir: String = dir) -> LocalCA? {
+        // A test process never reads the folder of the user.
+        if TestProcess.isRunning, dir == Paths.domainsDir { return nil }
         settleLeftover(dir)
         guard isPrivateFolder(dir), isPrivateFile("\(dir)/\(keyName)", mode: 0o600),
             isPrivateFile("\(dir)/\(derName)", mode: 0o600),
@@ -102,12 +104,15 @@ enum LocalCAStore {
     }
 
     /// Deletes the key first, so that the CA can never sign again, then the folder.
-    static func remove(dir: String = dir) {
+    /// With `removingEmptyParent`, the folder that held `dir` goes too if it is empty.
+    static func remove(dir: String = dir, removingEmptyParent: Bool = false) {
         if TestProcess.isRunning, dir == Paths.domainsDir { return }
         unlink("\(dir)/\(keyName)")
         try? FileManager.default.removeItem(atPath: dir)
         try? FileManager.default.removeItem(atPath: stagingPath(dir))
         try? FileManager.default.removeItem(atPath: oldPath(dir))
+        // rmdir removes only an empty folder.
+        if removingEmptyParent { rmdir((dir as NSString).deletingLastPathComponent) }
     }
 
     private static func write(_ data: Data, to path: String, mode: mode_t) throws {

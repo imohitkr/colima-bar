@@ -229,8 +229,7 @@ import Testing
     @Test func aSecondStartReplacesTheFirstListener() async throws {
         let (proxy, first) = try await started()
         defer { proxy.stop() }
-        let next = try LoopbackListener.unusedPort()
-        #expect(await proxy.start(candidates: [UInt16(next)]) == UInt16(next))
+        let next = Int(try await PortRetry.start { await proxy.start(candidates: [$0]) })
         #expect(proxy.port == UInt16(next))
         #expect(await refuses(first))
         #expect(await canConnect(next))
@@ -549,11 +548,11 @@ import Testing
     @Test func aListenerOnAllAddressesMakesAPortBusy() async throws {
         let wildcard = try LoopbackListener(.quiet, wildcard: true)
         defer { wildcard.stop() }
-        let free = try LoopbackListener.unusedPort()
         let proxy = DomainProxy(addresses: ["127.0.0.1"])
         defer { proxy.stop() }
         #expect(await proxy.start(candidates: [UInt16(wildcard.port)]) == nil)
-        #expect(await proxy.start(candidates: [UInt16(wildcard.port), UInt16(free)]) == UInt16(free))
+        let free = try await PortRetry.start { await proxy.start(candidates: [UInt16(wildcard.port), $0]) }
+        #expect(proxy.port == free)
         #expect(await !proxy.isFree(port: UInt16(wildcard.port)))
         #expect(await proxy.isFree(port: UInt16(try LoopbackListener.unusedPort())))
     }

@@ -49,10 +49,30 @@ import Testing
         #expect(tls.loadCA() == nil && !FileManager.default.fileExists(atPath: temp.path + "/domains"))
     }
 
+    @Test func removingTheFilesAlsoRemovesAnEmptyParentFolder() throws {
+        let temp = try TempFolder()
+        let tls = SystemDomainTLS(directory: temp.path + "/app/domains")
+        _ = try tls.prepareCA(permitted: ["localhost"])
+        tls.removeCAFiles()
+        #expect(!FileManager.default.fileExists(atPath: temp.path + "/app"))
+    }
+
+    @Test func removingTheFilesKeepsAParentFolderWithOtherFiles() throws {
+        let temp = try TempFolder()
+        let tls = SystemDomainTLS(directory: temp.path + "/app/domains")
+        _ = try tls.prepareCA(permitted: ["localhost"])
+        FileManager.default.createFile(atPath: temp.path + "/app/other", contents: Data("x".utf8))
+        tls.removeCAFiles()
+        #expect(FileManager.default.fileExists(atPath: temp.path + "/app/other"))
+    }
+
     @Test func theServicesOfATestProcessChangeNoKeychainAndNoTrust() throws {
         let tls = SystemDomainTLS(directory: Paths.domainsDir)
-        let ca = try LocalCA.create(permitted: ["localhost"])
-        #expect(throws: POSIXError.self) { try tls.prepareCA(permitted: ["localhost"]) }
+        // The folder of the user is never read: whatever it holds, there is no CA.
+        #expect(tls.loadCA() == nil)
+        let names = ["no-ca-has-this-name.invalid"]
+        let ca = try LocalCA.create(permitted: names)
+        #expect(throws: POSIXError.self) { try tls.prepareCA(permitted: names) }
         #expect(tls.install(ca) == .failed(errSecNotAvailable))
         #expect(tls.uninstall(ca) == .failed(errSecNotAvailable))
         #expect(tls.uninstallLeftovers() == .failed(errSecNotAvailable))

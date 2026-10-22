@@ -301,6 +301,9 @@ final class ColimaModel {
     /// Closes the dashboard popover, so a dialog is not hidden behind it.
     /// AppDelegate sets it.
     @ObservationIgnored var dismissPopover: @MainActor () -> Void = {}
+    /// Shows the dashboard again, key and focused, after a dialog that
+    /// `dismissPopover` made room for. AppDelegate sets it.
+    @ObservationIgnored var restoreDashboard: @MainActor () -> Void = {}
     /// The colima-ctl.sh actions that run now, for each profile. A running
     /// action (for example a prune that waits for its dialog) is not idle.
     @ObservationIgnored private var actionsInFlight: [String: Int] = [:]

@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         // isn't lost.
         Notifier.shared.install()
         model.dismissPopover = { [weak self] in self?.popover.performClose(nil) }
+        model.restoreDashboard = { [weak self] in self?.restoreDashboard() }
         Updater.shared.activity = { [weak self] in self?.model.updateActivity ?? UpdatePolicy.Activity() }
         Updater.shared.relaunch = { [weak self] in self?.relaunchIfUpdated(reveal: false) ?? false }
         Notifier.shared.onAlert = { [weak self] title, body, ctr in
@@ -664,6 +665,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.placeDashboard() }
+    }
+
+    /// Brings the dashboard back after a system dialog. The window comes
+    /// back key and focused, so the first click works. Else the popover opens.
+    func restoreDashboard() {
+        if window?.isVisible == true {
+            showWindow()
+        } else if !popover.isShown, let button = item.button {
+            NSApp.activate()
+            popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
+        } else {
+            NSApp.activate()
+        }
     }
 
     private func placeDashboard() {

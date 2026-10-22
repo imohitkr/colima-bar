@@ -13,13 +13,14 @@ import Testing
         let tls: FakeDomainTLS
         let store: UserDefaults
         let dialogs: Counter
+        let restores: Counter
     }
 
     private func rig(
         https: Bool = false, ca: Bool = false, domains: Bool = true, gap: TimeInterval = 0,
         failureRetry: TimeInterval = 0.05, pending: Bool = false, removing: Bool = false,
         permitted: [String] = ["localhost"],
-        trustRecheck: TimeInterval = 60, multiSANRenew: TimeInterval = 3600
+        trustRecheck: TimeInterval = 60, multiSANRenew: TimeInterval = 3600, dashboardOpen: Bool = false
     ) throws -> Rig {
         let proxy = FakeDomainProxy()
         let tls = FakeDomainTLS()
@@ -37,7 +38,10 @@ import Testing
         model.setState(.running)
         let dialogs = Counter()
         model.dismissPopover = { dialogs.add() }
-        return Rig(model: model, proxy: proxy, tls: tls, store: store, dialogs: dialogs)
+        let restores = Counter()
+        model.restoreDashboard = { restores.add() }
+        if dashboardOpen { model.visibleCount = 1 }
+        return Rig(model: model, proxy: proxy, tls: tls, store: store, dialogs: dialogs, restores: restores)
     }
 
     private func web(_ id: String, host hostPort: Int) -> String {
@@ -1032,5 +1036,60 @@ import Testing
                 == "listening on port 443, identity: recording, a certificate for each name, leaves made: 0, CA trusted: yes"
         )
         #expect(!text.contains("secretname"))
+    }
+
+    // MARK: The dashboard comes back after a dialog
+
+    @Test func theDashboardComesBackAfterEnablingHTTPS() async throws {
+        let r = try rig(dashboardOpen: true)
+        await turnOn(r)
+        #expect(await waitUntil { r.restores.value == 1 })
+    }
+
+    @Test func theDashboardComesBackAfterACancelledDialog() async throws {
+        let r = try rig(dashboardOpen: true)
+        r.tls.installOutcome = .cancelled
+        r.model.setHTTPS(true)
+        #expect(await waitUntil { r.restores.value == 1 })
+    }
+
+    @Test func theDashboardComesBackAfterDisablingHTTPS() async throws {
+        let r = try rig(dashboardOpen: true)
+        await turnOn(r)
+        #expect(await waitUntil { r.restores.value == 1 })
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        #expect(await waitUntil { r.restores.value == 2 })
+    }
+
+    @Test func theDashboardComesBackAfterTrustAgainAndAReplacement() async throws {
+        let r = try rig(https: true, ca: true, permitted: ["old.test"], dashboardOpen: true)
+        r.model.startHTTPSAtLaunch()
+        #expect(await waitUntil { r.model.domainStatus.https.phase == .untrusted })
+        r.tls.uninstallOutcome = .cancelled
+        r.model.trustCAAgain()
+        #expect(await waitUntil { r.restores.value == 1 })
+        r.tls.uninstallOutcome = .done
+        r.model.trustCAAgain()
+        #expect(await running(r))
+        #expect(await waitUntil { r.restores.value == 2 })
+    }
+
+    @Test func theDashboardComesBackAfterDeletingTheCertificate() async throws {
+        let r = try rig(https: false, removing: true, dashboardOpen: true)
+        r.model.startHTTPSAtLaunch()
+        try await Task.sleep(for: .milliseconds(60))
+        r.model.cleanUpLeftoverCA()
+        #expect(await removed(r))
+        #expect(await waitUntil { r.restores.value == 1 })
+    }
+
+    @Test func aClosedDashboardStaysClosedAfterADialog() async throws {
+        let r = try rig()
+        await turnOn(r)
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(r.restores.value == 0)
     }
 }
