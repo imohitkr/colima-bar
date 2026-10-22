@@ -32,27 +32,51 @@ import Testing
         #expect(problem(plist(), running: "1.0.0") != nil)
     }
 
-    @Test func aReleaseThatNeedsANewerMacOSIsAProblem() {
+    @Test func aReleaseThatNeedsANewerMacOSHasItsOwnError() {
         func os(_ major: Int, _ minor: Int = 0, _ patch: Int = 0) -> OperatingSystemVersion {
             OperatingSystemVersion(majorVersion: major, minorVersion: minor, patchVersion: patch)
         }
-        func problem(minimum: Any?, on: OperatingSystemVersion) -> String? {
+        func problem(minimum: Any?, on: OperatingSystemVersion) -> UpdateError? {
             var p = plist()
             if let minimum { p["LSMinimumSystemVersion"] = minimum }
-            return UpdateVerifier.plistProblem(p, tag: "v0.9.1", running: "0.9.0", os: on)
+            return UpdateVerifier.minimumSystemProblem(p, os: on)
         }
         #expect(problem(minimum: nil, on: os(14)) == nil)  // no key: fine
         #expect(problem(minimum: "15.0", on: os(15)) == nil)
         #expect(problem(minimum: "15", on: os(15, 3)) == nil)
         #expect(problem(minimum: "15.1.2", on: os(15, 1, 2)) == nil)
         #expect(problem(minimum: "15.1.2", on: os(26)) == nil)
-        #expect(problem(minimum: "15.0", on: os(14, 8, 9))?.contains("needs macOS 15.0 or later") == true)
-        #expect(problem(minimum: "15", on: os(14))?.contains("needs macOS 15.0 or later") == true)
-        #expect(problem(minimum: "15.1.2", on: os(15, 1, 1))?.contains("needs macOS 15.1.2 or later") == true)
+        #expect(problem(minimum: "15.0", on: os(14, 8, 9)) == .needsNewerMacOS(minimum: "15.0", current: "14.8"))
+        #expect(problem(minimum: "15", on: os(14)) == .needsNewerMacOS(minimum: "15.0", current: "14.0"))
+        #expect(
+            problem(minimum: "15.1.2", on: os(15, 1, 1)) == .needsNewerMacOS(minimum: "15.1.2", current: "15.1.1"))
+        #expect(
+            UpdateError.needsNewerMacOS(minimum: "15.0", current: "14.8").message
+                == "This update needs macOS 15.0 or later. This Mac has macOS 14.8.")
         for bad in ["", "x", "15.", ".5", "15.x", "1.2.3.4", "-1", "15 "] {
-            #expect(problem(minimum: bad, on: os(26)) != nil, "\(bad)")
+            #expect(problem(minimum: bad, on: os(26)) == nil, "\(bad)")
+            var p = plist()
+            p["LSMinimumSystemVersion"] = bad
+            #expect(UpdateVerifier.plistProblem(p, tag: "v0.9.1", running: "0.9.0") != nil, "\(bad)")
         }
-        #expect(problem(minimum: 15, on: os(26)) != nil)  // not a string
+        var notText = plist()
+        notText["LSMinimumSystemVersion"] = 15  // not a string
+        #expect(UpdateVerifier.plistProblem(notText, tag: "v0.9.1", running: "0.9.0") != nil)
+    }
+
+    @Test func readsTheRequiredMacOSOfAReleaseBody() {
+        func required(_ body: String) -> String? {
+            UpdateVerifier.requiredMacOS(inReleaseBody: body).map(UpdateVerifier.describeMinimum)
+        }
+        #expect(required("Requires macOS 15.0 or later.") == "15.0")
+        #expect(required("Requires macOS 15 or later.") == "15.0")
+        #expect(required("Requires macOS 15.1.2 or later.\n\n## What's Changed\n* x") == "15.1.2")
+        #expect(required("## What's Changed\n* x\n\nRequires macOS 26.2 or later.\nMore") == "26.2")
+        #expect(required("requires macOS 15.0 or later") == nil)  // case-sensitive
+        #expect(required("Requires macOS 15.0") == nil)
+        #expect(required("Requires macOS 1.2.3.4 or later") == nil)
+        #expect(required("Requires macOS x or later") == nil)
+        #expect(required("") == nil)
     }
 
     // MARK: download

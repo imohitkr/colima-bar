@@ -32,6 +32,12 @@ import Testing
         #expect(TLSIdentities.selfTest(ca: ca))
     }
 
+    /// True if a keychain query cannot answer because the keychain is locked
+    /// or would need a prompt. The test cannot check then.
+    private func isUnreadable(_ status: OSStatus) -> Bool {
+        status == errSecInteractionNotAllowed || status == errSecAuthFailed || status == errSecNotAvailable
+    }
+
     @Test func importingNeedsNoKeychain() throws {
         // The identity is made in memory: no keychain gets the key or the
         // certificate. The queries only read, and they never show a dialog.
@@ -39,6 +45,43 @@ import Testing
         // would need a prompt fails at once.
         let noUI = LAContext()
         noUI.interactionNotAllowed = true
+        // The positive control: the same query form finds a certificate that
+        // is certainly in the default search list (any one that the list
+        // holds). Without it, "not found" could mean that the form never
+        // finds anything. System roots are no control: only the deprecated
+        // SecKeychain API can search them.
+        let anyCertificate: [CFString: Any] = [
+            kSecClass: kSecClassCertificate, kSecMatchLimit: kSecMatchLimitOne, kSecReturnRef: true,
+            kSecUseAuthenticationContext: noUI,
+        ]
+        var present: CFTypeRef?
+        let presentStatus = SecItemCopyMatching(anyCertificate as CFDictionary, &present)
+        guard presentStatus == errSecSuccess, let present, CFGetTypeID(present) == SecCertificateGetTypeID() else {
+            // No certificate in the search list, or a locked keychain.
+            withKnownIssue(
+                "The keychain gives no certificate to use as a control (status \(presentStatus))", isIntermittent: true
+            ) {
+                Issue.record("no control")
+            }
+            return
+        }
+        let known = present as! SecCertificate
+        let knownKey = try #require(SecCertificateCopyKey(known))
+        let knownHash = try Data(
+            X509Builder.keyID([UInt8](#require(SecKeyCopyExternalRepresentation(knownKey, nil) as Data?))))
+        let control: [CFString: Any] = [
+            kSecClass: kSecClassCertificate, kSecAttrPublicKeyHash: knownHash,
+            kSecUseAuthenticationContext: noUI, kSecReturnRef: true,
+        ]
+        let controlStatus = SecItemCopyMatching(control as CFDictionary, nil)
+        if isUnreadable(controlStatus) {
+            withKnownIssue("The keychain cannot be read (status \(controlStatus))", isIntermittent: true) {
+                Issue.record("locked")
+            }
+            return
+        }
+        #expect(controlStatus == errSecSuccess, "the query form must find a certificate that exists")
+
         let ca = try LocalCA.create(permitted: ["localhost"])
         for host in ["a", "b", "c"] {
             let leaf = try ca.mintLeaf(names: ["\(host).localhost"])
@@ -48,7 +91,7 @@ import Testing
                 kSecClass: kSecClassKey, kSecAttrApplicationLabel: Data(keyID),
                 kSecUseAuthenticationContext: noUI, kSecReturnRef: true,
             ]
-            #expect(SecItemCopyMatching(keyQuery as CFDictionary, nil) == errSecItemNotFound)
+            expectAbsent(SecItemCopyMatching(keyQuery as CFDictionary, nil))
             // A certificate is found by the hash of its public key, which is the same SHA-1, and by its name.
             for match: [CFString: Any] in [
                 [kSecAttrPublicKeyHash: Data(keyID)],
@@ -58,9 +101,21 @@ import Testing
                     kSecClass: kSecClassCertificate, kSecUseAuthenticationContext: noUI, kSecReturnRef: true,
                 ]
                 query.merge(match) { $1 }
-                #expect(SecItemCopyMatching(query as CFDictionary, nil) == errSecItemNotFound)
+                expectAbsent(SecItemCopyMatching(query as CFDictionary, nil))
             }
         }
+    }
+
+    /// An absence query must answer "not found". A keychain that cannot be
+    /// read after the control worked is a known issue, not a failure.
+    private func expectAbsent(_ status: OSStatus) {
+        if isUnreadable(status) {
+            withKnownIssue("The keychain cannot be read (status \(status))", isIntermittent: true) {
+                Issue.record("locked")
+            }
+            return
+        }
+        #expect(status == errSecItemNotFound)
     }
 
     // MARK: The format

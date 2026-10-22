@@ -41,6 +41,7 @@ enum PKCS12 {
         guard x963.count == 97, x963[0] == 4 else { throw Failure.key }
         let publicPart = Array(x963[0..<65])
         var scalar = Array(x963[65..<97])
+        // Best effort: the `CFData` of `external` is not wiped.
         defer {
             wipe(&scalar)
             wipe(&x963)
@@ -59,6 +60,7 @@ enum PKCS12 {
         var pkcs8 = DER.seq(
             DER.int(0), DER.seq(DER.oid("1.2.840.10045.2.1"), DER.oid("1.2.840.10045.3.1.7")),
             DER.octets(ecPrivateKey))
+        // Best effort: the DER temporaries of the builders are not wiped.
         defer {
             wipe(&ecPrivateKey)
             wipe(&pkcs8)
@@ -129,7 +131,10 @@ enum PKCS12 {
         return bytes
     }
 
-    /// Zeroes `bytes`. `memset_s` is not removed as a dead store.
+    /// Zeroes `bytes`, as a best effort. `memset_s` is not removed as a dead
+    /// store, but other copies of the key stay: the `CFData` that
+    /// `SecKeyCopyExternalRepresentation` returns, and the DER temporaries
+    /// that the builders make, are not wiped.
     static func wipe(_ bytes: inout [UInt8]) {
         bytes.withUnsafeMutableBytes { _ = memset_s($0.baseAddress, $0.count, 0, $0.count) }
     }

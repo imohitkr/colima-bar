@@ -8,7 +8,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
-- ColimaBar now needs macOS 15 or later. Version 0.14.0 is the last version for macOS 14. The in-app update does not install a release that needs a newer macOS than the one that runs, and shows why.
+- ColimaBar now needs macOS 15 or later. Version 0.14.0 is the last version for macOS 14. The in-app update and the Homebrew notice skip a release that needs a newer macOS than the one that runs, and say why.
 - The TLS identities of HTTPS for container domains now exist in memory only. ColimaBar no longer makes a temporary keychain file, and it deletes the leftover files of older versions at launch.
 
 ## [0.14.0] - 2026-10-22

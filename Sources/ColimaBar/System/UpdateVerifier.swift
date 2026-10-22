@@ -96,13 +96,36 @@ enum UpdateVerifier {
             >= (minimum.majorVersion, minimum.minorVersion, minimum.patchVersion)
     }
 
+    /// The text of a macOS version: major.minor, and the patch number only
+    /// if `withPatch`.
+    static func describe(_ v: OperatingSystemVersion, withPatch: Bool) -> String {
+        "\(v.majorVersion).\(v.minorVersion)" + (withPatch ? ".\(v.patchVersion)" : "")
+    }
+
+    /// "15.0", or "15.1.2" if there is a patch number.
+    static func describeMinimum(_ v: OperatingSystemVersion) -> String {
+        describe(v, withPatch: v.patchVersion > 0)
+    }
+
+    /// The macOS that a release asks for in its body with a line like
+    /// `Requires macOS 15.0 or later.`, or nil if there is none. The
+    /// release workflow writes the line from the Info.plist of the build.
+    static func requiredMacOS(inReleaseBody body: String) -> OperatingSystemVersion? {
+        guard let m = body.firstMatch(of: /Requires macOS ([0-9]+(?:\.[0-9]+){0,2}) or later/) else { return nil }
+        return parseSystemVersion(String(m.1))
+    }
+
+    /// The error for a release that needs a newer macOS than `os`, or nil.
+    /// A minimum with a patch number shows the patch of the running macOS too.
+    static func systemProblem(minimum: OperatingSystemVersion, os: OperatingSystemVersion) -> UpdateError? {
+        guard !isAtLeast(os, minimum) else { return nil }
+        let patch = minimum.patchVersion > 0
+        return .needsNewerMacOS(minimum: describe(minimum, withPatch: patch), current: describe(os, withPatch: patch))
+    }
+
     /// Step 5: the problem with the Info.plist of the unpacked app, or nil.
-    /// `os` is the macOS that runs ColimaBar: a release that needs a newer
-    /// macOS must not replace a copy that works.
-    static func plistProblem(
-        _ plist: [String: Any]?, tag: String, running: String,
-        os: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
-    ) -> String? {
+    /// `LSMinimumSystemVersion` is checked by `minimumSystemProblem`.
+    static func plistProblem(_ plist: [String: Any]?, tag: String, running: String) -> String? {
         guard let plist else { return "the Info.plist cannot be read" }
         guard plist["CFBundleIdentifier"] as? String == bundleID else {
             return "the bundle identifier is not \(bundleID)"
@@ -111,18 +134,22 @@ enum UpdateVerifier {
         let version = plist["CFBundleShortVersionString"] as? String
         guard let version, version == Version.strip(tag) else { return "the version is not \(Version.strip(tag))" }
         guard Version.isNewer(version, than: running) else { return "the version is not newer than \(running)" }
-        if let raw = plist["LSMinimumSystemVersion"] {
-            guard let text = raw as? String, let minimum = parseSystemVersion(text) else {
-                return "the minimum macOS version is not readable"
-            }
-            if !isAtLeast(os, minimum) {
-                let name =
-                    "\(minimum.majorVersion).\(minimum.minorVersion)"
-                    + (minimum.patchVersion > 0 ? ".\(minimum.patchVersion)" : "")
-                return "it needs macOS \(name) or later, and this Mac has \(os.majorVersion).\(os.minorVersion)"
-            }
+        if let raw = plist["LSMinimumSystemVersion"], !(raw is String) || parseSystemVersion(raw as! String) == nil {
+            return "the minimum macOS version is not readable"
         }
         return nil
+    }
+
+    /// The error for an app whose `LSMinimumSystemVersion` is above `os`
+    /// (the macOS that runs ColimaBar): a release that needs a newer macOS
+    /// must not replace a copy that works.
+    static func minimumSystemProblem(
+        _ plist: [String: Any]?, os: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+    ) -> UpdateError? {
+        guard let text = plist?["LSMinimumSystemVersion"] as? String, let minimum = parseSystemVersion(text) else {
+            return nil
+        }
+        return systemProblem(minimum: minimum, os: os)
     }
 
     /// Steps 4 to 6 for an unpacked app: the signature, the plist, the
@@ -132,6 +159,7 @@ enum UpdateVerifier {
         try await checkSignature(app)
         let plist = NSDictionary(contentsOf: app.appendingPathComponent("Contents/Info.plist")) as? [String: Any]
         if let why = plistProblem(plist, tag: tag, running: running) { throw UpdateError.bundleInvalid(why) }
+        if let problem = minimumSystemProblem(plist) { throw problem }
         guard
             FileManager.default.isExecutableFile(
                 atPath: app.appendingPathComponent("Contents/MacOS/ColimaBar").path),
