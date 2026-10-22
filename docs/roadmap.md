@@ -4,10 +4,6 @@
 
 These milestones are planned next. Each milestone gets its own release. Features that need an extra tool, such as kubectl, mkcert, Trivy or Grype, are off by default and appear only when the tool is installed.
 
-## Container domains (0.14.0)
-
-- Open containers at names like `web.shop.localhost`, with optional HTTPS from a local certificate authority and an optional custom suffix such as `colima.internal`. `.local` names do not work: macOS sends them to multicast DNS, which waits 5 seconds.
-
 ## VM recreate (0.15.0)
 
 - Change the VM type and the mount type in the app. Colima fixes them when it creates the VM, so ColimaBar backs up the volumes (and optionally the images), recreates the VM and restores them.
