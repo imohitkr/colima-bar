@@ -9,6 +9,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Added
 
 - Container domains (off by default). On the System tab, turn on **Open containers at .localhost names**. Containers then open at names like `web.shop.localhost`. ColimaBar runs a proxy on port 80 of this Mac only, or on 8080 when 80 is busy. Labels pick the port or add names. See [Container domains](docs/usage.md#container-domains).
+- HTTPS for container domains (off by default). On the System tab, turn on **Use HTTPS with a local certificate authority**. ColimaBar makes a certificate authority that can sign only websites under `.localhost`, and macOS asks for your password one time to trust it. The links then use `https://`, on port 443 or 8443. Turning HTTPS off removes the certificate authority. **Show Certificate** shows the file for Node.js and other tools. The uninstall script removes the certificate authority too. See [HTTPS](docs/usage.md#https).
 
 ## [0.13.0] - 2026-10-21
 

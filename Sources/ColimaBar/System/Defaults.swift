@@ -61,6 +61,13 @@ enum Defaults {
         case mutedProjects
         /// Container domains (`ColimaModel+Domains`). Off by default.
         case domains
+        /// HTTPS for container domains. The local CA exists while it is on.
+        /// Not in the settings file: it shows a trust dialog.
+        case domainsHTTPS
+        /// A CA install is in progress: set before the password dialog, cleared after it.
+        case domainsHTTPSPending
+        /// The CA removal is in progress: set before the password dialog, cleared after it.
+        case domainsHTTPSRemoving
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

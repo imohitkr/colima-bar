@@ -1,0 +1,125 @@
+import Foundation
+import Security
+
+/// The only code that touches the login keychain and the trust settings. It
+/// adds the certificate of the CA (never a key) to the login keychain and
+/// trusts it for this user, for the SSL policy only. `install` and `remove`
+/// make macOS ask for the password of the user: they block until the user
+/// answers. No test calls them (`DomainTLSServicing` has a fake).
+enum TrustStore {
+    enum Outcome: Equatable, Sendable {
+        case done
+        case cancelled
+        case failed(OSStatus)
+    }
+
+    /// The trust settings: trusted as a root, for the SSL policy only.
+    static func trustSettings() -> CFArray {
+        let settings: [String: Any] = [
+            kSecTrustSettingsPolicy as String: SecPolicyCreateSSL(true, nil),
+            kSecTrustSettingsResult as String: NSNumber(value: SecTrustSettingsResult.trustRoot.rawValue),
+        ]
+        return [settings] as CFArray
+    }
+
+    private static func isCancel(_ status: OSStatus) -> Bool {
+        status == errAuthorizationCanceled || status == errSecUserCanceled
+    }
+
+    /// Adds the certificate to the login keychain and trusts it. One dialog.
+    /// A cancel removes the certificate again.
+    static func install(_ ca: LocalCA) -> Outcome {
+        // A test process never changes the keychain or the trust settings.
+        guard !TestProcess.isRunning else { return .failed(errSecNotAvailable) }
+        // No `kSecUseDataProtectionKeychain`: a Mac app without a signed
+        // entitlement gets -34018 from the data protection keychain.
+        let add: [CFString: Any] = [
+            kSecClass: kSecClassCertificate, kSecValueRef: ca.certificate, kSecAttrLabel: ca.commonName,
+        ]
+        let added = SecItemAdd(add as CFDictionary, nil)
+        guard added == errSecSuccess || added == errSecDuplicateItem else { return .failed(added) }
+        let status = SecTrustSettingsSetTrustSettings(ca.certificate, .user, trustSettings())
+        if status == errSecSuccess { return .done }
+        deleteCertificate(ca)
+        return isCancel(status) ? .cancelled : .failed(status)
+    }
+
+    /// Deletes the certificate of the CA from the keychains of this user. It
+    /// changes no trust setting and shows no dialog. It is for a CA that has none.
+    static func deleteCertificate(_ ca: LocalCA) {
+        guard !TestProcess.isRunning else { return }
+        SecItemDelete([kSecClass: kSecClassCertificate, kSecValueRef: ca.certificate] as CFDictionary)
+    }
+
+    /// Removes the trust setting (one dialog) and then the certificate. If the
+    /// user cancels or the removal fails, the certificate stays in the login
+    /// keychain, so the user can still see it and delete it there.
+    static func remove(_ ca: LocalCA) -> Outcome {
+        guard !TestProcess.isRunning else { return .failed(errSecNotAvailable) }
+        return remove(certificate: ca.certificate)
+    }
+
+    private static func remove(certificate: SecCertificate) -> Outcome {
+        let status = SecTrustSettingsRemoveTrustSettings(certificate, .user)
+        if status == errSecSuccess || status == errSecItemNotFound {
+            SecItemDelete([kSecClass: kSecClassCertificate, kSecValueRef: certificate] as CFDictionary)
+            return .done
+        }
+        return isCancel(status) ? .cancelled : .failed(status)
+    }
+
+    /// Removes every certificate that is labelled like the CA of ColimaBar.
+    /// It is for a CA whose files are gone. One dialog for each certificate.
+    /// The first outcome that is not `.done` is the result.
+    static func removeLabelled() -> Outcome {
+        guard !TestProcess.isRunning else { return .failed(errSecNotAvailable) }
+        var result = Outcome.done
+        for certificate in labelledCertificates() {
+            let outcome = remove(certificate: certificate)
+            if result == .done { result = outcome }
+        }
+        return result
+    }
+
+    /// The certificates of the keychains of this user with the label of the CA of ColimaBar.
+    private static func labelledCertificates() -> [SecCertificate] {
+        let query: [CFString: Any] = [
+            kSecClass: kSecClassCertificate, kSecMatchLimit: kSecMatchLimitAll, kSecReturnRef: true,
+            kSecReturnAttributes: true,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+            let items = result as? [[String: Any]]
+        else { return [] }
+        return items.compactMap { item in
+            guard let label = item[kSecAttrLabel as String] as? String,
+                label.hasPrefix(LocalCA.commonNamePrefix), let ref = item[kSecValueRef as String] as AnyObject?,
+                CFGetTypeID(ref) == SecCertificateGetTypeID()
+            else { return nil }
+            return unsafeDowncast(ref, to: SecCertificate.self)
+        }
+    }
+
+    /// True when the user trust settings hold an entry for the CA. It reads only: no dialog.
+    static func hasSettings(_ ca: LocalCA) -> Bool {
+        guard !TestProcess.isRunning else { return false }
+        var settings: CFArray?
+        return SecTrustSettingsCopyTrustSettings(ca.certificate, .user, &settings) == errSecSuccess && settings != nil
+    }
+
+    /// True when the user trust settings list the CA and the system accepts
+    /// a test leaf of it. It reads only: no dialog.
+    static func isTrusted(_ ca: LocalCA) -> Bool {
+        var settings: CFArray?
+        guard SecTrustSettingsCopyTrustSettings(ca.certificate, .user, &settings) == errSecSuccess,
+            settings != nil,
+            let leaf = try? ca.mintLeaf(names: ["\(DomainName.selfTestLabel).\(DomainName.localhost)"])
+        else { return false }
+        var trust: SecTrust?
+        let policy = SecPolicyCreateSSL(true, "\(DomainName.selfTestLabel).\(DomainName.localhost)" as CFString)
+        guard SecTrustCreateWithCertificates([leaf.certificate] as CFArray, policy, &trust) == errSecSuccess,
+            let trust
+        else { return false }
+        return SecTrustEvaluateWithError(trust, nil)
+    }
+}

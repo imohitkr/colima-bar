@@ -53,6 +53,12 @@ struct DomainRoutes: Equatable, Sendable {
     private(set) var suffixes: [String] = [DomainName.localhost]
     private(set) var profile = ""
     private(set) var vmRunning = false
+    /// The relative names that routes had while the VM ran (at most `rememberedCap`). They stay
+    /// while the VM stops, for the same profile and suffixes, so HTTPS can
+    /// show the 503 page of a stopped VM without a certificate warning.
+    private(set) var rememberedNames: Set<String> = []
+
+    static let rememberedCap = 256
 
     static let empty = DomainRoutes()
 
@@ -75,7 +81,7 @@ struct DomainRoutes: Equatable, Sendable {
     /// (internal ones, testcontainers). They count for `publishedHostPorts`.
     static func build(
         _ candidates: [DomainCandidate], suffixes: [String], profile: String, vmRunning: Bool,
-        otherPublished: Set<Int> = []
+        otherPublished: Set<Int> = [], previous: DomainRoutes = .empty, remember: Bool = true
     ) -> DomainRoutes {
         var table = DomainRoutes()
         table.suffixes = suffixes
@@ -221,6 +227,11 @@ struct DomainRoutes: Equatable, Sendable {
             byProject[project, default: []].formUnion(own)
         }
         table.projects = byProject.mapValues { $0.sorted() }
+        if vmRunning {
+            table.rememberedNames = Set(table.routes.keys.sorted().prefix(rememberedCap))
+        } else if remember, previous.profile == profile, previous.suffixes == suffixes {
+            table.rememberedNames = previous.rememberedNames
+        }
         return table
     }
 
@@ -272,5 +283,30 @@ struct DomainRoutes: Equatable, Sendable {
         let rest = name.dropLast(digits.count)
         guard rest.last == "-" || rest.last == "_" else { return nil }
         return Int(String(digits.reversed()))
+    }
+}
+
+extension DomainRoutes {
+    /// True when `host` is a route name or a subdomain of one. HTTPS makes a
+    /// certificate only for such a name.
+    func hasRoute(for host: String) -> Bool { routeHost(for: host) != nil }
+
+    /// The full name of the route that serves `host`: the host itself or its
+    /// closest parent that is a route. While the VM is stopped, a remembered
+    /// name counts as a route. nil for any other host. HTTPS makes one
+    /// certificate for each such name, so a flood of subdomains makes none more.
+    func routeHost(for host: String) -> String? {
+        guard let normal = DomainName.normalizedHost(host),
+            let relative = DomainName.relative(normal, suffixes: suffixes), !relative.isEmpty
+        else { return nil }
+        var name = relative
+        while !name.isEmpty {
+            if vmRunning ? routes[name] != nil : rememberedNames.contains(name) {
+                return String(normal.dropFirst(relative.count - name.count))
+            }
+            guard let dot = name.firstIndex(of: ".") else { break }
+            name = String(name[name.index(after: dot)...])
+        }
+        return nil
     }
 }

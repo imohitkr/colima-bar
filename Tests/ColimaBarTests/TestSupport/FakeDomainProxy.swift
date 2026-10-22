@@ -1,4 +1,5 @@
 import Foundation
+import Network
 
 @testable import ColimaBar
 
@@ -14,6 +15,12 @@ final class FakeDomainProxy: DomainProxying, @unchecked Sendable {
     private var calls: [[UInt16]] = []
     private var stopCount = 0
     private var hook: (@Sendable ([UInt16]) async -> Void)?
+    private var httpsFailure: (@Sendable () -> Void)?
+    private var httpsBound: UInt16?
+    private var httpsBusy: Set<UInt16> = []
+    private var httpsCalls: [[UInt16]] = []
+    private var httpsStopCount = 0
+    private var httpsHook: (@Sendable ([UInt16]) async -> Void)?
 
     var routes: DomainRoutes {
         get { lock.withLock { table } }
@@ -25,7 +32,55 @@ final class FakeDomainProxy: DomainProxying, @unchecked Sendable {
         set { lock.withLock { failure = newValue } }
     }
 
+    var onHTTPSListenerFailure: (@Sendable () -> Void)? {
+        get { lock.withLock { httpsFailure } }
+        set { lock.withLock { httpsFailure = newValue } }
+    }
+
     var port: UInt16? { lock.withLock { bound } }
+    var httpsPort: UInt16? { lock.withLock { httpsBound } }
+
+    /// The HTTPS ports that something else listens on.
+    var busyHTTPSPorts: Set<UInt16> {
+        get { lock.withLock { httpsBusy } }
+        set { lock.withLock { httpsBusy = newValue } }
+    }
+
+    /// The candidates of each `startHTTPS` call, in order.
+    var httpsStarts: [[UInt16]] { lock.withLock { httpsCalls } }
+    var httpsStops: Int { lock.withLock { httpsStopCount } }
+
+    /// Runs at the start of each `startHTTPS` call, before it picks a port.
+    func onStartHTTPS(_ body: (@Sendable ([UInt16]) async -> Void)?) { lock.withLock { httpsHook = body } }
+
+    func startHTTPS(candidates: [UInt16], tls: @escaping @Sendable () -> NWProtocolTLS.Options) async -> UInt16? {
+        let run = lock.withLock { httpsHook }
+        await run?(candidates)
+        return lock.withLock {
+            httpsCalls.append(candidates)
+            httpsBound = nil
+            return candidates.first(where: { !httpsBusy.contains($0) }).map { pick in
+                httpsBound = pick
+                return pick
+            }
+        }
+    }
+
+    func stopHTTPS() {
+        lock.withLock {
+            httpsStopCount += 1
+            httpsBound = nil
+        }
+    }
+
+    /// The HTTPS listener fails after it was ready.
+    func failHTTPSListener() {
+        let handler = lock.withLock { () -> (@Sendable () -> Void)? in
+            httpsBound = nil
+            return httpsFailure
+        }
+        handler?()
+    }
 
     /// The ports that something else listens on.
     var busyPorts: Set<UInt16> {
@@ -58,6 +113,7 @@ final class FakeDomainProxy: DomainProxying, @unchecked Sendable {
         lock.withLock {
             stopCount += 1
             bound = nil
+            httpsBound = nil
         }
     }
 

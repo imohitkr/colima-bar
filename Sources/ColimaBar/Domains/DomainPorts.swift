@@ -4,6 +4,8 @@ import Foundation
 enum DomainPorts {
     /// The ports of the proxy on this Mac, in the order that it tries them.
     static let http: [UInt16] = [80, 8080]
+    /// The ports of the HTTPS listener, in the order that it tries them.
+    static let https: [UInt16] = [443, 8443]
     /// Container ports that a route tries after the label, in this order.
     static let preferred: [Int] = [80, 8080, 3000, 8000, 5000, 5173, 4200, 8888, 443, 8443]
     /// Container ports that speak TLS (the `PortLink` rule). The proxy

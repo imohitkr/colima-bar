@@ -81,6 +81,12 @@ import Testing
                 "No running container publishes a web port."))
     }
 
+    @Test func aSecureRequestGetsLinksWithHTTPS() {
+        let t = text(.notFound(host: "x.localhost", profile: "default", known: ["web.localhost:8443"], secure: true))
+        #expect(t.contains("href=\"https://web.localhost:8443/\""))
+        #expect(!t.contains("href=\"http://"))
+    }
+
     @Test func theListHoldsAtMost50Names() {
         let known = (0..<80).map { "n\($0).localhost" }
         let t = text(.notFound(host: "x.localhost", profile: "default", known: known))

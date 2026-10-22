@@ -178,6 +178,9 @@ final class ColimaModel {
             domainsSettingChanged()
         }
     }
+    /// HTTPS for container domains (`ColimaModel+DomainsHTTPS`). Off by default.
+    /// It changes only through `setHTTPS`.
+    private(set) var httpsEnabled = false
     private(set) var domainRoutes = DomainRoutes.empty
     private(set) var domainStatus = DomainStatus()
     /// The containers whose port the proxy held when they started. They need a restart.
@@ -298,6 +301,9 @@ final class ColimaModel {
     /// Closes the dashboard popover, so a dialog is not hidden behind it.
     /// AppDelegate sets it.
     @ObservationIgnored var dismissPopover: @MainActor () -> Void = {}
+    /// Shows the dashboard again, key and focused, after a dialog that
+    /// `dismissPopover` made room for. AppDelegate sets it.
+    @ObservationIgnored var restoreDashboard: @MainActor () -> Void = {}
     /// The colima-ctl.sh actions that run now, for each profile. A running
     /// action (for example a prune that waits for its dialog) is not idle.
     @ObservationIgnored private var actionsInFlight: [String: Int] = [:]
@@ -361,6 +367,34 @@ final class ColimaModel {
     @ObservationIgnored var domainTimings = DomainTimings()
     /// COLIMABAR_DOMAINS=1 in a debug run: show the names, start nothing.
     @ObservationIgnored var domainsShownInDebug = false
+    /// The disk, keychain and TLS work of HTTPS. A test gives it a fake.
+    @ObservationIgnored let domainTLS: any DomainTLSServicing
+    @ObservationIgnored var tlsCA: LocalCA?
+    @ObservationIgnored var tlsProvider: TLSIdentityProvider?
+    @ObservationIgnored var leafCache: LeafCache?
+    @ObservationIgnored var tlsMode: DomainTLSServer.Mode = .perSNI
+    /// The routes at the last start of the HTTPS listener.
+    @ObservationIgnored var httpsStartPublished: Set<Int> = []
+    /// Each start, stop and failure of HTTPS makes the older ones stale.
+    @ObservationIgnored var httpsStartToken = 0
+    @ObservationIgnored var httpsSetupTask: Task<Void, Never>?
+    @ObservationIgnored var multiSANTask: Task<Void, Never>?
+    @ObservationIgnored var multiSANRenewTask: Task<Void, Never>?
+    @ObservationIgnored var httpsTrustCheckedAt = Date.distantPast
+    @ObservationIgnored var httpsTrustChecking = false
+    @ObservationIgnored var httpsRetry: Task<Void, Never>?
+    @ObservationIgnored var httpsRetryCount = 0
+    @ObservationIgnored var httpsRebindAt: Date?
+    @ObservationIgnored var httpsRecheck: Task<Void, Never>?
+    @ObservationIgnored var httpsMoveBackAt = Date.distantPast
+    @ObservationIgnored var httpsMoveBackProbing = false
+    @ObservationIgnored var httpsProviderTask: Task<TLSIdentityProvider?, Never>?
+    /// The names of the certificate that the fallback mode serves.
+    @ObservationIgnored var multiSANServed: [String] = []
+    /// The generation of the certificate of the fallback mode. Each listener of that mode makes the next one.
+    @ObservationIgnored var multiSANEpoch = 0
+    /// The queue of the certificate minting, apart from the queue of the proxy.
+    @ObservationIgnored let tlsMintQueue = DispatchQueue(label: "colimabar.domains.mint")
     /// The runner of the volume transfer that runs now.
     @ObservationIgnored var volumeRunner: VolumeBackupRunner?
     /// The profile of that transfer, and why it stopped if the VM or the profile changed.
@@ -451,14 +485,18 @@ final class ColimaModel {
     /// model never binds a port or touches the saved setting by accident.
     init(
         profile named: String? = nil, readOnly: Bool = false, dockerAPI: DockerAPI? = nil,
-        domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil, domainsStore: UserDefaults? = nil
+        domainProxy: (any DomainProxying)? = nil, domainsEnabled: Bool? = nil, domainsStore: UserDefaults? = nil,
+        httpsEnabled: Bool? = nil, domainTLS: (any DomainTLSServicing)? = nil
     ) {
         let inTest = TestProcess.isRunning
         self.domainProxy = domainProxy ?? (inTest ? InertDomainProxy() : DomainProxy())
+        self.domainTLS = domainTLS ?? (inTest ? InertDomainTLS() : SystemDomainTLS())
         let store = domainsStore ?? (inTest ? TestProcess.emptyStore() : .standard)
         self.domainsStore = store
         self.domainsEnabled =
             domainsEnabled ?? (store.object(forKey: Defaults.Key.domains.rawValue) as? Bool) ?? false
+        self.httpsEnabled =
+            httpsEnabled ?? (store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool) ?? false
         let p = named ?? Defaults.string(.profile) ?? "default"
         profile = p
         isDebug = readOnly
@@ -505,7 +543,10 @@ final class ColimaModel {
             powerObserver = observer
             startNetworkObserver()
             publishAppStatus()
+            // A copy that died leaves a temporary keychain in the cache folder.
+            domainTLS.cleanStale()
             if domainsEnabled { startDomainProxy(retryFirst: true) }
+            startHTTPSAtLaunch()
         } else {
             setDomainStatus(DomainStatus(phase: .debugRun))
         }
@@ -596,6 +637,7 @@ final class ColimaModel {
         proxy.stop()
         if !isDebug {
             invalidateDomainTasks()
+            stopHTTPSForQuit()
             domainProxy.stop()
             profileProxies.shutdown()
             AppStatusFile.removeIfOwned()
@@ -1870,6 +1912,7 @@ final class ColimaModel {
     func setDomainRoutes(_ routes: DomainRoutes) { set(\.domainRoutes, routes) }
     func setDomainStatus(_ status: DomainStatus) { set(\.domainStatus, status) }
     func setDomainRestartHints(_ hints: [DomainRestartHint]) { set(\.domainRestartHints, hints) }
+    func setHTTPSEnabledFlag(_ on: Bool) { set(\.httpsEnabled, on) }
     func setLogSizesChecking(_ on: Bool) { set(\.logSizesChecking, on) }
     func setDiskImage(_ size: DiskImageSize?) { set(\.diskImage, size) }
     func setTrimming(_ on: Bool) { set(\.isTrimming, on) }
