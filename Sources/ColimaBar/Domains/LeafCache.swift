@@ -16,16 +16,14 @@ import os
 /// value and an invalid name get the leaf of `localhost`, which is never
 /// minted again. So the number of leaves follows the number of routes,
 /// whatever a page makes a browser ask for. As a backstop, the cache holds
-/// at most `capacity` leaves. The least recently used one goes first, and
-/// the provider deletes its key and certificate.
+/// at most `capacity` leaves. The least recently used one goes first. An
+/// identity lives in memory only (`PKCS12`), so a dropped leaf is just freed.
 ///
 /// `lock` guards the table. `mintLock` makes the minters wait for each
 /// other, so one name never gets two leaves. `@unchecked Sendable` for that.
 final class LeafCache: @unchecked Sendable {
     private struct Entry {
         var identity: sec_identity_t
-        var certificate: SecCertificate
-        var key: SecKey
         var notAfter: Date
         var used: UInt64
     }
@@ -36,7 +34,6 @@ final class LeafCache: @unchecked Sendable {
         var minted = 0
     }
 
-    private let provider: TLSIdentityProvider
     private let capacity: Int
     private let resolves: @Sendable (String) -> String?
     private let now: @Sendable () -> Date
@@ -56,10 +53,9 @@ final class LeafCache: @unchecked Sendable {
     static let renewBefore: TimeInterval = 86400
 
     init(
-        ca: LocalCA, provider: TLSIdentityProvider, suffixes: [String], capacity: Int = 256,
+        ca: LocalCA, suffixes: [String], capacity: Int = 256,
         resolves: @escaping @Sendable (String) -> String?, now: @escaping @Sendable () -> Date = Date.init
     ) {
-        self.provider = provider
         self.capacity = capacity
         self.resolves = resolves
         self.now = now
@@ -68,6 +64,9 @@ final class LeafCache: @unchecked Sendable {
 
     /// The number of leaves that this cache has minted, also the ones it dropped.
     var mintedCount: Int { lock.withLock { table.minted } }
+
+    /// The number of leaves that the cache holds now.
+    var leafCount: Int { lock.withLock { table.entries.count } }
 
     /// The name of the leaf that a client with this SNI value gets: the
     /// self-test name, the route name that `resolves` returns for the SNI
@@ -104,47 +103,29 @@ final class LeafCache: @unchecked Sendable {
     /// Drops every leaf and signs the next ones with `ca`.
     func reset(ca: LocalCA, suffixes: [String]) {
         mintLock.withLock {
-            let dropped = lock.withLock { () -> [Entry] in
+            lock.withLock {
                 setup = Setup(ca: ca, suffixes: suffixes)
-                defer { table.entries = [:] }
-                return Array(table.entries.values)
+                table.entries = [:]
             }
-            discard(dropped)
         }
     }
 
     /// Drops the certificates of the fallback mode, except the ones of `epoch`.
     /// Call it after the listener of that epoch runs, so that the old
-    /// listener never serves a certificate without its key.
+    /// listener never serves a certificate that is gone.
     func dropMultiSAN(except epoch: Int? = nil) {
         mintLock.withLock {
             let keep = epoch.map { Self.multiPrefix($0) }
-            let dropped = lock.withLock { () -> [Entry] in
+            lock.withLock {
                 let keys = table.entries.keys.filter { key in
                     key.hasPrefix("multi:") && !(keep.map { key.hasPrefix($0) } ?? false)
                 }
-                return keys.compactMap { table.entries.removeValue(forKey: $0) }
+                for key in keys { table.entries[key] = nil }
             }
-            discard(dropped)
-        }
-    }
-
-    /// Drops every leaf and deletes their keys. The next request makes new ones.
-    func discardAll() {
-        mintLock.withLock {
-            let dropped = lock.withLock { () -> [Entry] in
-                defer { table.entries = [:] }
-                return Array(table.entries.values)
-            }
-            discard(dropped)
         }
     }
 
     private static func multiPrefix(_ epoch: Int) -> String { "multi:\(epoch):" }
-
-    private func discard(_ entries: [Entry]) {
-        for entry in entries { provider.discard(certificate: entry.certificate, key: entry.key) }
-    }
 
     private func identity(named key: String, names: [String]?) -> sec_identity_t? {
         let current = now()
@@ -160,33 +141,25 @@ final class LeafCache: @unchecked Sendable {
     private func mint(_ key: String, _ names: [String], _ current: Date) -> sec_identity_t? {
         let ca = lock.withLock { setup.ca }
         guard let leaf = try? ca.mintLeaf(names: names, now: current),
-            let id = try? provider.identity(certificate: leaf.certificate, key: leaf.key)
+            let id = try? PKCS12.identity(certificate: leaf.certificate, key: leaf.key)
         else {
             log.error("a leaf could not be made")
             return nil
         }
         guard let secIdentity = sec_identity_create(id) else {
-            provider.discard(certificate: leaf.certificate, key: leaf.key)
             log.error("a leaf could not be made")
             return nil
         }
-        let dropped = lock.withLock { () -> [Entry] in
-            var dropped: [Entry] = []
+        lock.withLock {
             table.minted += 1
             table.clock += 1
-            if let old = table.entries[key] { dropped.append(old) }
-            table.entries[key] = Entry(
-                identity: secIdentity, certificate: leaf.certificate, key: leaf.key, notAfter: leaf.notAfter,
-                used: table.clock)
+            table.entries[key] = Entry(identity: secIdentity, notAfter: leaf.notAfter, used: table.clock)
             while table.entries.count > capacity,
                 let oldest = table.entries.min(by: { $0.value.used < $1.value.used })
             {
-                dropped.append(oldest.value)
                 table.entries[oldest.key] = nil
             }
-            return dropped
         }
-        discard(dropped)
         return secIdentity
     }
 

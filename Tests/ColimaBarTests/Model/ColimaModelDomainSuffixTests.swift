@@ -593,7 +593,7 @@ import Testing
         #expect(stale.value == 0)
         #expect(
             Array(r.tls.events.dropFirst(before)) == [
-                "uninstall", "prepare", "install", "makeProvider", "selfTest 443",
+                "uninstall", "prepare", "install", "identityTest", "selfTest 443",
             ])
         let new = try #require(r.tls.ca)
         #expect(new.der != old.der && Set(new.permitted) == ["localhost", "dev.test"])

@@ -9,6 +9,7 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 ### Changed
 
 - ColimaBar now needs macOS 15 or later.
+- The TLS identities of HTTPS for container domains now exist in memory only. ColimaBar no longer makes a temporary keychain file, and it deletes the leftover files of older versions at launch.
 
 ## [0.14.0] - 2026-10-22
 

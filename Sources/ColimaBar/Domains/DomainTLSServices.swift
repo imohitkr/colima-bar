@@ -2,8 +2,8 @@ import Foundation
 import Security
 
 /// What the model needs from the disk, the keychain and the TLS stack to run
-/// HTTPS. The model tests give it a fake, so no test creates a CA on disk,
-/// touches the login keychain or the trust settings, or makes a keychain.
+/// HTTPS. The model tests give it a fake, so no test creates a CA on disk or
+/// touches the login keychain or the trust settings.
 protocol DomainTLSServicing: AnyObject, Sendable {
     /// The saved CA, or nil.
     func loadCA() -> LocalCA?
@@ -22,8 +22,9 @@ protocol DomainTLSServicing: AnyObject, Sendable {
     func hasTrustSettings(_ ca: LocalCA) -> Bool
     /// Deletes the certificate of the CA from the keychain. It changes no trust setting and shows no dialog.
     func deleteCertificate(_ ca: LocalCA)
-    func makeProvider(ca: LocalCA) -> TLSIdentityProvider?
-    /// Deletes the temporary keychains of processes that are gone.
+    /// True when a leaf of `ca` makes an identity that has its key and signs.
+    func identitySelfTest(ca: LocalCA) -> Bool
+    /// Deletes the temporary keychain files that older versions left behind.
     func cleanStale()
     /// Connects with one name under each of `suffixes`.
     func selfTest(port: UInt16, ca: LocalCA, suffixes: [String]) async -> Bool
@@ -32,7 +33,7 @@ protocol DomainTLSServicing: AnyObject, Sendable {
 }
 
 /// The real services: the folder in Application Support, the login keychain
-/// and the identity providers.
+/// and the TLS identities.
 final class SystemDomainTLS: DomainTLSServicing, @unchecked Sendable {
     /// The folder of the CA files. A test gives its own folder.
     private let directory: String
@@ -57,8 +58,8 @@ final class SystemDomainTLS: DomainTLSServicing, @unchecked Sendable {
     func isTrusted(_ ca: LocalCA) -> Bool { TrustStore.isTrusted(ca) }
     func hasTrustSettings(_ ca: LocalCA) -> Bool { TrustStore.hasSettings(ca) }
     func deleteCertificate(_ ca: LocalCA) { TrustStore.deleteCertificate(ca) }
-    func makeProvider(ca: LocalCA) -> TLSIdentityProvider? { TLSIdentityProviders.make(ca: ca) }
-    func cleanStale() { TLSIdentityProviders.cleanStale() }
+    func identitySelfTest(ca: LocalCA) -> Bool { TLSIdentities.selfTest(ca: ca) }
+    func cleanStale() { TLSIdentities.cleanStale() }
     func selfTest(port: UInt16, ca: LocalCA, suffixes: [String]) async -> Bool {
         await DomainTLSServer.selfTest(port: port, ca: ca, suffixes: suffixes)
     }
@@ -66,7 +67,7 @@ final class SystemDomainTLS: DomainTLSServicing, @unchecked Sendable {
 
 /// Services that do nothing and fail. A model in a test process uses them
 /// when the test gives no other services, so a forgotten argument cannot
-/// create a CA or touch a keychain.
+/// create a CA or touch the keychain.
 final class InertDomainTLS: DomainTLSServicing, @unchecked Sendable {
     var certificatePath: String { "" }
     func loadCA() -> LocalCA? { nil }
@@ -78,7 +79,7 @@ final class InertDomainTLS: DomainTLSServicing, @unchecked Sendable {
     func isTrusted(_ ca: LocalCA) -> Bool { false }
     func hasTrustSettings(_ ca: LocalCA) -> Bool { false }
     func deleteCertificate(_ ca: LocalCA) {}
-    func makeProvider(ca: LocalCA) -> TLSIdentityProvider? { nil }
+    func identitySelfTest(ca: LocalCA) -> Bool { false }
     func cleanStale() {}
     func selfTest(port: UInt16, ca: LocalCA, suffixes: [String]) async -> Bool { false }
 }
