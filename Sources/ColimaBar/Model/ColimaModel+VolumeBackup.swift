@@ -86,7 +86,7 @@ extension ColimaModel {
                             kind: .backup, volume: item.name, total: item.size, position: count > 1 ? i + 1 : nil,
                             count: count))
                 },
-                onProgress: { [weak self] bytes in Task { @MainActor in self?.transferProgress(bytes) } })
+                onProgress: { [self] bytes in Task { @MainActor in self.transferProgress(bytes) } })
             if let text = Self.backupMessage(
                 summary: summary, volumes: items.map(\.name), folder: folder, because: volumeStop?.because)
             {
@@ -135,7 +135,7 @@ extension ColimaModel {
                     setVolumeTransfer(
                         VolumeTransfer(kind: .restore, volume: target, total: Double(scan.size - scan.skip)))
                 },
-                onProgress: { [weak self] bytes in Task { @MainActor in self?.transferProgress(bytes) } })
+                onProgress: { [self] bytes in Task { @MainActor in self.transferProgress(bytes) } })
             switch outcome {
             case .done: notify(Self.restoreMessage(file: fileName, volume: target))
             case .declined: break
