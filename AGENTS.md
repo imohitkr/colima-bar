@@ -6,7 +6,7 @@ This file guides AI coding agents that work on this repository. Human contributo
 
 ColimaBar is a native macOS menu bar app for [Colima](https://github.com/abiosoft/colima). It shows the VM and its containers in a dashboard.
 Its proxy socket (`~/.cache/colima-bar/docker.sock`) starts the VM when the first real docker request arrives (auto-start). It can stop an idle VM (auto-stop).
-It uses Swift 6.4 and SwiftPM, in the Swift 6 language mode, with Command Line Tools only. It runs on Apple silicon with macOS 14 or later. It has no third-party dependencies.
+It uses Swift 6.4 and SwiftPM, in the Swift 6 language mode, with Command Line Tools only. It runs on Apple silicon with macOS 15 or later. It has no third-party dependencies.
 
 ## Commands
 

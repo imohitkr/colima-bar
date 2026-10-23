@@ -173,9 +173,17 @@ jobs:
           GH_REPO: ${{ github.repository }}
         # Immutable releases: a published release cannot change. Upload the
         # assets to a draft first, then publish it.
+        # The notes start with a line that the in-app update reads: the macOS
+        # that the build needs, from the Info.plist that build.sh wrote.
         run: |
+          minimum=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' build/ColimaBar.app/Contents/Info.plist)
+          if ! [[ "$minimum" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "The minimum macOS version of the build is not a version: $minimum" >&2
+            exit 1
+          fi
           gh release create "$GITHUB_REF_NAME" ColimaBar.dmg ColimaBar.zip \
-            --title "ColimaBar $GITHUB_REF_NAME" --generate-notes --draft
+            --title "ColimaBar $GITHUB_REF_NAME" --generate-notes --draft \
+            --notes "Requires macOS $minimum or later."
           gh release edit "$GITHUB_REF_NAME" --draft=false
 
       # In-app updates trust the digest that GitHub lists for each asset, and

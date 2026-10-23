@@ -27,6 +27,8 @@ struct FooterView: View {
             .hint(Help.version(AppDelegate.version))
             if let r = Updater.shared.available {
                 UpdateButton(release: r, model: model)
+            } else if let note = Updater.shared.macOSNote {
+                Text(note).font(.caption2).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
             }
             if !inWindow {
                 IconButton("macwindow", Help.window) { openWindow() }

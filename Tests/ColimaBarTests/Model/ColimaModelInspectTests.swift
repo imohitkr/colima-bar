@@ -21,21 +21,24 @@ import Testing
         #expect(await model.inspect(id: "") == .unavailable)
     }
 
-    @Test func aDecodingErrorGivesAReasonWithNoValue() throws {
-        struct Probe: Decodable {
-            let id: String
-            enum CodingKeys: String, CodingKey { case id = "Id" }
-        }
-        func reason(_ json: String) throws -> String {
-            do {
-                _ = try JSONDecoder().decode(Probe.self, from: Data(json.utf8))
-                return ""
-            } catch { return ColimaModel.inspectFailureReason(error) }
-        }
-        #expect(try reason(#"{"Id": 5}"#) == "wrong type in the answer")
-        #expect(try reason(#"{"Other": "hunter2"}"#) == "missing field in the answer")
-        #expect(try reason(#"{"Id": null}"#) == "missing value in the answer")
-        #expect(try reason("not json hunter2") == "answer is not JSON")
+    private struct Probe: Decodable {
+        let id: String
+        enum CodingKeys: String, CodingKey { case id = "Id" }
+    }
+
+    /// The reason that the model gives for a decoding error of `json`.
+    private func reason(_ json: String) -> String {
+        do {
+            _ = try JSONDecoder().decode(Probe.self, from: Data(json.utf8))
+            return ""
+        } catch { return ColimaModel.inspectFailureReason(error) }
+    }
+
+    @Test func aDecodingErrorGivesAReasonWithNoValue() {
+        #expect(reason(#"{"Id": 5}"#) == "wrong type in the answer")
+        #expect(reason(#"{"Other": "hunter2"}"#) == "missing field in the answer")
+        #expect(reason(#"{"Id": null}"#) == "missing value in the answer")
+        #expect(reason("not json hunter2") == "answer is not JSON")
         #expect(ColimaModel.inspectFailureReason(CocoaError(.fileNoSuchFile)) == "unreadable answer")
     }
 }

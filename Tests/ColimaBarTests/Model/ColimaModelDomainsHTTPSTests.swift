@@ -118,12 +118,24 @@ import Testing
         await turnOn(r)
         #expect(r.model.domainStatus.https.phase == .running)
         #expect(r.model.domainStatus.https.port == 443)
-        #expect(r.tls.events == ["prepare", "install", "makeProvider", "selfTest 443"])
+        #expect(r.tls.events == ["prepare", "install", "identityTest", "selfTest 443"])
         #expect(r.proxy.httpsStarts == [[443]])
         #expect(r.model.httpsEnabled)
         #expect(r.store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool == true)
         #expect(r.dialogs.value == 1)
         #expect(r.model.domainURL("web.shop")?.absoluteString == "https://web.shop.localhost/")
+    }
+
+    @Test func theIdentityTestRunsOnceUntilHTTPSIsTurnedOff() async throws {
+        let r = try rig()
+        await turnOn(r)
+        await r.model.startHTTPS()  // a second start, as a rebind makes it
+        #expect(await running(r))
+        #expect(r.tls.events.filter { $0 == "identityTest" }.count == 1)
+        r.model.setHTTPS(false)
+        #expect(await removed(r))
+        await turnOn(r)
+        #expect(r.tls.events.filter { $0 == "identityTest" }.count == 2)
     }
 
     @Test func aSecondClickDuringTheDialogAsksOnce() async throws {
@@ -210,9 +222,9 @@ import Testing
         #expect(r.proxy.httpsStops >= 1)
     }
 
-    @Test func noWorkingIdentityProviderFailsHTTPS() async throws {
+    @Test func aFailedIdentityTestFailsHTTPS() async throws {
         let r = try rig()
-        r.tls.providerWorks = false
+        r.tls.identitiesWork = false
         r.model.setHTTPS(true)
         #expect(await waitUntil { r.model.domainStatus.https.phase == .failed })
         #expect(r.model.domainStatus.https.problem == "HTTPS could not start. The TLS identity test failed.")
@@ -265,13 +277,11 @@ import Testing
     @Test func turningHTTPSOffRemovesTheCA() async throws {
         let r = try rig()
         await turnOn(r)
-        let provider = try #require(r.tls.providers.first)
         r.model.setHTTPS(false)
         #expect(await removed(r))
         // The key file goes before the dialog.
         #expect(Array(r.tls.events.suffix(2)) == ["removeFiles", "uninstall"])
         #expect(r.proxy.httpsPort == nil && r.proxy.httpsStops >= 1)
-        #expect(provider.removeCount == 1)
         #expect(r.tls.ca == nil)
         #expect(r.model.domainStatus.https.caption == "ColimaBar removed the certificate authority.")
         #expect(r.store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool == false)
@@ -372,10 +382,8 @@ import Testing
     @Test func theMasterSwitchOffStopsHTTPSButKeepsTheCA() async throws {
         let r = try rig()
         await turnOn(r)
-        let provider = try #require(r.tls.providers.first)
         r.model.domainsEnabled = false
         #expect(await waitUntil { r.proxy.httpsPort == nil })
-        #expect(provider.removeCount == 1)
         #expect(r.model.httpsEnabled && r.tls.ca != nil)
         #expect(!r.tls.events.contains("uninstall") && !r.tls.events.contains("removeFiles"))
         #expect(r.model.domainStatus.https.phase == .off)
@@ -445,12 +453,10 @@ import Testing
         #expect(r.proxy.httpsStarts.count == 2)
     }
 
-    @Test func aWakeUnlocksTheKeychainAndRestartsAMissingListener() async throws {
+    @Test func aWakeRestartsAMissingListener() async throws {
         let r = try rig()
         await turnOn(r)
-        let provider = try #require(r.tls.providers.first)
         r.model.httpsAfterWake()
-        #expect(provider.unlockCount == 1)
         try await Task.sleep(for: .milliseconds(50))
         #expect(r.proxy.httpsStarts.count == 1)  // the listener lives: no restart
         r.proxy.stopHTTPS()
@@ -572,16 +578,13 @@ import Testing
         #expect(master.proxy.routes.rememberedNames.isEmpty)
     }
 
-    @Test func aNewStartReplacesTheCacheAndDeletesTheLeavesOfTheOldOne() async throws {
+    @Test func aNewStartReplacesTheCache() async throws {
         let r = try rig()
         await turnOn(r)
-        let provider = try #require(r.tls.providers.first)
         let old = try #require(r.model.leafCache)
         _ = old.identity(forSNI: "colimabar-selftest.localhost")
-        #expect(provider.discardCount == 0)
         await r.model.startHTTPS()
         #expect(r.model.leafCache !== old)
-        #expect(provider.discardCount == 1)
     }
 
     @Test func thePerNameModeNeverRestartsForARouteChange() async throws {
@@ -618,7 +621,7 @@ import Testing
         r.model.trustCAAgain()
         #expect(await running(r))
         // The old CA goes first (trust and certificate), then the new one is made and trusted.
-        #expect(r.tls.events == ["uninstall", "prepare", "install", "makeProvider", "selfTest 443"])
+        #expect(r.tls.events == ["uninstall", "prepare", "install", "identityTest", "selfTest 443"])
         let new = try #require(r.tls.ca)
         #expect(Set(new.permitted) == ["localhost"] && new.der != old.der)
         #expect(r.model.httpsEnabled && !r.model.httpsInstallPending)
@@ -956,16 +959,15 @@ import Testing
         r.tls.queueSelfTests([false, true])
         await turnOn(r)
         #expect(r.model.tlsMode == .multiSAN)
-        let provider = try #require(r.tls.providers.first)
         let cache = try #require(r.model.leafCache)
         // The old listener serves this certificate.
         _ = cache.multiSANIdentity(names: ["a.localhost"], epoch: r.model.multiSANEpoch)
         let epoch = r.model.multiSANEpoch
         let atStart = Box<[Int]>([])
-        r.proxy.onStartHTTPS { _ in atStart.mutate { $0.append(provider.discardCount) } }
-        #expect(await waitUntil { r.model.multiSANEpoch > epoch && provider.discardCount >= 1 })
+        r.proxy.onStartHTTPS { _ in atStart.mutate { $0.append(cache.leafCount) } }
+        #expect(await waitUntil { r.model.multiSANEpoch > epoch && cache.leafCount == 0 })
         // At the first start of the renewal the old certificate was still there.
-        #expect(atStart.value.first == 0)
+        #expect(atStart.value.first == 1)
         #expect(r.model.domainStatus.https.phase == .running)
     }
 
@@ -1036,7 +1038,7 @@ import Testing
         let text = r.model.httpsStatusText
         #expect(
             text
-                == "listening on port 443, identity: recording, a certificate for each name, leaves made: 0, CA trusted: yes"
+                == "listening on port 443, identity: in memory, a certificate for each name, leaves made: 0, CA trusted: yes"
         )
         #expect(!text.contains("secretname"))
     }

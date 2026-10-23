@@ -2,7 +2,7 @@ import Testing
 
 @testable import ColimaBar
 
-@Suite struct VMConfigViewTests {
+@MainActor @Suite struct VMConfigViewTests {
     @Test func aPathInTheHomeFolderStartsWithATilde() {
         #expect(VMConfigView.abbreviated("/Users/me", home: "/Users/me") == "~")
         #expect(VMConfigView.abbreviated("/Users/me/code", home: "/Users/me") == "~/code")

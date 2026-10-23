@@ -41,6 +41,10 @@ final class Updater {
 
     /// The newest release when it is newer than this build, else nil.
     var available: ReleaseInfo?
+    /// The note for a newer release that needs a newer macOS than this one.
+    /// Such a release is not in `available`: it gets no button and no
+    /// notification.
+    var macOSNote: String?
     var phase: Phase = .idle
     /// Set after a failed check or swap: this version uses the release page
     /// until the next launch. The text says why.
@@ -48,7 +52,12 @@ final class Updater {
     var enabled = Defaults.bool(.checkUpdates) ?? true {
         didSet {
             Defaults.set(enabled, .checkUpdates)
-            if enabled { Task { await check(manual: false) } } else if phase == .idle { available = nil }
+            if enabled {
+                Task { await check(manual: false) }
+            } else if phase == .idle {
+                available = nil
+                macOSNote = nil
+            }
         }
     }
 
@@ -132,11 +141,19 @@ final class Updater {
             return
         case .upToDate:
             available = nil
+            macOSNote = nil
             if manual { UpdateAlert.info("You're up to date", "ColimaBar \(current) is the latest version.") }
             return
         case .newer:
             break
         }
+        if let note = UpdatePolicy.macOSNote(release) {
+            available = nil
+            macOSNote = note
+            if manual { UpdateAlert.info(note, "This Mac cannot run it, so ColimaBar does not offer it.") }
+            return
+        }
+        macOSNote = nil
         available = release
         if manual {
             Defaults.set(release.version, .notifiedVersion)

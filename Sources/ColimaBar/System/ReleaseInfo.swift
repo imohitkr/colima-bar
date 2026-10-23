@@ -17,6 +17,9 @@ struct ReleaseInfo: Equatable, Sendable {
     /// immutable, the asset is named `ColimaBar.zip`, and it has a valid
     /// size and SHA-256 digest.
     let zip: Asset?
+    /// The macOS that the release needs, from the line `Requires macOS 15.0
+    /// or later.` in its body. nil if the body has no such line.
+    var minimumMacOS: String? = nil
 
     static let zipName = "ColimaBar.zip"
 
@@ -42,6 +45,9 @@ struct ReleaseInfo: Equatable, Sendable {
                 zip = Asset(size: size, sha256: digest)
             }
         }
-        return ReleaseInfo(version: Version.strip(tag), tag: tag, page: ReleaseLink.page(tag: tag), zip: zip)
+        return ReleaseInfo(
+            version: Version.strip(tag), tag: tag, page: ReleaseLink.page(tag: tag), zip: zip,
+            minimumMacOS: (j["body"] as? String).flatMap(UpdateVerifier.requiredMacOS(inReleaseBody:)).map(
+                UpdateVerifier.describeMinimum))
     }
 }

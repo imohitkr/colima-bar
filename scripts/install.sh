@@ -200,7 +200,7 @@ main() {
   }
   local major
   major=$(sw_vers -productVersion | cut -d. -f1)
-  [ "$major" -ge 14 ] || { echo "ColimaBar needs macOS 14 or later." >&2; exit 1; }
+  [ "$major" -ge 15 ] || { echo "ColimaBar needs macOS 15 or later." >&2; exit 1; }
 
   # Replace an existing copy where it is. Otherwise use /Applications if we
   # can write to it, else ~/Applications.

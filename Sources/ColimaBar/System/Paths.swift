@@ -41,7 +41,7 @@ enum Paths {
     /// The files of the local certificate authority of HTTPS for container
     /// domains (`LocalCAStore`).
     static let domainsDir = "\(home)/Library/Application Support/ColimaBar/domains"
-    /// The temporary keychains of the TLS identities (`FileKeychainIdentityProvider`).
+    /// The folder where older versions kept temporary keychains of the TLS identities. Only the clean-up reads it.
     static let tlsCacheDir = "\(home)/Library/Caches/com.imohitkr.ColimaBar/tls"
     static let testcontainersProps = "\(home)/.testcontainers.properties"
 

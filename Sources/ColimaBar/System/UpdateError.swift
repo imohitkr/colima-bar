@@ -15,6 +15,9 @@ enum UpdateError: Error, Equatable {
     case unpackFailed(String)
     case signatureInvalid
     case bundleInvalid(String)
+    /// The release needs a newer macOS than the one that runs. The texts are
+    /// the minimum and the running version.
+    case needsNewerMacOS(minimum: String, current: String)
     /// An open VM action or similar work did not end in time.
     case blocked(String)
     /// macOS did not allow the change (App Management or a permission).
@@ -41,6 +44,8 @@ enum UpdateError: Error, Equatable {
         case .unpackFailed(let why): "ColimaBar could not unpack the download: \(why)."
         case .signatureInvalid: "The signature of the downloaded app is not valid."
         case .bundleInvalid(let why): "The downloaded app is not the expected release: \(why)."
+        case .needsNewerMacOS(let minimum, let current):
+            "This update needs macOS \(minimum) or later. This Mac has macOS \(current)."
         case .blocked(let why): "ColimaBar waited 2 minutes. \(why). ColimaBar did not restart."
         case .macOSBlocked: "macOS did not allow the change to the app folder."
         case .swapFailed(let why): "ColimaBar could not replace the app: \(why)."
@@ -51,11 +56,14 @@ enum UpdateError: Error, Equatable {
     }
 
     /// After these errors the offer changes to the release page until the
-    /// next launch. A network problem, a cancel, a missing attestation check
-    /// and busy work can pass, so the install button stays.
+    /// next launch. A network problem, a cancel, a missing attestation check,
+    /// busy work and an old macOS (the release page cannot help) can pass,
+    /// so the install button stays.
     var usesReleasePageAfter: Bool {
         switch self {
-        case .cancelled, .network, .notEnoughSpace, .blocked, .attestationUnavailable, .other: false
+        case .cancelled, .network, .notEnoughSpace, .blocked, .attestationUnavailable, .other,
+            .needsNewerMacOS:
+            false
         case .sizeMismatch, .digestMismatch, .attestationFailed, .unpackFailed, .signatureInvalid, .bundleInvalid,
             .macOSBlocked, .swapFailed, .rollbackFailed:
             true

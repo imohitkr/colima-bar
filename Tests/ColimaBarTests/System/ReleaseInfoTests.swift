@@ -9,7 +9,7 @@ import Testing
     /// The shape of the answer of releases/latest for v0.8.0 (shortened).
     private func json(
         tag: String = "v0.8.0", draft: Bool = false, prerelease: Bool = false, immutable: Bool? = true,
-        assets: String? = nil
+        assets: String? = nil, body: String? = nil
     ) -> Data {
         let zip =
             assets
@@ -20,11 +20,12 @@ import Testing
                 {"name":"ColimaBar.zip","size":1450000,"state":"uploaded","digest":"sha256:\(digest)",
                  "browser_download_url":"https://evil.example/ColimaBar.zip"}
                 """
+        let bodyField = body.map { ",\"body\":\(String(decoding: try! JSONEncoder().encode($0), as: UTF8.self))" } ?? ""
         let imm = immutable.map { ",\"immutable\":\($0)" } ?? ""
         return Data(
             """
             {"url":"https://api.github.com/repos/imohitkr/colima-bar/releases/1","html_url":"https://evil.example/x",
-             "tag_name":"\(tag)","draft":\(draft),"prerelease":\(prerelease)\(imm),"assets":[\(zip)]}
+             "tag_name":"\(tag)","draft":\(draft),"prerelease":\(prerelease)\(imm)\(bodyField),"assets":[\(zip)]}
             """.utf8)
     }
 
@@ -35,6 +36,13 @@ import Testing
         #expect(r.zip == ReleaseInfo.Asset(size: 1_450_000, sha256: digest))
         // The page comes from the tag, not from html_url.
         #expect(r.page.absoluteString == "https://github.com/imohitkr/colima-bar/releases/tag/v0.8.0")
+    }
+
+    @Test func readsTheMinimumMacOSFromTheBody() throws {
+        #expect(try #require(ReleaseInfo.parse(json())).minimumMacOS == nil)
+        #expect(try #require(ReleaseInfo.parse(json(body: "Notes only"))).minimumMacOS == nil)
+        let r = try #require(ReleaseInfo.parse(json(body: "Requires macOS 15.0 or later.\n\n## What's Changed")))
+        #expect(r.minimumMacOS == "15.0")
     }
 
     @Test func rejectsDraftsAndPrereleases() {

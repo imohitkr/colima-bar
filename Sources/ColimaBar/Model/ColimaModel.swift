@@ -388,7 +388,8 @@ final class ColimaModel {
     /// The delayed checks of the system resolver while the phase is `.notUsedYet`.
     @ObservationIgnored var dnsRecheck: Task<Void, Never>?
     @ObservationIgnored var tlsCA: LocalCA?
-    @ObservationIgnored var tlsProvider: TLSIdentityProvider?
+    /// True after the self-test of the TLS identities passed.
+    @ObservationIgnored var tlsIdentitiesWork = false
     @ObservationIgnored var leafCache: LeafCache?
     @ObservationIgnored var tlsMode: DomainTLSServer.Mode = .perSNI
     /// The routes at the last start of the HTTPS listener.
@@ -406,7 +407,7 @@ final class ColimaModel {
     @ObservationIgnored var httpsRecheck: Task<Void, Never>?
     @ObservationIgnored var httpsMoveBackAt = Date.distantPast
     @ObservationIgnored var httpsMoveBackProbing = false
-    @ObservationIgnored var httpsProviderTask: Task<TLSIdentityProvider?, Never>?
+    @ObservationIgnored var httpsIdentityTask: Task<Bool, Never>?
     /// The names of the certificate that the fallback mode serves.
     @ObservationIgnored var multiSANServed: [String] = []
     /// The generation of the certificate of the fallback mode. Each listener of that mode makes the next one.
@@ -569,7 +570,7 @@ final class ColimaModel {
             powerObserver = observer
             startNetworkObserver()
             publishAppStatus()
-            // A copy that died leaves a temporary keychain in the cache folder.
+            // Older versions left temporary keychain files in the cache folder.
             domainTLS.cleanStale()
             if domainsEnabled { startDomainProxy(retryFirst: true) }
             startHTTPSAtLaunch()

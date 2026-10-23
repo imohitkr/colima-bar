@@ -131,4 +131,23 @@ import Testing
             !UpdatePolicy.leftovers(bundle: "/Applications/.ColimaBar-update.app")
                 .contains("/Applications/.ColimaBar-update.app"))
     }
+
+    @Test func aReleaseThatNeedsANewerMacOSHasANoteAndNoOffer() {
+        func os(_ major: Int, _ minor: Int = 0, _ patch: Int = 0) -> OperatingSystemVersion {
+            OperatingSystemVersion(majorVersion: major, minorVersion: minor, patchVersion: patch)
+        }
+        func release(_ minimum: String?) -> ReleaseInfo {
+            ReleaseInfo(
+                version: "0.15.0", tag: "v0.15.0", page: ReleaseLink.page(tag: "v0.15.0"), zip: nil,
+                minimumMacOS: minimum)
+        }
+        #expect(UpdatePolicy.macOSNote(release("15.0"), os: os(14, 8)) == "ColimaBar 0.15.0 needs macOS 15")
+        #expect(UpdatePolicy.macOSNote(release("15.1.2"), os: os(15, 1, 1)) == "ColimaBar 0.15.0 needs macOS 15.1.2")
+        #expect(UpdatePolicy.macOSNote(release("26.2"), os: os(26, 1)) == "ColimaBar 0.15.0 needs macOS 26.2")
+        #expect(UpdatePolicy.macOSNote(release("15.0"), os: os(15)) == nil)
+        #expect(UpdatePolicy.macOSNote(release("15.0"), os: os(26)) == nil)
+        // No line in the body: the release is offered, and the check after the download guards.
+        #expect(UpdatePolicy.macOSNote(release(nil), os: os(14)) == nil)
+        #expect(UpdatePolicy.macOSNote(release("garbage"), os: os(14)) == nil)
+    }
 }

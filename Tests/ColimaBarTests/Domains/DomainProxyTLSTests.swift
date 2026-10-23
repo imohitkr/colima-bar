@@ -10,38 +10,23 @@ import Testing
 /// anchor. No test touches a keychain of the user or a trust setting. It never
 /// binds 80, 443, 8080 or 8443.
 @Suite struct DomainProxyTLSTests {
-    enum ProviderKind: CaseIterable, Sendable, CustomTestStringConvertible {
-        case fileKeychain
-        case privateAPI
-        var testDescription: String { self == .fileKeychain ? "file keychain" : "private API" }
-    }
-
-    /// Owns what a test starts, so that `close()` stops it and deletes the temporary keychain.
+    /// Owns what a test starts, so that `close()` stops it.
     private final class Rig: @unchecked Sendable {
         let proxy: DomainProxy
         let ca: LocalCA
         let cache: LeafCache
-        let provider: TLSIdentityProvider
-        let temp: TempFolder
         let port: Int
         let httpPort: Int
 
         init(
-            kind: ProviderKind, mode: DomainTLSServer.Mode = .perSNI, names: [String] = [],
+            mode: DomainTLSServer.Mode = .perSNI, names: [String] = [],
             suffixes: [String] = ["localhost"]
         ) async throws {
-            temp = try TempFolder()
             ca = try LocalCA.create(permitted: suffixes)
-            switch kind {
-            case .fileKeychain:
-                provider = try #require(FileKeychainIdentityProvider(cacheDir: temp.path))
-            case .privateAPI:
-                provider = PrivateIdentityProvider()
-            }
             let proxy = DomainProxy(addresses: ["127.0.0.1"])
             self.proxy = proxy
             cache = LeafCache(
-                ca: ca, provider: provider, suffixes: suffixes, resolves: { proxy.routes.routeHost(for: $0) })
+                ca: ca, suffixes: suffixes, resolves: { proxy.routes.routeHost(for: $0) })
             let server = DomainTLSServer(cache: cache, mode: mode, names: names)
             let queue = DispatchQueue(label: "test.mint")
             port = Int(
@@ -53,7 +38,6 @@ import Testing
 
         func close() {
             proxy.stop()
-            provider.removeAll()
         }
     }
 
@@ -70,9 +54,8 @@ import Testing
         "GET \(path) HTTP/1.1\r\nHost: \(host)\r\nConnection: close\r\n\r\n"
     }
 
-    @Test(arguments: ProviderKind.allCases)
-    func theHostPicksTheUpstreamOverTLS(kind: ProviderKind) async throws {
-        let rig = try await Rig(kind: kind)
+    @Test func theHostPicksTheUpstreamOverTLS() async throws {
+        let rig = try await Rig()
         defer { rig.close() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         rig.proxy.routes = routes(["web": alpha.port])
@@ -86,7 +69,7 @@ import Testing
     }
 
     @Test func eachNameGetsItsOwnLeafAndAHandshakeUsesTheCache() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         rig.proxy.routes = routes(["web": alpha.port, "api": alpha.port])
@@ -99,7 +82,7 @@ import Testing
     }
 
     @Test func aNameOutsideTheSuffixGetsTheLocalhostLeaf() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         let seen = await TLSClient.exchange(
             port: rig.port, sni: "www.example.com", anchor: nil, send: get("www.example.com"), until: "</html>")
@@ -116,7 +99,7 @@ import Testing
     }
 
     @Test func aFloodOfUnknownNamesMintsNothingAndTheRealNamesStillWork() async throws {
-        let rig = try await Rig(kind: .fileKeychain)
+        let rig = try await Rig()
         defer { rig.close() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         rig.proxy.routes = routes(["web": alpha.port])
@@ -134,10 +117,9 @@ import Testing
         #expect(rig.cache.mintedCount == 2)
     }
 
-    @Test(arguments: ProviderKind.allCases)
-    func oneCertificateServesEveryNameInTheFallbackMode(kind: ProviderKind) async throws {
+    @Test func oneCertificateServesEveryNameInTheFallbackMode() async throws {
         let names = ["web.localhost", "api.localhost", "localhost"]
-        let rig = try await Rig(kind: kind, mode: .multiSAN, names: names)
+        let rig = try await Rig(mode: .multiSAN, names: names)
         defer { rig.close() }
         for sni in names {
             let r = await TLSClient.exchange(
@@ -149,7 +131,7 @@ import Testing
     }
 
     @Test func theSelfTestPassesWithTheRightCAAndFailsOtherwise() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         rig.proxy.routes = routes([:])
         #expect(await DomainTLSServer.selfTest(port: UInt16(rig.port), ca: rig.ca))
@@ -161,14 +143,14 @@ import Testing
     }
 
     @Test func theSelfTestPassesWhileTheVMIsStopped() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         rig.proxy.routes = DomainRoutes.build([], suffixes: ["localhost"], profile: "default", vmRunning: false)
         #expect(await DomainTLSServer.selfTest(port: UInt16(rig.port), ca: rig.ca))
     }
 
     @Test func theConnectionNegotiatesHTTP11EvenIfTheClientOffersHTTP2() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         rig.proxy.routes = routes(["web": 1])
         let r = await TLSClient.exchange(
@@ -183,7 +165,7 @@ import Testing
     }
 
     @Test func anUnknownNameGetsAPageWithHTTPSLinks() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         rig.proxy.routes = routes(["web": alpha.port])
@@ -200,7 +182,7 @@ import Testing
     @Test func aRouteToAContainerPort443UsesTLSToTheUpstream() async throws {
         let upstream = try #require(await TLSUpstream.start())
         defer { upstream.stop() }
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         rig.proxy.routes = routes(["secure": upstream.port], containerPort: 443)
         let r = await TLSClient.exchange(
@@ -210,7 +192,7 @@ import Testing
     }
 
     @Test func aRouteToTheHTTPSPortOfTheProxyIsASelfLoop() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         rig.proxy.routes = routes(["loop": rig.port])
         let r = await TLSClient.exchange(
@@ -222,7 +204,7 @@ import Testing
     }
 
     @Test func stoppingHTTPSLeavesHTTPAndTheOtherWayAround() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         rig.proxy.routes = routes(["web": alpha.port])
@@ -236,7 +218,7 @@ import Testing
     }
 
     @Test func aNewHTTPStartLeavesHTTPSRunning() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         let alpha = try LoopbackHTTPServer(marker: "alpha-server")
         rig.proxy.routes = routes(["web": alpha.port])
@@ -249,14 +231,14 @@ import Testing
     }
 
     @Test func stopEndsBothListeners() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         rig.proxy.stop()
         #expect(rig.proxy.httpsPort == nil && rig.proxy.port == nil)
     }
 
     @Test func aFailedHTTPSListenerCallsItsOwnHandlerOnly() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         let https = Counter()
         let http = Counter()
@@ -268,7 +250,7 @@ import Testing
     }
 
     @Test func plainTextOnTheTLSPortEndsTheSession() async throws {
-        let rig = try await Rig(kind: .privateAPI)
+        let rig = try await Rig()
         defer { rig.close() }
         let port = rig.port
         let answer = await onOwnThread {
@@ -283,7 +265,7 @@ import Testing
     @Test func aHandshakeThatNeverEndsIsClosedAtTheHeadTimeout() async throws {
         let ca = try LocalCA.create(permitted: ["localhost"])
         let cache = LeafCache(
-            ca: ca, provider: PrivateIdentityProvider(), suffixes: ["localhost"], resolves: { _ in nil })
+            ca: ca, suffixes: ["localhost"], resolves: { _ in nil })
         var limits = DomainProxy.Limits()
         limits.headTimeout = 0.3
         let proxy = DomainProxy(addresses: ["127.0.0.1"], limits: limits)

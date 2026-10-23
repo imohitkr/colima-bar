@@ -417,18 +417,16 @@ extension ColimaModel {
             domainProxy.stopHTTPS()
             return setHTTPSStatus(.init(phase: .untrusted, problem: Self.needsNewCAText))
         }
-        guard let provider = await ensureTLSProvider(ca: ca) else {
+        guard await ensureTLSIdentities(ca: ca) else {
             guard token == httpsStartToken else { return }
             return setHTTPSFailed("HTTPS could not start. The TLS identity test failed.")
         }
         guard token == httpsStartToken, domainsEnabled, httpsEnabled else { return }
         let proxy = domainProxy
         let cache = LeafCache(
-            ca: ca, provider: provider, suffixes: suffixes,
+            ca: ca, suffixes: suffixes,
             resolves: { proxy.routes.routeHost(for: $0) })
-        // The old cache may still serve until the new listener runs. Its keys go when this start ends.
-        let previous = leafCache
-        defer { previous?.discardAll() }
+        // The old cache may still serve until the new listener runs. It is freed when nothing uses it.
         leafCache = cache
         tlsMode = .perSNI
         guard var port = await listenHTTPS(cache: cache, mode: .perSNI, token: token, retryFirst: retryFirst) else {
@@ -462,20 +460,17 @@ extension ColimaModel {
         }
     }
 
-    /// The provider that makes the identities. Callers that start together share one.
-    private func ensureTLSProvider(ca: LocalCA) async -> TLSIdentityProvider? {
-        if let tlsProvider { return tlsProvider }
+    /// Runs the self-test of the TLS identities once. Callers that start together share it.
+    private func ensureTLSIdentities(ca: LocalCA) async -> Bool {
+        if tlsIdentitiesWork { return true }
         let services = domainTLS
-        let task = httpsProviderTask ?? Task { await Self.blocking { services.makeProvider(ca: ca) } }
-        httpsProviderTask = task
-        let made = await task.value
-        httpsProviderTask = nil
-        guard httpsEnabled, domainsEnabled else {
-            made?.removeAll()
-            return nil
-        }
-        if tlsProvider == nil { tlsProvider = made }
-        return tlsProvider
+        let task = httpsIdentityTask ?? Task { await Self.blocking { services.identitySelfTest(ca: ca) } }
+        httpsIdentityTask = task
+        let works = await task.value
+        httpsIdentityTask = nil
+        guard httpsEnabled, domainsEnabled else { return false }
+        if works { tlsIdentitiesWork = true }
+        return works
     }
 
     /// Starts the TLS listener on 443, else 8443. Sets the failure and returns nil if no port works.
@@ -600,22 +595,19 @@ extension ColimaModel {
         multiSANRenewTask = nil
     }
 
-    /// Quit: stops every task of HTTPS, also a setup that waits for a dialog,
-    /// and deletes the temporary keychain. A cancelled setup changes no state, and
+    /// Quit: stops every task of HTTPS, also a setup that waits for a dialog. A cancelled setup changes no state, and
     /// the marker of an install tells the next launch what to clean up.
     func stopHTTPSForQuit() {
         invalidateHTTPSTasks()
         httpsSetupTask?.cancel()
-        tlsProvider?.removeAll()
     }
 
-    /// Stops the listener and deletes the temporary keychain. The CA stays.
+    /// Stops the listener and drops the leaves. The CA stays.
     func tearDownHTTPS() {
         invalidateHTTPSTasks()
         httpsRetryCount = 0
         domainProxy.stopHTTPS()
-        tlsProvider?.removeAll()
-        tlsProvider = nil
+        tlsIdentitiesWork = false
         leafCache = nil
     }
 
@@ -722,10 +714,9 @@ extension ColimaModel {
         }
     }
 
-    /// After a wake: unlock the temporary keychain, check the trust, and start the listener if it is gone.
+    /// After a wake: check the trust, and start the listener if it is gone.
     func httpsAfterWake() {
         guard !isDebug, domainsEnabled, httpsEnabled, httpsSetupTask == nil else { return }
-        tlsProvider?.unlockIfNeeded()
         let phase = domainStatus.https.phase
         guard phase != .settingUp, phase != .removing else { return }
         if domainProxy.httpsPort == nil {
@@ -794,6 +785,6 @@ extension ColimaModel {
         }
         let mode = tlsMode == .perSNI ? "a certificate for each name" : "one certificate"
         return
-            "\(phase), identity: \(tlsProvider?.name ?? "none"), \(mode), leaves made: \(leafCache?.mintedCount ?? 0), CA trusted: \(trust)"
+            "\(phase), identity: \(tlsIdentitiesWork ? "in memory" : "none"), \(mode), leaves made: \(leafCache?.mintedCount ?? 0), CA trusted: \(trust)"
     }
 }

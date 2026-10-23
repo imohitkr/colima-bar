@@ -13,7 +13,6 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
     private var eventLog: [String] = []
     private var selfTests: [Bool] = []
     private var selfTestSuffixLists: [[String]] = []
-    private var made: [RecordingProvider] = []
     private var settings = Settings()
     private var installHook: (@Sendable () -> Void)?
     private var uninstallHook: (@Sendable () -> Void)?
@@ -25,7 +24,7 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
         var trusted = true
         /// nil: the trust settings follow `trusted`.
         var hasSettings: Bool?
-        var providerWorks = true
+        var identitiesWork = true
     }
 
     let certificatePath = ""
@@ -59,9 +58,9 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
         get { lock.withLock { settings.hasSettings ?? settings.trusted } }
         set { lock.withLock { settings.hasSettings = newValue } }
     }
-    var providerWorks: Bool {
-        get { lock.withLock { settings.providerWorks } }
-        set { lock.withLock { settings.providerWorks = newValue } }
+    var identitiesWork: Bool {
+        get { lock.withLock { settings.identitiesWork } }
+        set { lock.withLock { settings.identitiesWork = newValue } }
     }
     /// The results of the next self-tests. When the list is empty, a self-test passes.
     func queueSelfTests(_ results: [Bool]) { lock.withLock { selfTests = results } }
@@ -69,7 +68,6 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
     func onInstall(_ body: (@Sendable () -> Void)?) { lock.withLock { installHook = body } }
     /// Runs inside `uninstall`, while the real dialog would show.
     func onUninstall(_ body: (@Sendable () -> Void)?) { lock.withLock { uninstallHook = body } }
-    var providers: [RecordingProvider] { lock.withLock { made } }
 
     private func record(_ event: String) { lock.withLock { eventLog.append(event) } }
 
@@ -110,12 +108,9 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
 
     func deleteCertificate(_ ca: LocalCA) { record("deleteCertificate") }
 
-    func makeProvider(ca: LocalCA) -> TLSIdentityProvider? {
-        record("makeProvider")
-        guard providerWorks else { return nil }
-        let provider = RecordingProvider()
-        lock.withLock { made.append(provider) }
-        return provider
+    func identitySelfTest(ca: LocalCA) -> Bool {
+        record("identityTest")
+        return identitiesWork
     }
 
     func cleanStale() { record("cleanStale") }
@@ -126,24 +121,5 @@ final class FakeDomainTLS: DomainTLSServicing, @unchecked Sendable {
             selfTestSuffixLists.append(suffixes)
             return selfTests.isEmpty ? true : selfTests.removeFirst()
         }
-    }
-
-    /// An identity provider in memory that counts its calls.
-    final class RecordingProvider: TLSIdentityProvider, @unchecked Sendable {
-        private let inner = PrivateIdentityProvider()
-        private let lock = NSLock()
-        private var removals = 0
-        private var discards = 0
-        private var unlocks = 0
-        let name = "recording"
-        var removeCount: Int { lock.withLock { removals } }
-        var discardCount: Int { lock.withLock { discards } }
-        var unlockCount: Int { lock.withLock { unlocks } }
-        func identity(certificate: SecCertificate, key: SecKey) throws -> SecIdentity {
-            try inner.identity(certificate: certificate, key: key)
-        }
-        func discard(certificate: SecCertificate, key: SecKey) { lock.withLock { discards += 1 } }
-        func unlockIfNeeded() { lock.withLock { unlocks += 1 } }
-        func removeAll() { lock.withLock { removals += 1 } }
     }
 }
