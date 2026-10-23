@@ -36,10 +36,10 @@ import Testing
     @Test func listensIsTrueForAnyServerOnTheLoopback() async throws {
         let quiet = try LoopbackListener(.quiet)
         defer { quiet.stop() }
-        #expect(await PortProbe.listens(port: quiet.port, ipv6: false, timeout: 2))
+        #expect(await PortProbe.listens(port: quiet.port, ipv6: false, timeout: 30))
         let dead = try LoopbackListener(.closesAtOnce)
         defer { dead.stop() }
-        #expect(await PortProbe.listens(port: dead.port, ipv6: false, timeout: 2))
+        #expect(await PortProbe.listens(port: dead.port, ipv6: false, timeout: 30))
     }
 
     @Test func listensIsFalseWhenNothingListens() async throws {

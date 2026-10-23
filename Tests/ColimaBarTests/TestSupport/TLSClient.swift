@@ -17,10 +17,12 @@ enum TLSClient {
     }
 
     /// Sends `send` after the handshake and reads until `until` appears, the
-    /// server closes, or `timeout` seconds pass.
+    /// server closes, or `timeout` seconds pass. The 30 s is a liveness limit: a run
+    /// returns as soon as the reply is in, and a stalled CI runner can freeze a test
+    /// process for ~18 s.
     static func exchange(
         port: Int, sni: String?, anchor: SecCertificate?, alpns: [String] = ["http/1.1"], send: String,
-        until: String, timeout: TimeInterval = 10
+        until: String, timeout: TimeInterval = 30
     ) async -> Result {
         guard let endpointPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return Result() }
         let queue = DispatchQueue(label: "test.tls-client")

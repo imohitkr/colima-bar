@@ -147,13 +147,13 @@ import Testing
     }
 
     @Test func aRealToolThatFailsGivesItsReason() async {
-        let notFound = await DiagnosticsProbe.command(["colimabar-no-such-tool-xyz"], timeout: 5)
+        let notFound = await DiagnosticsProbe.command(["colimabar-no-such-tool-xyz"], timeout: 30)
         guard case .failed(let why) = notFound else {
             Issue.record("\(notFound)")
             return
         }
         #expect(why.hasPrefix("not found"))
-        let exit = await DiagnosticsProbe.command(["/bin/sh", "-c", "echo oops >&2; exit 3"], timeout: 5)
+        let exit = await DiagnosticsProbe.command(["/bin/sh", "-c", "echo oops >&2; exit 3"], timeout: 30)
         #expect(exit == .failed("exit 3: oops"))
     }
 
