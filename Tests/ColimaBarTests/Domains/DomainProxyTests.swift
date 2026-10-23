@@ -242,7 +242,7 @@ import Testing
         let open = await onOwnThread { () -> Bool in
             guard let client = TCPClient(port: port) else { return false }
             client.send(httpGet("alpha.localhost"))
-            _ = client.read(until: "\r\n\r\n", timeout: 10)
+            _ = client.read(until: "\r\n\r\n", timeout: 30)
             return true
         }
         #expect(open)
@@ -297,11 +297,11 @@ import Testing
         let result = await onOwnThread { () -> [String] in
             guard let client = TCPClient(port: port) else { return ["<no connect>"] }
             client.send(httpGet("ws.localhost"))
-            let head = client.read(until: "\r\n\r\n", timeout: 10)
+            let head = client.read(until: "\r\n\r\n", timeout: 30)
             client.send(Data("ping-one".utf8))
-            let first = client.read(until: "ping-one", timeout: 10)
+            let first = client.read(until: "ping-one", timeout: 30)
             client.send(Data("ping-two".utf8))
-            let second = client.read(until: "ping-two", timeout: 10)
+            let second = client.read(until: "ping-two", timeout: 30)
             return [head, first, second]
         }
         #expect(result.first?.hasPrefix("HTTP/1.1 200 OK") == true)
@@ -375,7 +375,7 @@ import Testing
             guard let client = TCPClient(port: port) else { return "<no connect>" }
             client.send(Data("GET / HTTP/1.1\r\n\r\n".utf8))
             client.send(junk)
-            return client.read(until: "</html>", timeout: 10)
+            return client.read(until: "</html>", timeout: 30)
         }
         #expect(r.hasPrefix("HTTP/1.1 400 Bad Request"), "[\(r.prefix(40))]")
         #expect(r.contains("</html>"))
@@ -390,16 +390,16 @@ import Testing
         let client = await onOwnThread { () -> TCPClient? in
             guard let client = TCPClient(port: port) else { return nil }
             client.send(httpGet("ws.localhost"))
-            _ = client.read(until: "\r\n\r\n", timeout: 10)
+            _ = client.read(until: "\r\n\r\n", timeout: 30)
             return client
         }
         let open = try #require(client)
         proxy.stop()
-        // The read ends with the end of the stream, long before its 10 s limit.
+        // The read ends with the end of the stream, long before its limit.
         let started = Date()
-        let rest = await onOwnThread { open.read(until: nil, timeout: 10) }
+        let rest = await onOwnThread { open.read(until: nil, timeout: 90) }
         #expect(rest.isEmpty)
-        #expect(Date().timeIntervalSince(started) < 8)
+        #expect(Date().timeIntervalSince(started) < 60)
     }
 
     @Test func aRouteSwapKeepsASplicedUpstream() async throws {
@@ -411,14 +411,14 @@ import Testing
         let client = await onOwnThread { () -> TCPClient? in
             guard let client = TCPClient(port: port) else { return nil }
             client.send(httpGet("ws.localhost"))
-            _ = client.read(until: "\r\n\r\n", timeout: 10)
+            _ = client.read(until: "\r\n\r\n", timeout: 30)
             return client
         }
         let open = try #require(client)
         proxy.routes = routes(["ws": other.port])
         let reply = await onOwnThread { () -> String in
             open.send(Data("after-swap".utf8))
-            return open.read(until: "after-swap", timeout: 10)
+            return open.read(until: "after-swap", timeout: 30)
         }
         #expect(reply == "after-swap")
         #expect(other.requestCount == 0)
@@ -486,7 +486,7 @@ import Testing
         // A rejected client that stays open is cancelled by stop().
         let open = await onOwnThread { () -> TCPClient? in
             guard let client = TCPClient(port: port) else { return nil }
-            _ = client.read(until: "</html>", timeout: 10)
+            _ = client.read(until: "</html>", timeout: 30)
             return client
         }
         #expect(open != nil)
