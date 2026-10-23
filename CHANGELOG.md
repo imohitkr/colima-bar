@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-23
+
 ### Added
 
 - Change the VM type and mount type of a profile with a guided recreate. On the "More VM settings" page, pick the VM type (`vz` or `qemu`) and the mount type (`virtiofs`, `sshfs` or `9p`), then click **Change and Recreate…**. ColimaBar can back up the volumes and save the images first, deletes and creates the VM again (Colima keeps its Docker data disk), and restores what is missing. See [Change the VM type or mount type](docs/usage.md#change-the-vm-type-or-mount-type).
@@ -13,8 +15,14 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Changed
 
-- ColimaBar now needs macOS 15 or later. Version 0.14.0 is the last version for macOS 14. The in-app update and the Homebrew notice skip a release that needs a newer macOS than the one that runs, and say why.
+- ColimaBar now needs macOS 15 or later. Version 0.14.1 is the last version for macOS 14. The in-app update and the Homebrew notice skip a release that needs a newer macOS than the one that runs, and say why.
 - The TLS identities of HTTPS for container domains now exist in memory only. ColimaBar no longer makes a temporary keychain file, and it deletes the leftover files of older versions at launch.
+
+## [0.14.1] - 2026-10-23
+
+### Changed
+
+- The in-app update skips a release that needs a newer macOS than the one that runs, and says why. It also refuses a downloaded app that needs a newer macOS. ColimaBar 0.15.0 needs macOS 15, so on macOS 14 ColimaBar stays on 0.14.1.
 
 ## [0.14.0] - 2026-10-22
 
@@ -285,7 +293,9 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/imohitkr/colima-bar/compare/v0.14.1...v0.15.0
+[0.14.1]: https://github.com/imohitkr/colima-bar/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/imohitkr/colima-bar/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/imohitkr/colima-bar/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/imohitkr/colima-bar/compare/v0.11.0...v0.12.0
