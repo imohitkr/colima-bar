@@ -64,7 +64,8 @@ final class TCPClient: @unchecked Sendable {
     func shutdownWrite() { shutdown(fd, SHUT_WR) }
 
     /// Reads until `until` is in the text, the stream ends or `timeout` seconds pass.
-    func read(until marker: String? = nil, timeout: TimeInterval = 20) -> String {
+    /// The 30 s is a liveness limit (a stalled CI runner freezes the process for ~18 s).
+    func read(until marker: String? = nil, timeout: TimeInterval = 30) -> String {
         var out = Data()
         var buf = [UInt8](repeating: 0, count: 16384)
         let end = Date().addingTimeInterval(timeout)
@@ -90,7 +91,7 @@ final class TCPClient: @unchecked Sendable {
 /// With `halfClose`, it sends the end of the stream after the chunks.
 func tcpExchange(
     port: Int, ipv6: Bool = false, send chunks: [Data], until marker: String? = nil, halfClose: Bool = false,
-    timeout: TimeInterval = 20
+    timeout: TimeInterval = 30
 ) async -> String {
     await onOwnThread {
         guard let client = TCPClient(port: port, ipv6: ipv6) else { return "<no connect>" }

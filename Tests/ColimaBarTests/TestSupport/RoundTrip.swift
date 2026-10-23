@@ -5,10 +5,10 @@ import Foundation
 
 /// Sends raw HTTP over a unix socket and returns everything read until close
 /// or until `until` appears. The socket calls block, so they run on their own
-/// thread (see onOwnThread). A read that waits more than 20 s ends the call.
+/// thread (see onOwnThread). A read that waits more than 30 s ends the call.
 func roundTrip(_ path: String, _ request: String, until: String? = nil) async -> String {
     await onOwnThread {
-        guard let fd = UnixSocket.connect(path, timeout: 20) else { return "<no connect>" }
+        guard let fd = UnixSocket.connect(path, timeout: 30) else { return "<no connect>" }
         defer { close(fd) }
         _ = UnixSocket.writeAll(fd, Data(request.utf8))
         var out = Data()

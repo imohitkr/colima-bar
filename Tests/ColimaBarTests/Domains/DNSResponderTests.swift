@@ -15,7 +15,7 @@ import Testing
     /// Sends `packets` back to back from ONE new source port to `host`, and
     /// reads replies until `count` came or `wait` seconds passed without one.
     private func exchangeMany(
-        _ packets: [[UInt8]], port: UInt16, host: String = "127.0.0.1", count: Int? = nil, wait: Int = 2
+        _ packets: [[UInt8]], port: UInt16, host: String = "127.0.0.1", count: Int? = nil, wait: Int = 30
     ) async -> [[UInt8]] {
         await onOwnThread {
             let fd = socket(AF_INET, SOCK_DGRAM, 0)
@@ -48,7 +48,7 @@ import Testing
     }
 
     /// Sends one packet from a new source port and waits up to `wait` seconds.
-    private func exchange(_ packet: [UInt8], port: UInt16, wait: Int = 2) async -> [UInt8]? {
+    private func exchange(_ packet: [UInt8], port: UInt16, wait: Int = 30) async -> [UInt8]? {
         await exchangeMany([packet], port: port, wait: wait).first
     }
 

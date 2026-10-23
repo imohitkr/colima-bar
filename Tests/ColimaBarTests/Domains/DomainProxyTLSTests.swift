@@ -274,7 +274,7 @@ import Testing
         let answer = await onOwnThread {
             guard let client = TCPClient(port: port) else { return "no connection" }
             client.send(Data("GET / HTTP/1.1\r\nHost: a.localhost\r\n\r\n".utf8))
-            return client.read(timeout: 5)
+            return client.read(timeout: 30)
         }
         #expect(!answer.contains("HTTP/1.1 200"))
         #expect(await waitUntil { rig.proxy.sessionCount == 0 })
@@ -296,7 +296,7 @@ import Testing
         let silent = await onOwnThread {
             // Connects and says nothing: the TLS handshake never starts.
             let client = TCPClient(port: Int(port))
-            _ = client?.read(timeout: 5)
+            _ = client?.read(timeout: 30)
             return client != nil
         }
         #expect(silent)
