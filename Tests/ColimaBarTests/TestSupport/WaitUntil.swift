@@ -2,25 +2,27 @@ import Foundation
 
 /// The time that `waitUntil` still has. A sleep that wakes up late shows that
 /// the runner did not run the task, and that time does not count.
+/// It uses the continuous clock, so a change of the wall clock moves nothing.
 struct WaitBudget {
-    private(set) var end: Date
-    private let latest: Date
+    typealias Instant = ContinuousClock.Instant
+    private(set) var end: Instant
+    private let latest: Instant
 
     /// A free runner wakes a task within a few ms. Later than this is a stall.
-    static let stallThreshold: TimeInterval = 0.05
+    static let stallThreshold: Duration = .milliseconds(50)
     /// A stall can move the end out to this many times `timeout`, no further.
     static let stallAllowance = 6.0
 
-    init(start: Date = Date(), timeout: TimeInterval) {
-        end = start.addingTimeInterval(timeout)
-        latest = start.addingTimeInterval(timeout * Self.stallAllowance)
+    init(start: Instant = .now, timeout: TimeInterval) {
+        end = start + .seconds(timeout)
+        latest = start + .seconds(timeout * Self.stallAllowance)
     }
 
-    func hasTime(at now: Date = Date()) -> Bool { now < end }
+    func hasTime(at now: Instant = .now) -> Bool { now < end }
 
     /// `late` is how long the sleep took beyond its length.
-    mutating func noteWake(late: TimeInterval) {
-        if late > Self.stallThreshold { end = min(end.addingTimeInterval(late), latest) }
+    mutating func noteWake(late: Duration) {
+        if late > Self.stallThreshold { end = min(end + late, latest) }
     }
 }
 
@@ -38,13 +40,13 @@ struct WaitBudget {
 func waitUntil(
     timeout: TimeInterval = 20, isolation: isolated (any Actor)? = #isolation, _ condition: () -> Bool
 ) async -> Bool {
-    let step = 0.010
+    let step = Duration.milliseconds(10)
     var budget = WaitBudget(timeout: timeout)
     while budget.hasTime() {
         if condition() { return true }
-        let before = Date()
-        try? await Task.sleep(for: .seconds(step))
-        budget.noteWake(late: Date().timeIntervalSince(before) - step)
+        let before = ContinuousClock.now
+        try? await Task.sleep(for: step)
+        budget.noteWake(late: ContinuousClock.now - before - step)
     }
     return condition()
 }

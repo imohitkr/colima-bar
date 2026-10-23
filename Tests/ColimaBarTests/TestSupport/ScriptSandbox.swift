@@ -142,7 +142,7 @@ final class ScriptSandbox {
         let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode)
         guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         defer { close(fd) }
-        fchmod(fd, mode)
+        guard fchmod(fd, mode) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
         var bytes = Array(text.utf8)[...]
         while !bytes.isEmpty {
             let n = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
