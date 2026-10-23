@@ -116,7 +116,7 @@ import Testing
         #expect(model.recreate != nil)
         #expect(notes.texts.isEmpty)
         // The journal has no volumes: the run ends, drops the journal and shows the result.
-        await waitUntil { model.recreate == nil }
+        #expect(await waitUntil { model.recreate == nil })
         #expect(model.pendingRecreate[p] == nil)
         #expect(!notes.texts.isEmpty && !notes.texts.contains(Help.recreatePending))
     }

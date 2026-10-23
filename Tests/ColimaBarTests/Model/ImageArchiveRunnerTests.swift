@@ -142,7 +142,7 @@ import Testing
         let r = runner(d)
         let dest = folder.path + "/images.tar"
         let saving = Task { await r.save(refs: ["a:1"], to: dest, onProgress: { _ in }) }
-        await waitUntil { d.seen.count == 1 }
+        #expect(await waitUntil { d.seen.count == 1 })
         r.cancel()
         guard case .failure(let f) = await saving.value else {
             Issue.record("a cancel passed")
