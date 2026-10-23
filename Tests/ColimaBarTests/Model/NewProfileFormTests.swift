@@ -30,7 +30,7 @@ import Testing
     @Test func theFormChecksNameSizesAndRuntime() {
         var form = NewProfileForm(name: "work", cpus: 2, memGB: 4, diskGB: 60)
         #expect(form.problem(existing: ["default"]) == nil)
-        #expect(form.arguments == ["2", "4", "60", "docker"])
+        #expect(form.arguments == ["2", "4", "60", "docker", "vz", "virtiofs"])
         #expect(form.problem(existing: ["work"]) != nil)
         form.diskGB = DiskShrink.minimumGB - 1
         #expect(form.problem(existing: []) != nil)
@@ -45,5 +45,35 @@ import Testing
     @Test func choicesStayBelowTheLimitAndKeepTheCurrentValue() {
         #expect(NewProfileForm.choices([1, 2, 4, 8, 16], limit: 8, including: 3) == [1, 2, 3, 4, 8])
         #expect(NewProfileForm.choices([1, 2, 4], limit: 2, including: 12) == [1, 2, 12])
+    }
+
+    @Test func theFormHasTheVMTypeAndTheMountTypeInItsArguments() {
+        var form = NewProfileForm(name: "work", cpus: 2, memGB: 4, diskGB: 60)
+        #expect(form.vmType == "vz" && form.mountType == "virtiofs")
+        #expect(form.arguments == ["2", "4", "60", "docker", "vz", "virtiofs"])
+        form.vmType = "qemu"
+        form.mountType = "9p"
+        #expect(form.arguments == ["2", "4", "60", "docker", "qemu", "9p"])
+    }
+
+    @Test func aMountTypeThatTheVMTypeDoesNotTakeIsAProblem() {
+        var form = NewProfileForm(name: "work", cpus: 2, memGB: 4, diskGB: 60)
+        form.mountType = "9p"
+        #expect(form.problem(existing: []) == "Select a mount type that the VM type supports.")
+        form.vmType = "qemu"
+        #expect(form.problem(existing: []) == nil)
+    }
+
+    @Test func qemuNeedsQEMU() {
+        var form = NewProfileForm(name: "work", cpus: 2, memGB: 4, diskGB: 60)
+        form.vmType = "qemu"
+        form.mountType = "sshfs"
+        #expect(
+            form.problem(existing: [], qemuInstalled: false)
+                == "The qemu VM type needs QEMU. Install it with brew install qemu.")
+        #expect(form.problem(existing: [], qemuInstalled: true) == nil)
+        form.vmType = "vz"
+        form.mountType = "virtiofs"
+        #expect(form.problem(existing: [], qemuInstalled: false) == nil)
     }
 }

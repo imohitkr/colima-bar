@@ -16,6 +16,13 @@ enum TestProcess {
             || Bundle.main.bundlePath.hasSuffix(".xctest")
     }()
 
+    /// A new empty folder for files that the model writes to its cache folder.
+    static func emptyCacheDir() -> String {
+        let path = NSTemporaryDirectory() + "colimabar-test-cache-\(UUID().uuidString)"
+        try? FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        return path
+    }
+
     /// A store that holds nothing and that no other process reads. It keeps
     /// its values in memory and writes no preferences file.
     static func emptyStore() -> UserDefaults { MemoryDefaults() }

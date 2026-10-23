@@ -12,6 +12,7 @@ struct DashboardView: View {
         VStack(spacing: 0) {
             HeaderView(model: model)
             Divider()
+            if let progress = model.recreate { VMRecreateStrip(model: model, progress: progress) }
             if ui.showDoctor {
                 DoctorView(model: model, ui: ui)
             } else if ui.showVMConfig {

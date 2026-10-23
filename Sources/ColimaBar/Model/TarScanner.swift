@@ -4,8 +4,10 @@ import Foundation
 /// PAX `x` records (`path`, `linkpath`, `size`) and GNU long names. It skips
 /// the data of each entry and checks each header. It never stores file data.
 ///
-/// Every name must be `v` or start with `v/`, because the helper container
-/// mounts the volume at `/v`. A name with `..` or a leading `/`, a device, or
+/// With `Names.volume` (the default), every name must be `v` or start with
+/// `v/`, because the helper container mounts the volume at `/v`. With
+/// `Names.any` (a `docker save` archive of images), a name only must not start
+/// with `/` or have a `..` part. A name with `..` or a leading `/`, a device, or
 /// a hard link to a target outside `v/` is unsafe. A symlink target is not
 /// checked: Docker extracts in a chroot, so a link cannot leave the volume.
 /// The archive is complete only after its end marker (two zero blocks).
@@ -27,6 +29,14 @@ struct TarScanner {
         case done
     }
 
+    /// Which names the scanner accepts.
+    enum Names: Equatable, Sendable {
+        /// The archive of a volume: `v` and `v/…`.
+        case volume
+        /// The archive of images: any relative name without `..`.
+        case any
+    }
+
     /// The most bytes of one PAX or GNU record that the scanner holds.
     static let maxRecord = 1 << 20
 
@@ -40,12 +50,15 @@ struct TarScanner {
     private var pendingPath: String?
     private var pendingLink: String?
     private var pendingSize: Int64?
+    private let names: Names
+
+    init(names: Names = .volume) { self.names = names }
 
     /// True for `v`, `v/` and every path below `v/`, with no `..` part and no
     /// leading `/`.
-    static func isSafe(_ path: String) -> Bool {
+    static func isSafe(_ path: String, names: Names = .volume) -> Bool {
         guard !path.isEmpty, !path.hasPrefix("/") else { return false }
-        guard path == "v" || path.hasPrefix("v/") else { return false }
+        if names == .volume { guard path == "v" || path.hasPrefix("v/") else { return false } }
         return !path.split(separator: "/", omittingEmptySubsequences: false).contains("..")
     }
 
@@ -146,10 +159,10 @@ struct TarScanner {
         pendingPath = nil
         pendingLink = nil
         pendingSize = nil
-        guard Self.isSafe(name) else { throw Failure.unsafeEntry(name) }
+        guard Self.isSafe(name, names: names) else { throw Failure.unsafeEntry(name) }
         switch h.kind {
         case .charDevice, .blockDevice: throw Failure.unsafeEntry(name)
-        case .hardLink: guard Self.isSafe(link) else { throw Failure.unsafeEntry(name) }
+        case .hardLink: guard Self.isSafe(link, names: names) else { throw Failure.unsafeEntry(name) }
         default: break
         }
         entryCount += 1

@@ -200,6 +200,47 @@ import Testing
             + TarFixture.endMarker
         #expect(try scan(tar).isComplete)
     }
+
+    // MARK: Names of an image archive
+
+    private func scanImages(_ data: Data) throws -> TarScanner {
+        var s = TarScanner(names: .any)
+        try s.feed(data)
+        return s
+    }
+
+    @Test func anImageArchiveHasAnyRelativeName() throws {
+        let tar =
+            TarFixture.entry("blobs/", flag: 0x35) + TarFixture.entry("blobs/sha256/abc", content: "x")
+            + TarFixture.entry("manifest.json", content: "[]") + TarFixture.entry("oci-layout", content: "{}")
+            + TarFixture.endMarker
+        let s = try scanImages(tar)
+        #expect(s.isComplete && s.sawContent && s.entryCount == 4)
+    }
+
+    @Test func anImageArchiveRefusesAbsoluteNamesAndDotDot() {
+        for name in ["/etc/x", "a/../b", "../x"] {
+            #expect(throws: TarScanner.Failure.unsafeEntry(name)) {
+                _ = try scanImages(TarFixture.entry(name, content: "x") + TarFixture.endMarker)
+            }
+        }
+    }
+
+    @Test func aVolumeArchiveStillWantsTheRootFolder() {
+        #expect(throws: TarScanner.Failure.unsafeEntry("manifest.json")) {
+            var s = TarScanner()
+            try s.feed(TarFixture.entry("manifest.json") + TarFixture.endMarker)
+        }
+    }
+
+    @Test func anImageArchiveRefusesADeviceAndAnOutsideHardLink() {
+        #expect(throws: TarScanner.Failure.unsafeEntry("dev")) {
+            _ = try scanImages(TarFixture.entry("dev", flag: 0x33) + TarFixture.endMarker)
+        }
+        #expect(throws: TarScanner.Failure.unsafeEntry("link")) {
+            _ = try scanImages(TarFixture.entry("link", flag: 0x31, linkName: "/etc/passwd") + TarFixture.endMarker)
+        }
+    }
 }
 
 extension Data {

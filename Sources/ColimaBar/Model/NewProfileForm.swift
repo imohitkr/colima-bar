@@ -8,6 +8,8 @@ struct NewProfileForm: Equatable {
     var memGB: Int
     var diskGB: Int
     var runtime = "docker"
+    var vmType = "vz"
+    var mountType = "virtiofs"
 
     /// The runtimes that the form offers. Only docker has a docker socket,
     /// so only a docker profile gets auto-start and auto-stop.
@@ -35,15 +37,24 @@ struct NewProfileForm: Equatable {
     static let memoryChoices = [1, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64]
     static let diskChoices = [20, 40, 60, 100, 150, 200, 300, 500]
 
-    /// Why the form cannot create the profile, or nil.
-    func problem(existing: [String]) -> String? {
+    /// Why the form cannot create the profile, or nil. `qemuInstalled` is false
+    /// when the qemu VM type has no QEMU on this Mac.
+    func problem(existing: [String], qemuInstalled: Bool = true) -> String? {
         if let p = ProfileName.problem(newName: name, existing: existing) { return p }
         if cpus < 1 || memGB < 1 { return "Select at least 1 CPU and 1 GB of memory." }
         if diskGB < DiskShrink.minimumGB { return "Select a disk of \(DiskShrink.minimumGB) GB or more." }
         if !Self.runtimes.contains(runtime) { return "Select the docker or containerd runtime." }
+        if !VMTypeRules.isValid(vmType: vmType, mountType: mountType) {
+            return "Select a mount type that the VM type supports."
+        }
+        if vmType == "qemu", !qemuInstalled {
+            return "The qemu VM type needs QEMU. Install it with brew install qemu."
+        }
         return nil
     }
 
     /// The arguments of `colima-ctl.sh profile-create`.
-    var arguments: [String] { [String(cpus), String(memGB), String(diskGB), runtime] }
+    var arguments: [String] {
+        [String(cpus), String(memGB), String(diskGB), runtime, vmType, mountType]
+    }
 }

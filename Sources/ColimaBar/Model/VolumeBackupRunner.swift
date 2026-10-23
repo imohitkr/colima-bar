@@ -365,7 +365,7 @@ final class VolumeBackupRunner: @unchecked Sendable {
 
 /// Resumes one continuation, once, from any thread. `fire` may come before `arm`.
 /// `@unchecked Sendable`: `lock` guards both properties.
-private final class OneShot: @unchecked Sendable {
+final class OneShot: @unchecked Sendable {
     private let lock = NSLock()
     private var continuation: CheckedContinuation<Void, Never>?
     private var fired = false

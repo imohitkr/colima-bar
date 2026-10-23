@@ -18,6 +18,44 @@ enum VMSettingsCheck {
 
     static let maxDNSServers = 3
 
+    /// What the VM type check needs besides the pick.
+    struct RecreateContext {
+        var current = VMSettings.Read()
+        var qemuInstalled = true
+    }
+
+    /// The reasons that ColimaBar must not change the VM type and the mount
+    /// type to this pair, one sentence each.
+    static func recreateProblems(vmType: String, mountType: String, context: RecreateContext) -> [String] {
+        var out: [String] = []
+        let read = context.current
+        if read.typesUnreadable {
+            return ["Edit colima.yaml by hand: vmType or mountType has a form that ColimaBar cannot read."]
+        }
+        if !VMTypeRules.vmTypes.contains(vmType) {
+            out.append("Use the VM type vz or qemu.")
+        } else if !VMTypeRules.mountTypes(for: vmType).contains(mountType) {
+            if mountType == "virtiofs" {
+                out.append("virtiofs needs the vz VM type.")
+            } else if mountType == "9p" {
+                out.append("9p needs the qemu VM type.")
+            } else {
+                out.append("Select a mount type that the VM type supports.")
+            }
+        }
+        if vmType == "vz", !VMTypeRules.isHostArch(read.arch) {
+            out.append("An \(read.arch) VM needs the qemu VM type.")
+        }
+        if vmType == "qemu" {
+            if !context.qemuInstalled { out.append("The qemu VM type needs QEMU. Install it with brew install qemu.") }
+            if read.address { out.append("This VM has a reachable IP address. It needs the vz VM type.") }
+            if read.networkMode == "bridged" {
+                out.append("Bridged networking with qemu needs socket_vmnet. ColimaBar does not set it up.")
+            }
+        }
+        return out
+    }
+
     /// The reasons that ColimaBar must not write the change, one sentence each.
     static func problems(_ change: VMSettingsChange, context: Context) -> [String] {
         var out: [String] = []

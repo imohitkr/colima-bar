@@ -1,6 +1,6 @@
 import AppKit
 
-/// The New Profile form: name, CPU, memory, disk and runtime. The values
+/// The New Profile form: name, CPU, memory, disk, runtime, VM type and mount type. The values
 /// start with the ones of the selected profile. The Create button works
 /// only while the form is valid (see NewProfileForm.problem).
 @MainActor
@@ -31,6 +31,19 @@ enum NewProfileAlert {
         let runtime = NSPopUpButton(frame: .zero, pullsDown: false)
         runtime.addItems(withTitles: NewProfileForm.runtimes)
         runtime.selectItem(withTitle: defaults.runtime)
+        let vmType = NSPopUpButton(frame: .zero, pullsDown: false)
+        vmType.addItems(withTitles: VMTypeRules.vmTypes)
+        vmType.selectItem(withTitle: defaults.vmType)
+        vmType.toolTip = Help.newProfileVMType
+        let mountType = NSPopUpButton(frame: .zero, pullsDown: false)
+        mountType.toolTip = Help.newProfileMountType
+        func fillMountTypes() {
+            let items = VMTypeRules.mountTypes(for: vmType.titleOfSelectedItem ?? "vz")
+            mountType.removeAllItems()
+            mountType.addItems(withTitles: items)
+        }
+        fillMountTypes()
+        mountType.selectItem(withTitle: defaults.mountType)
         let problem = NSTextField(wrappingLabelWithString: "")
         problem.textColor = .secondaryLabelColor
         problem.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
@@ -42,6 +55,8 @@ enum NewProfileAlert {
             [NSTextField(labelWithString: "Memory:"), mem],
             [NSTextField(labelWithString: "Disk:"), disk],
             [NSTextField(labelWithString: "Runtime:"), runtime],
+            [NSTextField(labelWithString: "VM type:"), vmType],
+            [NSTextField(labelWithString: "Mount type:"), mountType],
         ])
         grid.column(at: 0).xPlacement = .trailing
         grid.rowSpacing = 8
@@ -55,18 +70,24 @@ enum NewProfileAlert {
             NewProfileForm(
                 name: name.stringValue.trimmingCharacters(in: .whitespaces),
                 cpus: cpu.selectedTag(), memGB: mem.selectedTag(), diskGB: disk.selectedTag(),
-                runtime: runtime.titleOfSelectedItem ?? "docker")
+                runtime: runtime.titleOfSelectedItem ?? "docker", vmType: vmType.titleOfSelectedItem ?? "vz",
+                mountType: mountType.titleOfSelectedItem ?? "")
         }
+        let qemu = VMTypeRules.qemuInstalled(arch: "")
         let watcher = FormWatcher {
-            let p = form().problem(existing: existing)
+            let p = form().problem(existing: existing, qemuInstalled: qemu)
             create.isEnabled = p == nil
             problem.stringValue = p ?? " "
         }
         name.delegate = watcher
-        for control in [cpu, mem, disk, runtime] {
+        for control in [cpu, mem, disk, runtime, mountType] {
             control.target = watcher
             control.action = #selector(FormWatcher.changed(_:))
         }
+        // A new VM type fills the mount types again and picks the default.
+        vmType.target = watcher
+        vmType.action = #selector(FormWatcher.changed(_:))
+        watcher.beforeUpdate = { sender in if sender === vmType { fillMountTypes() } }
         watcher.update()
         alert.accessoryView = stack
         alert.window.initialFirstResponder = name
@@ -75,7 +96,9 @@ enum NewProfileAlert {
         let answer = alert.runModal()
         name.delegate = nil
         let result = form()
-        guard answer == .alertFirstButtonReturn, result.problem(existing: existing) == nil else { return nil }
+        guard answer == .alertFirstButtonReturn, result.problem(existing: existing, qemuInstalled: qemu) == nil else {
+            return nil
+        }
         return result
     }
 
@@ -95,10 +118,15 @@ enum NewProfileAlert {
 @MainActor
 private final class FormWatcher: NSObject, NSTextFieldDelegate {
     let update: () -> Void
+    /// Runs before the check, with the control that changed.
+    var beforeUpdate: (AnyObject?) -> Void = { _ in }
 
     init(_ update: @escaping () -> Void) { self.update = update }
 
     func controlTextDidChange(_ note: Notification) { update() }
 
-    @objc func changed(_ sender: Any?) { update() }
+    @objc func changed(_ sender: Any?) {
+        beforeUpdate(sender as AnyObject?)
+        update()
+    }
 }

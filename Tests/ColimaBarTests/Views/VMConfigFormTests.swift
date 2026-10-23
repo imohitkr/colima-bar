@@ -166,4 +166,23 @@ import Testing
         #expect(!can(debug: true))
         #expect(!can(file: false))
     }
+
+    @Test func theTypePicksStartAtTheEffectiveTypesAndRevertGoesBack() {
+        var read = VMSettings.Read()
+        read.vmType = "qemu"
+        let form = loaded(read)
+        #expect(form.vmType == "qemu" && form.mountType == "sshfs")
+        form.vmType = "vz"
+        form.mountType = "virtiofs"
+        form.revert()
+        #expect(form.vmType == "qemu" && form.mountType == "sshfs")
+        #expect(loaded().vmType == "vz" && loaded().mountType == "virtiofs")
+    }
+
+    @Test func theTypePicksDoNotMakeApplyDirty() {
+        let form = loaded()
+        form.vmType = "qemu"
+        form.mountType = "9p"
+        #expect(!form.isDirty && form.change.isEmpty)
+    }
 }

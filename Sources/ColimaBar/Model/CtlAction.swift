@@ -17,6 +17,10 @@ enum CtlAction: String, CaseIterable, Sendable {
     case vmConfig = "vm-config"
     /// Deletes the VM with all its data and starts it with a smaller disk.
     case diskShrink = "disk-shrink"
+    /// Deletes the VM without `--data` and creates it again with another VM
+    /// type and mount type. Colima fixes both when it creates the VM. The
+    /// data disk stays. Args: the VM type and the mount type.
+    case vmRecreate = "vm-recreate"
     case autoStop = "auto-stop"
     /// Creates a new profile with `colima start` and starts its VM.
     case profileCreate = "profile-create"
@@ -65,8 +69,8 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// not on the next 1 s tick, so a second click can't race it.
     var isVMAction: Bool {
         switch self {
-        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .autoStop,
-            .profileCreate, .profileDelete, .repair:
+        case .start, .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .vmRecreate,
+            .autoStop, .profileCreate, .profileDelete, .repair:
             true
         default: false
         }
@@ -76,8 +80,8 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// for each container. Container alerts wait while it runs.
     var stopsContainers: Bool {
         switch self {
-        case .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .autoStop, .repair, .stopAll,
-            .profileDelete:
+        case .stop, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .diskShrink, .vmRecreate,
+            .autoStop, .repair, .stopAll, .profileDelete:
             true
         default: false
         }
@@ -87,8 +91,8 @@ enum CtlAction: String, CaseIterable, Sendable {
     /// or volume leaves its row and a second Remove can't fail.
     var changesDisk: Bool {
         switch self {
-        case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll, .diskShrink, .composePull,
-            .composeDown, .autoPrune:
+        case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll, .diskShrink, .vmRecreate,
+            .composePull, .composeDown, .autoPrune:
             true
         default: false
         }
@@ -113,7 +117,8 @@ enum CtlAction: String, CaseIterable, Sendable {
     func showsDialog(running: Bool) -> Bool {
         switch self {
         case .resources, .rosetta, .k8s, .vmConfig: running
-        case .disk, .diskShrink, .profileDelete, .repair, .containerRemove, .imageRemove, .volumeRemove, .stopAll,
+        case .disk, .diskShrink, .vmRecreate, .profileDelete, .repair, .containerRemove, .imageRemove, .volumeRemove,
+            .stopAll,
             .prune, .composeDown, .logTruncate:
             true
         default: false
@@ -134,22 +139,28 @@ enum CtlAction: String, CaseIterable, Sendable {
     func startsVM(running: Bool) -> Bool {
         switch self {
         case .start: !running
-        case .restart, .repair, .profileCreate, .diskShrink: true
+        // vmRecreate deletes the VM, and the data disk stays: the same as diskShrink.
+        case .restart, .repair, .profileCreate, .diskShrink, .vmRecreate: true
         case .resources, .rosetta, .k8s, .disk, .vmConfig: running
         default: false
         }
     }
 
     /// The script asks again after an upgrade of Colima or Lima, for a start
-    /// that the user begins in the menu. `repair` has its own dialog and a
+    /// that the user begins in the menu, and for a VM type change, which always
+    /// starts the VM. `repair` has its own dialog and a
     /// Doctor row, `diskShrink` deletes the data anyway and `profileCreate`
     /// has no record.
     func warnsAfterUpgrade(running: Bool) -> Bool {
         switch self {
-        case .start, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig: startsVM(running: running)
+        case .start, .restart, .resources, .rosetta, .k8s, .disk, .vmConfig, .vmRecreate: startsVM(running: running)
         default: false
         }
     }
+
+    /// How long ColimaBar lets the script run, in seconds. A VM type change
+    /// stops, deletes and creates the VM, so it gets 30 minutes.
+    var timeout: TimeInterval { self == .vmRecreate ? 1800 : 900 }
 
     /// The environment that ColimaBar gives the script. `expectRunning` is
     /// the VM state that `run` used for `showsDialog(running:)`. It goes in
@@ -181,6 +192,7 @@ enum CtlAction: String, CaseIterable, Sendable {
         case .stop, .autoStop: return "Stopping"
         case .vmConfig: return "Applying VM settings"
         case .diskShrink: return "Shrinking disk"
+        case .vmRecreate: return "Changing VM type"
         case .profileCreate: return "Creating"
         case .profileDelete: return "Deleting"
         case .repair: return "Repairing"

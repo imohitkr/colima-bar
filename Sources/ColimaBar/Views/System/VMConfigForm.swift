@@ -11,6 +11,10 @@ final class VMConfigForm {
     var mountInotify = false
     var mirrorsText = ""
     var insecureText = ""
+    /// The picks of the VM type section. They are not part of `change`, so
+    /// Apply ignores them: a change needs a recreate.
+    var vmType = "vz"
+    var mountType = "virtiofs"
 
     /// The values of colima.yaml that the fields started from.
     private(set) var baseline = VMSettings.Read()
@@ -62,6 +66,9 @@ final class VMConfigForm {
         mountInotify = baseline.mountInotify
         mirrorsText = baseline.registryMirrors.joined(separator: ", ")
         insecureText = baseline.insecureRegistries.joined(separator: ", ")
+        let types = VMTypeRules.effective(vmType: baseline.vmType, mountType: baseline.mountType)
+        vmType = types.vmType
+        mountType = types.mountType
     }
 
     /// The fields that you changed. A read-only field never counts.
