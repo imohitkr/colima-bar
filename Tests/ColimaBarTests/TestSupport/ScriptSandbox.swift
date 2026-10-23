@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 /// Runs the repository's shell scripts in a temporary HOME with stub tools.
@@ -71,7 +72,7 @@ final class ScriptSandbox {
         let fm = FileManager.default
         try fm.createDirectory(atPath: home, withIntermediateDirectories: true)
         try fm.createDirectory(atPath: bin, withIntermediateDirectories: true)
-        fm.createFile(atPath: log, contents: nil)
+        try Self.put("", to: log)
         try stub(
             "osascript",
             """
@@ -116,7 +117,7 @@ final class ScriptSandbox {
         // colima-ctl.sh looks for a `colima start` in progress.
         try stub("pgrep", "exit 1")
         // The owner checks of colima-ctl.sh ask `ps` about a PID.
-        fm.createFile(atPath: processTable, contents: nil)
+        try Self.put("", to: processTable)
         try stub(
             "ps",
             """
@@ -131,17 +132,35 @@ final class ScriptSandbox {
 
     deinit { try? FileManager.default.removeItem(atPath: root) }
 
+    /// Writes a file in one pass: open, write, close. `String.write(atomically:)`
+    /// writes a temporary file, syncs it to the disk and renames it. A sandbox
+    /// makes dozens of files in the body of a test, which runs on a thread of the
+    /// Swift pool, and a runner with a slow disk then holds all those threads
+    /// in fsync. Nothing reads a sandbox file while it is written, and a power
+    /// cut makes no sandbox matter, so the plain write is enough.
+    static func put(_ text: String, to path: String, mode: mode_t = 0o644) throws {
+        let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode)
+        guard fd >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(fd) }
+        guard fchmod(fd, mode) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        var bytes = Array(text.utf8)[...]
+        while !bytes.isEmpty {
+            let n = bytes.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            if n < 0, errno == EINTR { continue }
+            guard n > 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            bytes = bytes.dropFirst(n)
+        }
+    }
+
     /// Writes an executable stub tool.
     func stub(_ tool: String, _ body: String) throws {
-        let path = "\(bin)/\(tool)"
-        try ("#!/bin/bash\n" + body + "\n").write(toFile: path, atomically: true, encoding: .utf8)
-        chmod(path, 0o755)
+        try Self.put("#!/bin/bash\n" + body + "\n", to: "\(bin)/\(tool)", mode: 0o755)
     }
 
     /// Sets the processes that the stub `ps` knows. Any other PID has no process.
     func stubProcesses(_ processes: [FakeProcess]) throws {
         let text = processes.map { "\($0.pid)\t\($0.etime)\t\($0.command)" }.joined(separator: "\n") + "\n"
-        try text.write(toFile: processTable, atomically: true, encoding: .utf8)
+        try Self.put(text, to: processTable)
     }
 
     /// Sets the modification time of a file or folder to `seconds` ago.
@@ -158,7 +177,7 @@ final class ScriptSandbox {
         guard text.contains("\n" + marker) else { throw SandboxError.noPathLine(name) }
         let patched = text.replacingOccurrences(of: "\n" + marker, with: "\n" + marker + bin + ":")
         let path = "\(root)/\(name)"
-        try patched.write(toFile: path, atomically: true, encoding: .utf8)
+        try Self.put(patched, to: path)
         return path
     }
 
@@ -213,6 +232,6 @@ final class ScriptSandbox {
         let path = "\(home)/\(relative)"
         try FileManager.default.createDirectory(
             atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try text.write(toFile: path, atomically: true, encoding: .utf8)
+        try Self.put(text, to: path)
     }
 }

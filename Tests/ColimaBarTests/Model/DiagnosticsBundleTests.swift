@@ -48,7 +48,10 @@ import Testing
     }
 
     @Test func theFileStaysWithinTheSizeLimit() {
-        let big = String(repeating: "line of text\n", count: 400_000)
+        // 2.6 MB, just over the 2 MiB limit: the redactor runs over every byte, and the
+        // test holds a thread of the Swift pool for that time.
+        let big = String(repeating: "line of text\n", count: 200_000)
+        #expect(big.utf8.count > DiagnosticsBundle.maxBytes)
         let text = render([DiagnosticsSection(part: .appLog, outcome: .ok(big))])
         #expect(text.utf8.count <= DiagnosticsBundle.maxBytes)
         #expect(text.contains("[cut at"))
