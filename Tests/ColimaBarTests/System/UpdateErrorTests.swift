@@ -15,6 +15,7 @@ import Testing
     @Test func aNetworkProblemACancelAMissingCheckAndBusyWorkKeepTheInstallButton() {
         let passing: [UpdateError] = [
             .cancelled, .network("x"), .notEnoughSpace, .blocked("x"), .attestationUnavailable("x"), .other("x"),
+            .needsNewerMacOS(minimum: "15.0", current: "14.8"),
         ]
         for e in passing { #expect(!e.usesReleasePageAfter, "\(e)") }
     }

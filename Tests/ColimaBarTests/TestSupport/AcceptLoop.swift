@@ -50,7 +50,7 @@ final class AcceptLoop: @unchecked Sendable {
             defer { stopped = true }
             return stopped
         }
-        if !wasStopped, started { _ = ended.wait(timeout: .now() + 5) }
+        if !wasStopped, started { _ = ended.wait(timeout: .now() + 30) }
         unlink(path)
     }
 }

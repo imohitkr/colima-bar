@@ -6,6 +6,12 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-10-23
+
+### Changed
+
+- The in-app update skips a release that needs a newer macOS than the one that runs, and says why. It also refuses a downloaded app that needs a newer macOS. ColimaBar 0.15.0 needs macOS 15, so on macOS 14 ColimaBar stays on 0.14.1.
+
 ## [0.14.0] - 2026-10-22
 
 ### Added
@@ -275,7 +281,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/imohitkr/colima-bar/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/imohitkr/colima-bar/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/imohitkr/colima-bar/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/imohitkr/colima-bar/compare/v0.11.0...v0.12.0

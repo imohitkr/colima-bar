@@ -49,6 +49,19 @@ enum UpdatePolicy {
         return Version.isNewer(latest, than: running) ? .newer : .upToDate
     }
 
+    /// The short note for a release that needs a newer macOS than `os`, or
+    /// nil if the release has no such line or `os` is enough. Such a release
+    /// gets no offer and no notification.
+    static func macOSNote(
+        _ release: ReleaseInfo, os: OperatingSystemVersion = ProcessInfo.processInfo.operatingSystemVersion
+    ) -> String? {
+        guard let text = release.minimumMacOS, let minimum = UpdateVerifier.parseSystemVersion(text),
+            !UpdateVerifier.isAtLeast(os, minimum)
+        else { return nil }
+        let name = minimum.patchVersion > 0 || minimum.minorVersion > 0 ? text : "\(minimum.majorVersion)"
+        return "ColimaBar \(release.version) needs macOS \(name)"
+    }
+
     /// True if there is room for the download and the unpacked app, with
     /// the same amount again for a copy to another volume.
     static func hasRoom(free: Int64, zipSize: Int) -> Bool {

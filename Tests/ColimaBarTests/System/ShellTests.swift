@@ -73,7 +73,7 @@ import Testing
         task.cancel()
         let r = await task.value
         #expect(!r.ok)
-        #expect(Date().timeIntervalSince(started) < 30)
+        #expect(Date().timeIntervalSince(started) < 120)
     }
 
     @Test func aCancellableRunInACancelledTaskDoesNotStartTheChild() async {

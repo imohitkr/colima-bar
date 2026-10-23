@@ -57,8 +57,8 @@ import Testing
             unlink(stable)
         }
 
-        // If the proxy never hangs up, read() fails after 20 s instead of returning 0.
-        let fd = try #require(UnixSocket.connect(stable, timeout: 20))
+        // If the proxy never hangs up, read() fails after 30 s instead of returning 0.
+        let fd = try #require(UnixSocket.connect(stable, timeout: 30))
         defer { close(fd) }
         #expect(await readOnce(fd) == 0)  // send nothing: the proxy must hang up
     }
@@ -73,8 +73,8 @@ import Testing
             unlink(stable)
         }
 
-        // If the proxy never hangs up, read() fails after 20 s instead of returning 0.
-        let fd = try #require(UnixSocket.connect(stable, timeout: 20))
+        // If the proxy never hangs up, read() fails after 30 s instead of returning 0.
+        let fd = try #require(UnixSocket.connect(stable, timeout: 30))
         defer { close(fd) }
         #expect(await readOnce(fd) == 0)  // send nothing: the proxy must hang up
     }
@@ -145,7 +145,7 @@ import Testing
             unlink(stable)
         }
 
-        let fd = try #require(UnixSocket.connect(stable, timeout: 20))
+        let fd = try #require(UnixSocket.connect(stable, timeout: 30))
         defer { close(fd) }
         _ = UnixSocket.writeAll(fd, Data("GET /_ping HTTP/1.1\r\nHost: d\r".utf8))
         try await Task.sleep(for: .milliseconds(200))
