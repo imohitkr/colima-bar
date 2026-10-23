@@ -79,8 +79,15 @@ struct VMRecreatePlan: Equatable {
     /// The text of the confirmation alert.
     static func warning(_ i: Inputs, plan: VMRecreatePlan) -> String {
         let from = VMTypeRules.effective(vmType: i.current.vmType, mountType: i.current.mountType)
+        // Name only what changes: "from vz to vz" reads like a mistake.
+        var changes: [String] = []
+        if from.vmType != i.target.vmType { changes.append("the VM type from \(from.vmType) to \(i.target.vmType)") }
+        if from.mountType != i.target.mountType {
+            changes.append("the mount type from \(from.mountType) to \(i.target.mountType)")
+        }
+        let what = changes.isEmpty ? "the VM" : changes.joined(separator: " and ")
         var lines = [
-            "ColimaBar changes the VM type from \(from.vmType) to \(i.target.vmType) and the mount type from \(from.mountType) to \(i.target.mountType). Colima cannot change them on an existing VM. Thus Colima deletes the VM and creates it again with the same other settings."
+            "ColimaBar changes \(what). Colima cannot change this on an existing VM. Thus Colima deletes the VM and creates it again with the same other settings."
         ]
         if i.dataDiskKept {
             lines.append(

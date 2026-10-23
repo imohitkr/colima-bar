@@ -120,6 +120,16 @@ import Testing
         #expect(!text.contains("deleted for good"))
     }
 
+    @Test func theWarningNamesOnlyTheTypeThatChanges() {
+        var i = inputs(target: ("vz", "sshfs"))
+        var text = VMRecreatePlan.warning(i, plan: .make(i))
+        #expect(text.hasPrefix("ColimaBar changes the mount type from virtiofs to sshfs. Colima cannot change"))
+        #expect(!text.contains("the VM type from"))
+        i = inputs(target: ("qemu", "virtiofs"))
+        text = VMRecreatePlan.warning(i, plan: .make(i))
+        #expect(text.hasPrefix("ColimaBar changes the VM type from vz to qemu. Colima cannot change"))
+    }
+
     @Test func theWarningSaysThatDataIsLostWithoutADataDisk() {
         let i = inputs(kept: false, kubernetes: true)
         let text = VMRecreatePlan.warning(i, plan: .make(i))
@@ -157,11 +167,11 @@ import Testing
     }
 
     @Test func theWarningStartsFromTheDefaultsOfAFileWithNoTypes() {
-        var i = inputs()
+        // A qemu file with no mount type uses sshfs.
+        var i = inputs(target: ("qemu", "9p"))
         i.current.vmType = "qemu"
         #expect(
-            VMRecreatePlan.warning(i, plan: .make(i)).contains(
-                "from qemu to qemu and the mount type from sshfs to sshfs."))
+            VMRecreatePlan.warning(i, plan: .make(i)).hasPrefix("ColimaBar changes the mount type from sshfs to 9p."))
     }
 
     // MARK: Answer
