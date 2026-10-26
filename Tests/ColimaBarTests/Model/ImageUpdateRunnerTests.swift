@@ -180,11 +180,42 @@ import Testing
         #expect(result == .failed(.other, message: "the pull ended early"))
     }
 
-    @Test func anErrorStatusIsAFailure() async throws {
-        let (daemon, runner) = try daemon { _ in .init(status: 404, chunks: [line(#"{"message":"gone"}"#)]) }
+    @Test func anErrorStatusWithoutAMessageIsAFailureWithTheStatus() async throws {
+        let (daemon, runner) = try daemon { _ in .init(status: 404, body: Data("not json".utf8)) }
         defer { daemon.stop() }
         let result = await runner.pull(try #require(ImageRef.parse("o/a")), platform: nil)
         #expect(result == .failed(.notFound, message: "HTTP 404"))
+    }
+
+    @Test func theMessageOfAnErrorStatusDecidesTheFailureKind() async throws {
+        let message = "pull access denied for o/a, repository does not exist or may require 'docker login'"
+        let (daemon, runner) = try daemon { _ in
+            .init(status: 404, body: Data(#"{"message":"\#(message)"}"#.utf8))
+        }
+        defer { daemon.stop() }
+        let result = await runner.pull(try #require(ImageRef.parse("o/a")), platform: nil)
+        #expect(result == .failed(.signInNeeded, message: message))
+
+        let (limited, runner2) = try self.daemon { _ in
+            .init(status: 429, chunks: [line(#"{"message":"toomanyrequests: You have reached your pull rate limit"}"#)])
+        }
+        defer { limited.stop() }
+        let result2 = await runner2.pull(try #require(ImageRef.parse("o/a")), platform: nil)
+        #expect(result2 == .failed(.rateLimited, message: "toomanyrequests: You have reached your pull rate limit"))
+    }
+
+    @Test func aLongErrorBodyIsCutAtFourKilobytes() async throws {
+        let filler = String(repeating: "x", count: 20_000)
+        let (daemon, _) = try daemon { _ in .init(status: 500, body: Data(#"{"message":"\#(filler)"}"#.utf8)) }
+        defer { daemon.stop() }
+        let ended = Box<StreamHandle?>(nil)
+        _ = DockerAPI(socketPath: daemon.path).stream("/images/create?fromImage=a", method: "POST", onLine: { _ in }) {
+            handle in
+            ended.mutate { $0 = handle }
+        }
+        #expect(await waitUntil { ended.value != nil })
+        #expect(ended.value?.status == 500)
+        #expect(ended.value?.errorBody?.count == DockerAPI.errorBodyLimit)
     }
 
     @Test func noDaemonIsUnreachable() async throws {

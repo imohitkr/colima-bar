@@ -162,7 +162,9 @@ struct ImageUpdateRunner: Sendable {
         }
 
         /// The daemon closed the stream.
-        func ended(status: Int?) {
+        /// `body` is the start of the body of a non-2xx reply. It holds the
+        /// message of the daemon.
+        func ended(status: Int?, body: Data?) {
             let (message, complete) = lock.withLock { (error, sawStatus) }
             guard let status else {
                 finish(.failed(.unreachable, message: "the daemon does not answer"))
@@ -171,7 +173,10 @@ struct ImageUpdateRunner: Sendable {
             if let message {
                 finish(.failed(ImageUpdateCheck.classify(status: status, message: message), message: message))
             } else if !(200..<300).contains(status) {
-                finish(.failed(ImageUpdateCheck.classify(status: status, message: nil), message: "HTTP \(status)"))
+                let said = body.flatMap { try? JSONDecoder().decode(APIMessage.self, from: $0) }?.message
+                finish(
+                    .failed(
+                        ImageUpdateCheck.classify(status: status, message: said), message: said ?? "HTTP \(status)"))
             } else if complete {
                 finish(.pulled)
             } else {
@@ -202,7 +207,7 @@ struct ImageUpdateRunner: Sendable {
                 pull.install(c)
                 let handle = api.stream(
                     "/images/create?\(query)", method: "POST", onLine: { pull.read($0) },
-                    onEnd: { pull.ended(status: $0.status) })
+                    onEnd: { pull.ended(status: $0.status, body: $0.errorBody) })
                 pull.attach(handle)
             }
         } onCancel: {
