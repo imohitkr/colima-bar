@@ -89,6 +89,26 @@ final class ColimaModel {
     /// shows them. The selected profile uses `busy`.
     private(set) var profileActions: [String: String] = [:]
     private(set) var routing = Routing.Status()
+    /// The docker contexts that exist and the current one (`ColimaModel+Contexts`).
+    private(set) var dockerContexts: [DockerContextItem] = []
+    private(set) var dockerContextCurrent = ""
+    /// kubectl is on the search path.
+    private(set) var kubectlAvailable = false
+    /// The kubeconfig as `kubectl config view` shows it, or nil if it cannot be read.
+    private(set) var kubeConfig: KubeConfig?
+    /// The last read of the kubeconfig failed. False while the first read is pending.
+    private(set) var kubeReadFailed = false
+    /// The namespaces that a Colima cluster listed, by context.
+    private(set) var kubeNamespaces: [String: [String]] = [:]
+    /// Show the kubectl context and namespace switchers. Off by default. It is
+    /// saved in `domainsStore`, like the other settings that a test must not persist.
+    var kubectlSwitcher = false {
+        didSet {
+            guard kubectlSwitcher != oldValue else { return }
+            // A debug run never writes a setting.
+            if !isDebug { domainsStore.set(kubectlSwitcher, forKey: Defaults.Key.kubectlSwitcher.rawValue) }
+        }
+    }
     /// The last Doctor run (see ColimaModel+Doctor), or nil before the first.
     private(set) var doctorReport: DoctorReport?
     /// A Doctor check or fix runs now.
@@ -385,6 +405,17 @@ final class ColimaModel {
     @ObservationIgnored private var lastPing = Date()
     @ObservationIgnored private var dirWatcher: ColimaDirWatcher?
     @ObservationIgnored private(set) var isDebug = false
+    /// How the context switchers run docker and kubectl. A test passes a fake.
+    @ObservationIgnored var contextRunner: ContextRunner.Run = ContextRunner.system
+    /// Finds kubectl. A test process finds none unless the test says so.
+    @ObservationIgnored var kubectlLocator: () -> String? = { TestProcess.isRunning ? nil : Shell.which("kubectl") }
+    /// The docker config folder that the context list reads. A test process gets an empty one.
+    @ObservationIgnored var dockerConfigDir = DockerContextStore.configDir(
+        env: ProcessInfo.processInfo.environment, home: Paths.home)
+    /// When each Colima cluster last listed its namespaces.
+    @ObservationIgnored var kubeNamespaceAt: [String: Date] = [:]
+    /// A debug run loaded COLIMABAR_CONTEXTS_FIXTURE: no refresh replaces it.
+    @ObservationIgnored var contextsFixtureLoaded = false
     /// The proxy of container domains. It listens only while the setting is on.
     @ObservationIgnored let domainProxy: any DomainProxying
     /// Where the setting is saved. A test process gets its own empty store, so no test reads or writes the real one.
@@ -572,6 +603,8 @@ final class ColimaModel {
         self.domainSuffix = (domainSuffix ?? store.string(forKey: Defaults.Key.domainSuffix.rawValue))
             .flatMap(DomainSuffix.valid)
         imageUpdateCheck = (store.object(forKey: Defaults.Key.imageUpdateCheck.rawValue) as? Bool) ?? false
+        kubectlSwitcher = (store.object(forKey: Defaults.Key.kubectlSwitcher.rawValue) as? Bool) ?? false
+        if inTest { dockerConfigDir = NSTemporaryDirectory() + "colimabar-no-docker-\(getpid())" }
         let (cache, cacheProblem) = ImageUpdateCache.decodeChecked(
             store.string(forKey: Defaults.Key.imageUpdateCache.rawValue))
         imageUpdateCache = cache
@@ -607,8 +640,9 @@ final class ColimaModel {
             profileProxies.setListening(autoStart)
             configStamp = Routing.configStamp()
             Task {
-                await Routing.apply(selected: profile)
+                await Routing.apply(selected: profile, choice: dockerContextChoice)
                 routing = await Routing.status()
+                refreshDockerContexts()
             }
             dirWatcher = makeDirWatcher()
             // A debug run changes nothing, so it does not observe system sleep.
@@ -631,6 +665,8 @@ final class ColimaModel {
             if domainsEnabled, domainSuffix != nil { Task { await startDNSResponder() } }
         } else {
             setDomainStatus(DomainStatus(phase: .debugRun))
+            // The docker list only reads files, so a debug run shows it too.
+            refreshDockerContexts()
         }
         Task { await refreshAll() }
         lastPing = Date()
@@ -737,7 +773,10 @@ final class ColimaModel {
         if Paths.colimaFoldersMoved { await refreshStatus() }
         let stamp = Routing.configStamp()
         if Self.contextCheckDue(stamp: stamp, lastStamp: configStamp, retryAt: contextRetryAt, now: Date()) {
-            if stamp != configStamp { contextFailures = 0 }
+            if stamp != configStamp {
+                contextFailures = 0
+                refreshDockerContexts()
+            }
             configStamp = stamp
             contextRetryAt = nil
             checkDockerContext()
@@ -1348,7 +1387,7 @@ final class ColimaModel {
         Task {
             repeat {
                 contextCheckAgain = false
-                if await Routing.restoreContext(selected: profile) {
+                if await Routing.restoreContext(selected: profile, choice: dockerContextChoice) {
                     contextFailures = 0
                 } else {
                     contextFailures += 1
@@ -1356,6 +1395,7 @@ final class ColimaModel {
                 }
             } while contextCheckAgain
             isCheckingContext = false
+            refreshDockerContexts()
             if visibleCount > 0, dashboardTab == .system { routing = await Routing.status() }
         }
     }
@@ -1779,6 +1819,7 @@ final class ColimaModel {
     /// colima.yaml is a cheap read, so an edit outside the app shows at once.
     private func becameVisible() {
         reloadConfig()
+        refreshDockerContexts()
         Task {
             if Date().timeIntervalSince(lastColima) >= Self.statusMaxAgeOnOpen { await refreshStatus() }
             if state == .running {
@@ -1787,6 +1828,7 @@ final class ColimaModel {
             }
             if dashboardTab == .system { routing = await Routing.status() }
         }
+        Task { await refreshKube() }
         checkPortsOnOpen()
         syncStatStreams()
     }
@@ -2042,6 +2084,21 @@ final class ColimaModel {
     func setDNSHealth(_ all: [String: DNSHealth.Report]) { set(\.dnsHealth, all) }
     func setNetworkChecking(_ all: Set<String>) { set(\.networkChecking, all) }
     func setNetworkCheckErrors(_ all: [String: String]) { set(\.networkCheckErrors, all) }
+
+    /// `ColimaModel+Contexts` stores its state through these.
+    func setDockerContexts(_ items: [DockerContextItem], current: String) {
+        set(\.dockerContexts, items)
+        set(\.dockerContextCurrent, current)
+    }
+    func setKube(
+        available: Bool? = nil, config: KubeConfig?? = nil, readFailed: Bool? = nil,
+        namespaces: [String: [String]]? = nil
+    ) {
+        if let available { set(\.kubectlAvailable, available) }
+        if let readFailed { set(\.kubeReadFailed, readFailed) }
+        if let config { set(\.kubeConfig, config) }
+        if let namespaces { set(\.kubeNamespaces, namespaces) }
+    }
 
     /// `ColimaModel+Compose` stores its state through these two.
     func setComposeBusy(_ all: Set<String>) { set(\.composeBusy, all) }

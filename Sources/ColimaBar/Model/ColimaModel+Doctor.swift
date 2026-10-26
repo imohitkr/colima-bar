@@ -128,6 +128,8 @@ extension ColimaModel {
         switch fix {
         case .useColimabar:
             if await Routing.useOwnContext() {
+                // The user clicked the fix, so no earlier pick stays.
+                dockerContextChoice = nil
                 notify("Doctor switched the docker context to colimabar.")
             } else {
                 doctorLog.error("Doctor: use colimabar failed")
@@ -135,7 +137,7 @@ extension ColimaModel {
             }
             await refreshRouting()
         case .setRoutes:
-            let applied = await Routing.apply(selected: profile)
+            let applied = await Routing.apply(selected: profile, choice: dockerContextChoice)
             if applied.any {
                 notify("Doctor set the routes for apps and testcontainers.")
             } else {

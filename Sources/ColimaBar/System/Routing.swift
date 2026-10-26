@@ -7,7 +7,8 @@ import os
 ///
 /// When ColimaBar isn't running, the stable path is a symlink to Colima's
 /// socket. Colima switches the docker context on start and deletes it on
-/// stop, so ColimaBar moves the context back (`restoreContext`).
+/// stop, so ColimaBar moves the context back (`restoreContext`). It moves
+/// back to the context that the user picked in ColimaBar (`choice`), if any.
 @MainActor
 enum Routing {
     private static let log = Logger(category: "routing")
@@ -31,9 +32,9 @@ enum Routing {
     /// custom testcontainers docker.host).
     /// Returns what it changed.
     @discardableResult
-    static func apply(selected: String) async -> Applied {
+    static func apply(selected: String, choice: String?) async -> Applied {
         var applied = Applied()
-        let r = await ensureContext(selected: selected, launch: true)
+        let r = await ensureContext(selected: selected, launch: true, choice: choice)
         if r.ok || r.ours {
             applied.launchd = await applyLaunchd(contextIsOurs: r.ours)
         } else {
@@ -166,7 +167,7 @@ enum Routing {
     /// ColimaBar context is current, it also sets the launchd and
     /// testcontainers routes, in case a first try missed them. Returns false
     /// when a step failed (the caller tries again later).
-    static func restoreContext(selected: String) async -> Bool {
+    static func restoreContext(selected: String, choice: String?) async -> Bool {
         guard let cur = currentContext() else {
             log.error("cannot read the docker config file")
             return false
@@ -174,7 +175,7 @@ enum Routing {
         var ours = isOurs(cur)
         var ok = true
         if !cur.isEmpty, cur != contextName, cur != "default" {
-            let r = await ensureContext(selected: selected, launch: false)
+            let r = await ensureContext(selected: selected, launch: false, choice: choice)
             (ours, ok) = (r.ours, r.ok)
         }
         if ours {
@@ -196,25 +197,37 @@ enum Routing {
     /// The context to switch to, or nil to leave the current one. `existing`
     /// has only contexts that exist (see `existingContexts`).
     ///
+    /// `choice` is the context that the user picked in ColimaBar, or nil.
+    ///
     /// - `colimabar` stays.
     /// - The default context (empty or `default`) moves to `colimabar` only
-    ///   at launch. Later, the user chose it.
-    /// - A Colima context moves to the ColimaBar context of its profile
-    ///   (`colimabar` for the selected profile, else `colimabar-PROFILE`).
-    ///   If that context is missing, an existing Colima context stays and a
-    ///   missing one moves to `colimabar`.
+    ///   at launch, and not when the user picked `default`. Later, the user
+    ///   chose it.
+    /// - A Colima context means that Colima just started. It moves to the
+    ///   choice, if that context exists. Else it moves to the ColimaBar
+    ///   context of its profile (`colimabar` for the selected profile, else
+    ///   `colimabar-PROFILE`). If that context is missing, an existing
+    ///   Colima context stays and a missing one moves to `colimabar`.
     /// - Any other context stays if it exists. If it is missing, it moves to
     ///   `colimabar`.
     nonisolated static func contextTarget(
-        current: String, existing: Set<String>, selected: String, launch: Bool
+        current: String, existing: Set<String>, selected: String, launch: Bool, choice: String?
     ) -> String? {
         if current == contextName { return nil }
-        if current.isEmpty || current == "default" { return launch ? contextName : nil }
+        if current.isEmpty || current == "default" { return launch && choice != "default" ? contextName : nil }
         if let profile = colimaProfile(current) {
+            if let choice, colimaProfile(choice) == nil, !isOurs(choice), existing.contains(choice) { return choice }
             let target = profile == selected ? contextName : ProfileContexts.name(profile)
             if existing.contains(target) { return target }
         }
         return existing.contains(current) ? nil : contextName
+    }
+
+    /// The pick to keep after a check: nil when a ColimaBar context is
+    /// current (the user switched back) or when the picked context is gone.
+    nonisolated static func keptChoice(_ choice: String?, current: String, existing: Set<String>) -> String? {
+        guard let choice, !isOurs(current), existing.contains(choice) else { return nil }
+        return choice
     }
 
     /// Creates the "colimabar" context if `names` lacks it, and adds it to
@@ -259,7 +272,9 @@ enum Routing {
     /// Creates the "colimabar" context if it is missing and switches to the
     /// context that `contextTarget` gives. `ours`: a ColimaBar context is
     /// current afterwards. `ok`: no step failed.
-    private static func ensureContext(selected: String, launch: Bool) async -> (ours: Bool, ok: Bool) {
+    private static func ensureContext(
+        selected: String, launch: Bool, choice: String?
+    ) async -> (ours: Bool, ok: Bool) {
         let ls = await Shell.run(["docker", "context", "ls", "--format", listFormat], timeout: 10)
         guard ls.ok else {
             log.error("docker context ls failed (exit \(ls.status))")
@@ -272,7 +287,8 @@ enum Routing {
         var names = existingContexts(listing: ls.out)
         var ok = await createOwnContext(ifMissingFrom: &names)
         var now = cur
-        if let target = contextTarget(current: cur, existing: names, selected: selected, launch: launch),
+        if let target = contextTarget(
+            current: cur, existing: names, selected: selected, launch: launch, choice: choice),
             names.contains(target)
         {
             let used = await Shell.run(["docker", "context", "use", target], timeout: 10)
