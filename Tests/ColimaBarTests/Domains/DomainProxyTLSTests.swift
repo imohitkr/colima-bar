@@ -134,7 +134,8 @@ import Testing
         let rig = try await Rig()
         defer { rig.close() }
         rig.proxy.routes = routes([:])
-        #expect(await DomainTLSServer.selfTest(port: UInt16(rig.port), ca: rig.ca))
+        // A pass returns at once; the long timeout only absorbs a loaded CI runner.
+        #expect(await DomainTLSServer.selfTest(port: UInt16(rig.port), ca: rig.ca, timeout: 30))
         let other = try LocalCA.create(permitted: ["localhost"])
         #expect(await !DomainTLSServer.selfTest(port: UInt16(rig.port), ca: other, timeout: 3))
         // Nothing listens on this port.
@@ -146,7 +147,8 @@ import Testing
         let rig = try await Rig()
         defer { rig.close() }
         rig.proxy.routes = DomainRoutes.build([], suffixes: ["localhost"], profile: "default", vmRunning: false)
-        #expect(await DomainTLSServer.selfTest(port: UInt16(rig.port), ca: rig.ca))
+        // A pass returns at once; the long timeout only absorbs a loaded CI runner.
+        #expect(await DomainTLSServer.selfTest(port: UInt16(rig.port), ca: rig.ca, timeout: 30))
     }
 
     @Test func theConnectionNegotiatesHTTP11EvenIfTheClientOffersHTTP2() async throws {
