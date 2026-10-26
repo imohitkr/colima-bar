@@ -26,10 +26,12 @@ struct Container: Identifiable, Equatable {
     let health: String?
     /// The folder and files of the Compose project, if the labels are valid.
     let compose: ComposeProject?
+    /// The ID of the image that the container runs, or "" when the daemon gave none.
+    let imageID: String
 
     init(
         id: String, name: String, image: String, state: String, status: String, ports: [Int], project: String?,
-        compose: ComposeProject? = nil
+        compose: ComposeProject? = nil, imageID: String = ""
     ) {
         self.id = id
         self.name = name
@@ -39,6 +41,7 @@ struct Container: Identifiable, Equatable {
         self.ports = ports
         self.project = project
         self.compose = compose
+        self.imageID = imageID
         health = Self.health(status: status)
     }
 

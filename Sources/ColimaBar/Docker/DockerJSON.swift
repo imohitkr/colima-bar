@@ -62,6 +62,9 @@ struct APIContainer: Decodable {
     let Id: String
     let Names: [String]
     let Image: String
+    /// The ID of the image that the container runs, `sha256:…`. The `Image`
+    /// field turns into this ID once its tag points at another image.
+    let ImageID: String?
     let State: String
     let Status: String
     let Ports: [Port]?
@@ -257,7 +260,19 @@ struct APIContainerDetail: Decodable {
     let NetworkSettings: Net?
 }
 
-/// `GET /images/{id}/json`, the part that gives the digests.
+/// `GET /images/{id}/json`, the part that gives the digests, the ID and the platform.
 struct APIImageDetail: Decodable {
+    let Id: String?
     let RepoDigests: [String]?
+    let Architecture: String?
+    let Variant: String?
+    let Os: String?
+}
+
+/// `GET /distribution/{ref}/json`: what the registry has for the reference.
+struct APIDistribution: Decodable {
+    struct Descriptor: Decodable {
+        let digest: String?
+    }
+    let Descriptor: Descriptor?
 }
