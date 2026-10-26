@@ -88,7 +88,7 @@ struct ContainerRow: View {
             }
             Menu {
                 Button("Inspect…") { ui.inspectID = c.id }
-                if model.imageUpdates.containers[c.id]?.isUpdate == true {
+                if model.imageUpdates.badge(for: c)?.isUpdate == true {
                     Button("Pull New Image") { model.pullNewImage(containerID: c.id) }
                         .disabled(!model.canPullImages || !model.imageUpdates.pulling.isEmpty)
                         .hint(model.isDebug ? Help.imageUpdateDebug : Help.pullNewImage)

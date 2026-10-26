@@ -216,7 +216,7 @@ Image updates are off by default. See [Image updates](usage.md#image-updates). I
 
 - The VM must run. ColimaBar never starts the VM for a check, and a debug run makes no registry call.
 - A run checks each image once in 24 hours. **Check Now** works once in 5 minutes.
-- Docker Hub limits anonymous requests. After a rate limit answer, ColimaBar waits 6 hours for Docker Hub, and a run checks at most 3 Docker Hub images. Wait, or sign in to Docker Hub in the VM with `docker login`.
+- Docker Hub limits anonymous requests. ColimaBar makes at most 3 Docker Hub calls in one hour, for all profiles together. After a rate limit answer, it waits 6 hours for Docker Hub. ColimaBar sends no sign-in, so a `docker login` does not change this limit.
 - A private registry needs a sign-in. ColimaBar sends no credentials of its own, so it shows no badge for an image that the daemon of the VM cannot read. Hover over the line under the setting to see how many images need a sign-in.
 - ColimaBar skips an image that you built or loaded on the VM, an image that a digest names, and an image that the registry does not know.
 - If the Mac is offline, ColimaBar tries again after 1 hour.

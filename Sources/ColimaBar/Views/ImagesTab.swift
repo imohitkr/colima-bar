@@ -16,7 +16,8 @@ struct ImagesTab: View {
                 if model.imageUpdateCheck {
                     Button("Check for Updates") { model.checkImagesNow() }.buttonStyle(.borderless).font(.caption)
                         .disabled(!model.canCheckImagesNow)
-                        .hint(model.isDebug ? Help.imageUpdateDebug : Help.checkImagesNow)
+                        .hint(
+                            model.isDebug ? Help.imageUpdateDebug : model.checkNowBlockedReason ?? Help.checkImagesNow)
                 }
                 Button("Remove dangling") { model.run(.prune, "dangling") }.buttonStyle(.borderless).font(.caption)
                     .hint(Help.removeDangling)
@@ -38,7 +39,7 @@ struct ImagesTab: View {
                     Spacer(minLength: 4)
                     if !i.dangling, model.imageUpdates.images[ImageRef.parse(i.ref)?.normalized ?? ""]?.isUpdate == true
                     {
-                        ImageUpdateBadge(status: .update(digest: ""))
+                        ImageUpdateBadge(status: .update(digest: ""), inImagesTab: true)
                     }
                     if i.containers > 0 {
                         Text("in use").font(.system(size: 9, weight: .medium))
@@ -51,7 +52,11 @@ struct ImagesTab: View {
                         .hint(Help.imageSize)
                     Menu {
                         Button("Copy reference") { Pasteboard.copy(i.ref) }
-                        if !i.dangling { Button("Pull latest of this tag") { model.run(.imagePull, i.ref) } }
+                        if !i.dangling {
+                            Button("Pull latest of this tag") { model.run(.imagePull, i.ref) }
+                                .disabled(model.isDebug)
+                                .hint(model.isDebug ? Help.imageUpdateDebug : Help.pullLatestOfTag)
+                        }
                         Divider()
                         Button("Remove…") { model.run(.imageRemove, i.ref) }
                     } label: {

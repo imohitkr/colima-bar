@@ -22,7 +22,7 @@ struct ImageUpdatesStrip: View {
             }
             Button("Check Now") { model.checkImagesNow() }
                 .controlSize(.mini).disabled(!model.canCheckImagesNow)
-                .hint(model.isDebug ? Help.imageUpdateDebug : Help.checkImagesNow)
+                .hint(model.isDebug ? Help.imageUpdateDebug : model.checkNowBlockedReason ?? Help.checkImagesNow)
         }
         .padding(.vertical, 3).padding(.horizontal, 6)
         .background(.quaternary.opacity(0.25), in: RoundedRectangle(cornerRadius: 6))

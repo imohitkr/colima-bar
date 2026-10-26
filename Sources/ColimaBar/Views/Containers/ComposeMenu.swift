@@ -37,7 +37,8 @@ struct ComposeMenu: View {
                     .disabled(reason != nil).hint(Help.composePull)
                 if model.projectNeedsUpdate(project.name) {
                     Button("Update and Recreate") { model.updateAndRecreate(project: project) }
-                        .disabled(reason != nil || !model.canPullImages).hint(Help.composeUpdateRecreate)
+                        .disabled(reason != nil || !model.canPullImages)
+                        .hint(model.isDebug ? Help.imageUpdateDebug : Help.composeUpdateRecreate)
                 }
                 Button("Up (Detached)") { model.compose(.up, project: project) }
                     .disabled(reason != nil).hint(Help.composeUp)

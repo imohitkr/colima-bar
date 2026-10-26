@@ -367,6 +367,11 @@ final class ColimaModel {
     @ObservationIgnored var imageScanAgain = false
     /// A registry check runs now.
     @ObservationIgnored var imageChecking = false
+    /// Counts the resets of the check (setting change, profile switch). Only
+    /// the run with the current value may end the check or rebuild the results.
+    @ObservationIgnored var imageCheckToken = 0
+    /// The task of the registry check that runs now. Tests wait for it.
+    @ObservationIgnored var imageCheckTask: Task<Void, Never>?
     /// When the last registry check of each profile started, in this launch.
     @ObservationIgnored var imageRunAt: [String: Date] = [:]
     @ObservationIgnored var imageCheckNowAt: Date?
@@ -567,7 +572,12 @@ final class ColimaModel {
         self.domainSuffix = (domainSuffix ?? store.string(forKey: Defaults.Key.domainSuffix.rawValue))
             .flatMap(DomainSuffix.valid)
         imageUpdateCheck = (store.object(forKey: Defaults.Key.imageUpdateCheck.rawValue) as? Bool) ?? false
-        imageUpdateCache = ImageUpdateCache.decode(store.string(forKey: Defaults.Key.imageUpdateCache.rawValue))
+        let (cache, cacheProblem) = ImageUpdateCache.decodeChecked(
+            store.string(forKey: Defaults.Key.imageUpdateCache.rawValue))
+        imageUpdateCache = cache
+        if let cacheProblem {
+            log.error("image update check: \(cacheProblem, privacy: .public)")
+        }
         let p = named ?? Defaults.string(.profile) ?? "default"
         profile = p
         isDebug = readOnly
@@ -996,13 +1006,19 @@ final class ColimaModel {
         Task { await refreshAll() }
     }
 
+    /// The part of a profile switch that makes the answers of the old socket
+    /// late: tasks that started before it then drop their results.
+    func dropDataOfOldSocket() {
+        generation += 1
+        clearVMData(because: .profileChanged)
+    }
+
     /// Points the API client, the saved logs and the stable proxy at the
     /// socket of the selected profile, and forgets the data of the old socket.
     private func retargetSocket() {
-        generation += 1
         alertGate = ContainerAlertGate()
         deferredUnhealthy = [:]
-        clearVMData(because: .profileChanged)
+        dropDataOfOldSocket()
         set(\.diskImage, nil)
         for h in statStreams.values { h.cancel() }
         statStreams = [:]
@@ -1393,24 +1409,43 @@ final class ColimaModel {
         return true
     }
 
+    /// True if no state of the VM blocks a call to the registry or a pull
+    /// now. `checking` is true for a registry check: only one runs at a time.
+    func imageCallsAllowed(checking: Bool) -> Bool {
+        ImageUpdateSchedule.mayRun(
+            enabled: imageUpdateCheck, isDebug: isDebug, updateRestarting: updateRestarting,
+            running: state == .running, hasDockerSocket: hasDockerSocket, busyMarker: busy,
+            actionsInFlight: busyActions(profile), waking: wakes[profile] != nil,
+            transferring: volumeTransfer != nil, proxyTransfers: selectedTransfers(), trimming: isTrimming,
+            recreating: recreate != nil, checking: checking)
+    }
+
     /// The references that a registry check of the selected profile starts
     /// with now, or nil. The check then holds the profile back for an hour.
     /// `force` is Check Now: it skips the hourly gap and the 24 hours of each
-    /// reference.
+    /// reference, but not the Docker Hub budget. The claim writes the Docker Hub
+    /// calls of the run into the budget.
     func claimImageUpdates(now: Date, force: Bool = false) -> [ImageRef]? {
         guard
-            ImageUpdateSchedule.mayRun(
-                enabled: imageUpdateCheck, isDebug: isDebug, updateRestarting: updateRestarting,
-                running: state == .running, hasDockerSocket: hasDockerSocket, busyMarker: busy,
-                actionsInFlight: busyActions(profile), waking: wakes[profile] != nil,
-                transferring: volumeTransfer != nil, proxyTransfers: selectedTransfers(), trimming: isTrimming,
-                recreating: recreate != nil, checking: imageChecking),
+            imageCallsAllowed(checking: imageChecking),
             force || ImageUpdateSchedule.isDue(lastRun: imageRunAt[profile], now: now)
         else { return nil }
+        let checkable = imageUpdates.checkable
+        adoptFreshAnswers(for: checkable, now: now)
         let refs = ImageUpdateSchedule.plan(
-            refs: imageUpdates.checkable, entries: imageUpdateCache.entries(of: profile), now: now, force: force)
+            refs: checkable, entries: imageUpdateCache.entries(of: profile), hub: imageUpdateCache.hub, now: now,
+            force: force)
         guard !refs.isEmpty else { return nil }
         imageRunAt[profile] = now
+        // The calls count when the run starts, not when it ends: a reset or a quit
+        // in the run must not give the budget back. A call that never starts is
+        // charged too. That errs on the safe side.
+        let hubCalls = refs.filter(\.isDockerHub).count
+        if hubCalls > 0 {
+            imageUpdateCache.hub = ImageUpdateSchedule.hubSpent(
+                imageUpdateCache.hub, calls: hubCalls, rateLimited: false, now: now)
+            saveImageUpdateCache()
+        }
         return refs
     }
 
@@ -1876,6 +1911,11 @@ final class ColimaModel {
     func run(_ action: CtlAction, args: [String], profile target: String? = nil) {
         // The old copy quits at once after the swap of an update.
         guard !updateRestarting else { return }
+        // A pull makes the daemon contact a registry.
+        if isDebug, action == .imagePull {
+            notify(Help.imageUpdateDebug)
+            return
+        }
         // The backups and the restore of a VM type change need the VM as it is.
         if recreate != nil {
             notify(Help.recreateBusy)

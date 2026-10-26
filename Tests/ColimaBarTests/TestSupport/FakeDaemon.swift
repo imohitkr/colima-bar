@@ -21,11 +21,14 @@ final class FakeDaemon: @unchecked Sendable {
     /// An answer. With `chunks`, the daemon sends no `Content-Length`: it
     /// sends the head, then each chunk, then closes. With `holdOpen`, it keeps
     /// the connection open after the last chunk until the client closes it.
+    /// With `gate`, the daemon sends nothing until `gate` returns true. A
+    /// stopped daemon closes the connection with no answer.
     struct Answer: Sendable {
         var status = 200
         var body = Data()
         var chunks: [Data]?
         var holdOpen = false
+        var gate: (@Sendable () -> Bool)?
     }
 
     typealias Handler = @Sendable (Request) -> Answer
@@ -105,6 +108,11 @@ final class FakeDaemon: @unchecked Sendable {
     }
 
     private static func stream(_ answer: Answer, to c: Int32, loop: AcceptLoop) {
+        while let gate = answer.gate, !gate(), !loop.isStopped { usleep(10_000) }
+        if answer.gate != nil, loop.isStopped {
+            close(c)
+            return
+        }
         let head = "HTTP/1.1 \(answer.status) \(reason(answer.status))\r\nConnection: close\r\n\r\n"
         var ok = UnixSocket.writeAll(c, Data(head.utf8))
         for chunk in answer.chunks ?? [] where ok { ok = UnixSocket.writeAll(c, chunk) }

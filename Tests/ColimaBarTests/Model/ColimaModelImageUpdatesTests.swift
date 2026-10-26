@@ -7,6 +7,7 @@ import Testing
     private let d1 = "sha256:" + String(repeating: "1", count: 64)
     private let d2 = "sha256:" + String(repeating: "2", count: 64)
     private let nginx = "docker.io/library/nginx:latest"
+    private let otherImage = "docker.io/library/redis:7"
     private let profile = "image-test-profile"
 
     /// The images of the fake daemon: nginx was pulled, `local/build` was built here.
@@ -26,7 +27,10 @@ import Testing
         ]
         var architecture = "arm64"
         var registryDigest: String
-        var gate: Box<Bool>?
+        /// The number of /distribution requests that may answer, in the order that they arrive.
+        var gate: Box<Int>?
+        /// The status of the /distribution answers.
+        var distributionStatus = 200
         var pull: FakeDaemon.Answer = .init(chunks: [
             Data(#"{"status":"Status: Downloaded newer image for nginx:latest"}"#.utf8 + [0x0A])
         ])
@@ -34,6 +38,7 @@ import Testing
 
     private func daemon(_ setup: Setup) throws -> FakeDaemon {
         let rows = list(setup.containers)
+        let arrivals = Counter()
         let d = FakeDaemon(path: TestSocketPath.unique()) { [d1 = d1] request in
             let line = request.line
             func ok(_ json: String) -> FakeDaemon.Answer { .init(body: Data(json.utf8)) }
@@ -50,8 +55,16 @@ import Testing
             }
             if line.hasPrefix("GET /images/") { return ok(#"{"Id":"sha256:built","RepoDigests":[]}"#) }
             if line.hasPrefix("GET /distribution/") {
-                if let gate = setup.gate { while !gate.value { usleep(10_000) } }
-                return ok(#"{"Descriptor":{"digest":"\#(setup.registryDigest)"}}"#)
+                guard setup.distributionStatus == 200 else {
+                    return .init(
+                        status: setup.distributionStatus,
+                        body: Data(#"{"message":"toomanyrequests: You have reached your pull rate limit"}"#.utf8))
+                }
+                let json = #"{"Descriptor":{"digest":"\#(setup.registryDigest)"}}"#
+                guard let gate = setup.gate else { return ok(json) }
+                arrivals.add()
+                let mine = arrivals.value
+                return .init(chunks: [Data(json.utf8)], gate: { gate.value >= mine })
             }
             if line.hasPrefix("GET /info") { return ok(#"{"Architecture":"aarch64"}"#) }
             if line.hasPrefix("POST /images/create") { return setup.pull }
@@ -84,6 +97,13 @@ import Testing
         let m = model(d, on: false)
         #expect(await m.refreshContainers())
         await m.refreshImageUpdates()
+        m.checkImageUpdates()
+        m.checkImagesNow()
+        #expect(m.claimImageUpdates(now: Date(), force: true) == nil)
+        #expect(!m.canCheckImagesNow && !m.canPullImages)
+        #expect(await m.pullImages([try #require(ImageRef.parse("nginx"))]) == false)
+        m.pullAllImageUpdates()
+        m.pullNewImage(containerID: "c1")
         #expect(d.seen.allSatisfy { $0.hasPrefix("GET /containers/json") })
         #expect(m.imageUpdates == ImageUpdateState())
     }
@@ -125,10 +145,15 @@ import Testing
         try await scanned(m)
         m.applyImageAnswers([nginx: .init(digest: d2, checkedAt: Date())], profile: profile)
         m.imageRunAt[profile] = Date()
+        m.imageCheckNowAt = Date()
+        m.imageUpdateCache.hub = .init(calls: [Date().timeIntervalSince1970], pausedUntil: 1)
+        let hub = m.imageUpdateCache.hub
         m.imageUpdateCheck = false
         #expect(m.imageUpdates == ImageUpdateState())
-        #expect(m.imageRunAt.isEmpty && m.imageCheckNowAt == nil)
+        #expect(m.imageRunAt.isEmpty)
         #expect(m.imageUpdateCache.entries(of: profile).count == 1)
+        // The Check Now gap and the Docker Hub budget do not reset: off and on is no way round them.
+        #expect(m.imageCheckNowAt != nil && m.imageUpdateCache.hub == hub)
     }
 
     // MARK: - Registry pass
@@ -181,22 +206,99 @@ import Testing
     }
 
     @Test func aResultThatArrivesAfterTheSettingWentOffIsDropped() async throws {
-        let gate = Box(false)
+        let gate = Box(0)
         let d = try daemon(Setup(registryDigest: d2, gate: gate))
         defer {
-            gate.mutate { $0 = true }
+            gate.mutate { $0 = 99 }
             d.stop()
         }
         let m = model(d)
         try await scanned(m)
         m.checkImageUpdates()
-        #expect(await waitUntil { m.imageUpdates.checking })
-        m.imageUpdateCheck = false
-        gate.mutate { $0 = true }
         #expect(await waitUntil { self.calls(d, "/distribution/") == 1 })
-        try await Task.sleep(for: .milliseconds(100))
+        let task = try #require(m.imageCheckTask)
+        m.imageUpdateCheck = false
+        gate.mutate { $0 = 99 }
+        await task.value
+        #expect(calls(d, "/distribution/") == 1)
         #expect(m.imageUpdateCache.entries(of: profile).isEmpty)
         #expect(m.imageUpdates == ImageUpdateState())
+        // The calls happened: the budget has them.
+        #expect(m.imageUpdateCache.hub.calls.count == 1)
+    }
+
+    @Test func theEndOfAnOldRunDoesNotEndTheRunThatReplacedIt() async throws {
+        let gate = Box(0)
+        let d = try daemon(Setup(registryDigest: d2, gate: gate))
+        defer {
+            gate.mutate { $0 = 99 }
+            d.stop()
+        }
+        let m = model(d)
+        try await scanned(m)
+        m.checkImageUpdates()
+        #expect(await waitUntil { self.calls(d, "/distribution/") == 1 })
+        let first = try #require(m.imageCheckTask)
+        // Off and on again: a second run may start while the first still waits.
+        m.imageUpdateCheck = false
+        m.imageUpdateCheck = true
+        await m.refreshImageUpdates()
+        #expect(await waitUntil { m.imageUpdates.images[self.nginx] != nil })
+        m.checkImageUpdates()
+        #expect(await waitUntil { self.calls(d, "/distribution/") == 2 })
+        let second = try #require(m.imageCheckTask)
+        // The first request answers. The second still waits.
+        gate.mutate { $0 = 1 }
+        await first.value
+        #expect(m.imageChecking && m.imageUpdates.checking)
+        gate.mutate { $0 = 99 }
+        await second.value
+        #expect(!m.imageChecking)
+        #expect(m.imageUpdates.containers["c1"] == .update(digest: d2))
+    }
+
+    @Test func aSwitchOfTheProfileDuringARunDropsTheResultsButKeepsThePaidAnswer() async throws {
+        let gate = Box(0)
+        let d = try daemon(Setup(registryDigest: d2, gate: gate))
+        defer {
+            gate.mutate { $0 = 99 }
+            d.stop()
+        }
+        let m = model(d)
+        try await scanned(m)
+        m.checkImageUpdates()
+        #expect(await waitUntil { self.calls(d, "/distribution/") == 1 })
+        let task = try #require(m.imageCheckTask)
+        m.dropDataOfOldSocket()
+        gate.mutate { $0 = 99 }
+        await task.value
+        #expect(!m.imageChecking)
+        #expect(m.imageUpdates == ImageUpdateState())
+        // The answer belongs to the profile that asked, and the registry call cannot be undone.
+        #expect(m.imageUpdateCache.entries(of: profile)[nginx]?.digest == d2)
+    }
+
+    @Test func aRunThatEndsAfterTheVMStoppedChangesNoEntry() async throws {
+        let gate = Box(0)
+        let d = try daemon(Setup(registryDigest: d2, gate: gate))
+        defer {
+            gate.mutate { $0 = 99 }
+            d.stop()
+        }
+        let m = model(d)
+        try await scanned(m)
+        m.applyImageAnswers(
+            [nginx: .init(digest: d2, checkedAt: Date().addingTimeInterval(-25 * 3600), pulled: true)], profile: profile
+        )
+        m.checkImageUpdates()
+        #expect(await waitUntil { self.calls(d, "/distribution/") == 1 })
+        let task = try #require(m.imageCheckTask)
+        m.setState(.stopped)
+        // The daemon went away, so the answer is a failure.
+        d.stop()
+        await task.value
+        let entry = try #require(m.imageUpdateCache.entries(of: profile)[nginx])
+        #expect(entry.digest == d2 && entry.pulled == true && entry.error == nil)
     }
 
     @Test func checkNowWorksOnceInFiveMinutesAndIgnoresTheHourlyGap() async throws {
@@ -204,7 +306,7 @@ import Testing
         defer { d.stop() }
         let m = model(d)
         try await scanned(m)
-        m.applyImageAnswers([nginx: .init(digest: d1, checkedAt: Date())], profile: profile)
+        m.applyImageAnswers([nginx: .init(digest: d1, checkedAt: Date().addingTimeInterval(-7200))], profile: profile)
         m.imageRunAt[profile] = Date()
         #expect(m.canCheckImagesNow)
         m.checkImagesNow()
@@ -213,7 +315,236 @@ import Testing
         #expect(!m.canCheckImagesNow)
     }
 
+    @Test func aFailedCheckKeepsTheLastDigestAndThePulledMark() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        let before = Date().addingTimeInterval(-25 * 3600)
+        m.applyImageAnswers([nginx: .init(digest: d2, checkedAt: before, pulled: true)], profile: profile)
+        m.applyImageAnswers([nginx: .init(error: .unreachable, checkedAt: Date())], profile: profile)
+        let entry = try #require(m.imageUpdateCache.entries(of: profile)[nginx])
+        #expect(entry.digest == d2 && entry.pulled == true && entry.error == .unreachable)
+        #expect(entry.isValid)
+        m.applyImageAnswers([nginx: .init(digest: d1, checkedAt: Date())], profile: profile)
+        #expect(m.imageUpdateCache.entries(of: profile)[nginx]?.error == nil)
+        // An update that the registry showed stays on the row while the registry is down.
+        m.applyImageAnswers([nginx: .init(digest: d2, checkedAt: before)], profile: profile)
+        m.applyImageAnswers([nginx: .init(error: .rateLimited, checkedAt: Date())], profile: profile)
+        m.rebuildImageUpdates()
+        #expect(m.imageUpdates.containers["c2"] == .update(digest: d2))
+    }
+
+    // MARK: - Docker Hub budget
+
+    @Test func aClaimWritesItsDockerHubCallsIntoTheSavedBudget() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        m.checkImageUpdates()
+        // The call counts before the run ends.
+        #expect(m.imageUpdateCache.hub.calls.count == 1)
+        let task = try #require(m.imageCheckTask)
+        await task.value
+        #expect(m.imageUpdateCache.hub.calls.count == 1 && m.imageUpdateCache.hub.pausedUntil == nil)
+        // The budget is saved with the cache.
+        let text = m.domainsStore.string(forKey: Defaults.Key.imageUpdateCache.rawValue)
+        #expect(ImageUpdateCache.decode(text).hub == m.imageUpdateCache.hub)
+    }
+
+    @Test func aRateLimitedAnswerOfARunPausesDockerHubForAllProfiles() async throws {
+        var setup = Setup(registryDigest: d2)
+        setup.distributionStatus = 429
+        let d = try daemon(setup)
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        m.checkImageUpdates()
+        let task = try #require(m.imageCheckTask)
+        await task.value
+        #expect(m.imageUpdateCache.entries(of: profile)[nginx]?.error == .rateLimited)
+        #expect(m.imageUpdateCache.hub.pausedUntil != nil)
+        #expect(ImageUpdateSchedule.hubAllowance(m.imageUpdateCache.hub, now: Date()) == 0)
+    }
+
+    @Test func aRateLimitedAnswerPausesDockerHubAndATrimDoesNotLiftIt() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        let now = Date()
+        m.imageUpdateCache.hub = ImageUpdateSchedule.hubSpent(.init(), calls: 1, rateLimited: true, now: now)
+        m.applyImageAnswers([nginx: .init(error: .rateLimited, checkedAt: now)], profile: profile)
+        #expect(m.claimImageUpdates(now: now.addingTimeInterval(5 * 3600), force: true) == nil)
+        // Nothing uses the other image any more, and the trim removes its entry. The pause stays.
+        m.applyImageAnswers([otherImage: .init(error: .rateLimited, checkedAt: now)], profile: profile)
+        m.trimImageUpdateCache()
+        #expect(m.imageUpdateCache.entries(of: profile)[otherImage] == nil)
+        #expect(ImageUpdateSchedule.hubAllowance(m.imageUpdateCache.hub, now: now.addingTimeInterval(3600)) == 0)
+        #expect(m.claimImageUpdates(now: now.addingTimeInterval(3600), force: true) == nil)
+    }
+
+    @Test func aSpentBudgetHoldsBackDockerHubInEveryProfile() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        let now = Date()
+        m.imageUpdateCache.hub = ImageUpdateSchedule.hubSpent(.init(), calls: 3, rateLimited: false, now: now)
+        #expect(m.claimImageUpdates(now: now) == nil)
+        #expect(m.claimImageUpdates(now: now, force: true) == nil)
+        // Another profile reads the same saved budget.
+        m.saveImageUpdateCache()
+        let other = ColimaModel(
+            profile: "other", dockerAPI: DockerAPI(socketPath: d.path), domainsStore: m.domainsStore)
+        other.setState(.running)
+        other.imageUpdateCheck = true
+        try await scanned(other)
+        #expect(other.claimImageUpdates(now: now) == nil)
+        #expect(m.claimImageUpdates(now: now.addingTimeInterval(3601))?.count == 1)
+    }
+
+    /// Three tags of one image: three Docker Hub references.
+    private func threeTags() -> Setup {
+        var setup = Setup(registryDigest: d2)
+        setup.containers = [
+            ("c1", "nginx", "sha256:old", "running"),
+            ("c2", "nginx:1", "sha256:old", "running"),
+            ("c3", "nginx:2", "sha256:old", "running"),
+        ]
+        return setup
+    }
+
+    @Test func aResetAfterAClaimDoesNotGiveTheDockerHubCallsBack() async throws {
+        let d = try daemon(threeTags())
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        let now = Date()
+        #expect(m.claimImageUpdates(now: now)?.count == 3)
+        m.resetImageUpdates()
+        m.imageRunAt = [:]
+        await m.refreshImageUpdates()
+        #expect(await waitUntil { !m.imageUpdates.checkable.isEmpty })
+        #expect(m.claimImageUpdates(now: now) == nil)
+        #expect(m.claimImageUpdates(now: now, force: true) == nil)
+    }
+
+    @Test func turningTheSettingOffAndOnDuringARunMakesNoMoreThanThreeDockerHubCalls() async throws {
+        let gate = Box(0)
+        var setup = threeTags()
+        setup.gate = gate
+        let d = try daemon(setup)
+        defer {
+            gate.mutate { $0 = 99 }
+            d.stop()
+        }
+        let m = model(d)
+        try await scanned(m)
+        #expect(await waitUntil { m.imageUpdates.checkable.count == 3 })
+        m.checkImageUpdates()
+        #expect(await waitUntil { self.calls(d, "/distribution/") == ImageUpdateSchedule.concurrency })
+        let task = try #require(m.imageCheckTask)
+        m.imageUpdateCheck = false
+        m.imageUpdateCheck = true
+        await m.refreshImageUpdates()
+        #expect(await waitUntil { m.imageUpdates.checkable.count == 3 })
+        m.imageRunAt = [:]
+        m.checkImageUpdates()
+        m.checkImagesNow()
+        gate.mutate { $0 = 99 }
+        await task.value
+        #expect(calls(d, "/distribution/") <= ImageUpdateSchedule.hubLimit)
+        #expect(m.imageUpdateCache.hub.calls.count == 3)
+    }
+
+    @Test func aFreshAnswerOfAnotherProfileIsUsedInsteadOfACall() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        let now = Date()
+        m.applyImageAnswers(
+            [nginx: .init(digest: d2, checkedAt: now.addingTimeInterval(-3600))], profile: "other-profile")
+        #expect(m.claimImageUpdates(now: now) == nil)
+        #expect(m.imageUpdateCache.entries(of: profile)[nginx]?.digest == d2)
+        #expect(m.imageUpdateCache.entries(of: profile)[nginx]?.pulled == nil)
+        #expect(m.imageUpdates.containers["c2"] == .update(digest: d2))
+        // An old answer or a failure of the other profile is not used.
+        let m2 = model(d)
+        try await scanned(m2)
+        m2.applyImageAnswers(
+            [nginx: .init(digest: d2, checkedAt: now.addingTimeInterval(-25 * 3600))], profile: "other-profile")
+        #expect(m2.claimImageUpdates(now: now)?.count == 1)
+    }
+
+    // MARK: - Gates
+
+    @Test func checkNowIsOffWithAHintWhileEveryReferenceWasCheckedInTheLastHour() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        #expect(m.canCheckImagesNow && m.checkNowBlockedReason == nil)
+        m.applyImageAnswers([nginx: .init(digest: d2, checkedAt: Date().addingTimeInterval(-60))], profile: profile)
+        #expect(!m.canCheckImagesNow)
+        #expect(m.checkNowBlockedReason == Help.checkImagesNowWaiting)
+    }
+
+    @Test func checkNowIsOffWhileTheDockerHubBudgetIsSpent() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        m.applyImageAnswers([nginx: .init(digest: d2, checkedAt: Date().addingTimeInterval(-7200))], profile: profile)
+        #expect(m.canCheckImagesNow)
+        m.imageUpdateCache.hub = ImageUpdateSchedule.hubSpent(.init(), calls: 3, rateLimited: false, now: Date())
+        #expect(!m.canCheckImagesNow && m.checkNowBlockedReason == Help.checkImagesNowWaiting)
+    }
+
+    @Test func pullsAndChecksWaitForTheSameStatesAsARun() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        #expect(m.canPullImages && m.canCheckImagesNow)
+        m.setTrimming(true)
+        #expect(!m.canPullImages && !m.canCheckImagesNow)
+        #expect(await m.pullImages([try #require(ImageRef.parse("nginx"))]) == false)
+        m.setTrimming(false)
+        m.holdAction(profile)
+        #expect(!m.canPullImages && !m.canCheckImagesNow)
+        m.releaseAction(profile)
+        m.setState(.stopped)
+        #expect(!m.canPullImages && !m.canCheckImagesNow)
+        m.setState(.running)
+        #expect(calls(d, "/images/create") == 0)
+    }
+
+    @Test func checkNowNeedsAReferenceThatTheRegistryCanAnswerFor() async throws {
+        var setup = Setup(registryDigest: d2)
+        setup.containers = [("c3", "local/build", "sha256:built", "running")]
+        let d = try daemon(setup)
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        #expect(m.imageUpdates.checkable.isEmpty)
+        #expect(!m.canCheckImagesNow)
+    }
+
     // MARK: - Debug runs
+
+    @Test func theOldPullActionOfTheImagesTabDoesNothingInADebugRun() async throws {
+        let d = try daemon(Setup(registryDigest: d2))
+        defer { d.stop() }
+        let m = model(d, debug: true)
+        let sent = Box<[String]>([])
+        m.notifySink = { text in sent.mutate { $0.append(text) } }
+        m.run(.imagePull, "nginx:latest")
+        #expect(sent.value == [Help.imageUpdateDebug])
+        #expect(m.busy == nil && !m.hasActionInFlight)
+    }
 
     @Test func aDebugRunMakesNoRegistryCallAndNoPull() async throws {
         let d = try daemon(Setup(registryDigest: d2))
@@ -230,7 +561,6 @@ import Testing
         m.pullNewImage(containerID: "c1")
         #expect(await m.pullImages([try #require(ImageRef.parse("nginx"))]) == false)
         #expect(!m.canCheckImagesNow && !m.canPullImages)
-        try await Task.sleep(for: .milliseconds(50))
         #expect(calls(d, "/distribution/") == 0 && calls(d, "/images/create") == 0)
         #expect(m.domainsStore.string(forKey: Defaults.Key.imageUpdateCache.rawValue) == nil)
     }
@@ -321,10 +651,49 @@ import Testing
         m.scheduledPrune = true
         defer { m.scheduledPrune = false }
         #expect(!m.claimScheduledPrune(now: Date()))
-        // The same tag is not pulled twice at the same time.
+        // A pull in progress holds the gate, so a second pull does not start.
         #expect(await m.pullImages([try #require(ImageRef.parse("nginx"))]) == false)
         pull.cancel()
         _ = await pull.value
+        #expect(m.busyActions(profile) == 0)
+    }
+
+    @Test func turningTheSettingOffStopsARunningPullBeforeTheNextImage() async throws {
+        let open = Box(false)
+        var setup = threeTags()
+        setup.pull = .init(
+            chunks: [Data(#"{"status":"Status: Downloaded newer image"}"#.utf8 + [0x0A])], gate: { open.value })
+        let d = try daemon(setup)
+        defer {
+            open.mutate { $0 = true }
+            d.stop()
+        }
+        let m = model(d)
+        try await scanned(m)
+        let refs = try ["nginx", "nginx:1", "nginx:2"].map { try #require(ImageRef.parse($0)) }
+        let pull = Task { await m.pullImages(refs) }
+        #expect(await waitUntil { self.calls(d, "/images/create") == 1 })
+        m.imageUpdateCheck = false
+        open.mutate { $0 = true }
+        #expect(await pull.value == false)
+        #expect(calls(d, "/images/create") == 1)
+    }
+
+    @Test func aPullThatEndsAfterAProfileSwitchDoesNotReadTheListAgain() async throws {
+        var setup = Setup(registryDigest: d2)
+        setup.pull = .init(chunks: [Data(#"{"status":"Pulling"}"#.utf8 + [0x0A])], holdOpen: true)
+        let d = try daemon(setup)
+        defer { d.stop() }
+        let m = model(d)
+        try await scanned(m)
+        let reads = calls(d, "GET /containers/json")
+        let ref = try #require(ImageRef.parse("nginx"))
+        let pull = Task { await m.pullImages([ref]) }
+        #expect(await waitUntil { m.busyActions(self.profile) == 1 })
+        m.dropDataOfOldSocket()
+        pull.cancel()
+        #expect(await pull.value == false)
+        #expect(calls(d, "GET /containers/json") == reads)
         #expect(m.busyActions(profile) == 0)
     }
 
@@ -333,8 +702,7 @@ import Testing
         defer { d.stop() }
         let m = model(d)
         try await scanned(m)
-        m.pullNewImage(containerID: "c1")  // a recreate, not an update
-        try await Task.sleep(for: .milliseconds(50))
+        m.pullNewImage(containerID: "c1")  // a recreate, not an update: it returns before it starts a task
         #expect(calls(d, "/images/create") == 0)
         m.applyImageAnswers([nginx: .init(digest: d2, checkedAt: Date())], profile: profile)
         m.rebuildImageUpdates()

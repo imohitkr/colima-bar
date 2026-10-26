@@ -9,21 +9,24 @@ extension ColimaModel {
     // MARK: - Setting
 
     /// Called after the setting changed. Off forgets the results and the
-    /// waits. The cache stays, so turning it on again needs no new calls.
+    /// hourly gap. The cache, the Docker Hub budget and the Check Now gap
+    /// stay, so turning the setting off and on again gives no new calls.
     func imageUpdateSettingChanged() {
         if imageUpdateCheck {
             scheduleImageUpdateScan()
         } else {
             imageRunAt = [:]
-            imageCheckNowAt = nil
-            imageChecking = false
             resetImageUpdates()
         }
     }
 
     /// Forgets what the daemon said, and the results. A new scan starts with
-    /// the next container refresh.
+    /// the next container refresh. A registry check that runs now ends with
+    /// no effect on the state: its token is out of date.
     func resetImageUpdates() {
+        imageCheckToken += 1
+        imageCheckTask?.cancel()
+        imageCheckTask = nil
         imageScan = ImageUpdateRunner.Scan()
         imageScanning = false
         imageScanAgain = false
@@ -81,7 +84,7 @@ extension ColimaModel {
 
     /// Removes the answers for references that no container uses. An empty
     /// container list can be a start in progress, so it removes nothing.
-    private func trimImageUpdateCache() {
+    func trimImageUpdateCache() {
         guard !isDebug, !containers.isEmpty, !imageScan.configImages.isEmpty else { return }
         let keys = Set(
             imageScan.configImages.values.compactMap { (try? ImageUpdateCheck.reference(of: $0).get())?.normalized })
@@ -108,10 +111,28 @@ extension ColimaModel {
         runImageUpdateCheck(refs, now: Date())
     }
 
-    /// True if Check Now can start. The button reads it.
+    /// True if Check Now can start. The buttons read it.
     var canCheckImagesNow: Bool {
-        imageUpdateCheck && !isDebug && !imageChecking && state == .running
+        imageCallsAllowed(checking: imageChecking)
             && ImageUpdateSchedule.checkNowAllowed(last: imageCheckNowAt, now: Date())
+            && !imageUpdates.checkable.isEmpty && !checkNowPlan(now: Date()).isEmpty
+    }
+
+    /// The references that Check Now would check now.
+    private func checkNowPlan(now: Date) -> [ImageRef] {
+        ImageUpdateSchedule.plan(
+            refs: imageUpdates.checkable, entries: imageUpdateCache.entries(of: profile), hub: imageUpdateCache.hub,
+            now: now, force: true)
+    }
+
+    /// The reason why Check Now does nothing now, or nil if it can start.
+    /// The buttons show it as a hint.
+    var checkNowBlockedReason: String? {
+        guard imageCallsAllowed(checking: imageChecking), !imageUpdates.checkable.isEmpty,
+            ImageUpdateSchedule.checkNowAllowed(last: imageCheckNowAt, now: Date()),
+            checkNowPlan(now: Date()).isEmpty
+        else { return nil }
+        return Help.checkImagesNowWaiting
     }
 
     /// Check Now: checks the oldest references again, within the limits of one run.
@@ -126,15 +147,23 @@ extension ColimaModel {
         imageChecking = true
         rebuildImageUpdates()
         let gen = generation
+        let token = imageCheckToken
         let p = profile
         let runner = ImageUpdateRunner(api: api)
-        Task {
-            let answers = await runner.check(refs, now: now)
-            // A profile switch has reset the flag and the results.
-            guard gen == generation else { return }
-            imageChecking = false
+        imageCheckTask = Task {
+            var answers = await runner.check(refs, now: now)
+            // A rate limit holds, whatever became of the state.
+            pauseHubIfRateLimited(answers, now: now)
+            // The VM went away during the run: its failures say nothing about the registry.
+            if gen == generation, state != .running { answers = answers.filter { $0.value.error != .unreachable } }
+            // A paid answer stays in the cache of its profile after a switch. It does not after the setting went off.
             if imageUpdateCheck { applyImageAnswers(answers, profile: p) }
-            rebuildImageUpdates()
+            // A reset or a switch has cleared the flag and the results, and a newer run may own them now.
+            if token == imageCheckToken {
+                imageChecking = false
+                imageCheckTask = nil
+                rebuildImageUpdates()
+            }
             // Counts only: the references name the user's images.
             log.notice(
                 "image update check: \(answers.count, privacy: .public) answers, \(answers.values.filter { $0.error != nil }.count, privacy: .public) failed"
@@ -142,13 +171,55 @@ extension ColimaModel {
         }
     }
 
+    /// A rate limit answer pauses Docker Hub for 6 hours, for all profiles.
+    /// The calls of the run were written into the budget at the claim.
+    private func pauseHubIfRateLimited(_ answers: [String: ImageUpdateCache.Entry], now: Date) {
+        guard answers.contains(where: { $0.key.hasPrefix(ImageRef.hub + "/") && $0.value.error == .rateLimited })
+        else { return }
+        imageUpdateCache.hub = ImageUpdateSchedule.hubSpent(
+            imageUpdateCache.hub, calls: 0, rateLimited: true, now: now)
+        saveImageUpdateCache()
+    }
+
+    /// Takes a fresh good answer of another profile for a reference of the
+    /// selected profile that needs one: the registry says the same to both, so
+    /// the second call is a waste of the Docker Hub budget.
+    func adoptFreshAnswers(for refs: [ImageRef], now: Date) {
+        var entries = imageUpdateCache.entries(of: profile)
+        var adopted = false
+        for ref in refs where ImageUpdateSchedule.isStale(entries[ref.normalized], now: now) {
+            let key = ref.normalized
+            let fresh = imageUpdateCache.profiles.filter { $0.key != profile }.values.compactMap { $0[key] }
+                .filter { $0.error == nil && !ImageUpdateSchedule.isStale($0, now: now) }
+                .max { $0.checkedAt < $1.checkedAt }
+            guard let fresh else { continue }
+            let old = entries[key]
+            entries[key] = .init(
+                digest: fresh.digest, checkedAt: fresh.date, pulled: old?.digest == fresh.digest ? old?.pulled : nil)
+            adopted = true
+        }
+        guard adopted else { return }
+        imageUpdateCache.set(entries, profile: profile)
+        saveImageUpdateCache()
+        rebuildImageUpdates()
+    }
+
     /// Merges the answers of a run into the cache of `p`. A digest that a
-    /// pull already took keeps its pulled mark.
+    /// pull already took keeps its pulled mark. A failed check keeps the
+    /// digest and the mark of the last good check: a registry that cannot be
+    /// reached does not take the badge away.
     func applyImageAnswers(_ answers: [String: ImageUpdateCache.Entry], profile p: String) {
         var entries = imageUpdateCache.entries(of: p)
         for (key, answer) in answers {
             var entry = answer
-            if let old = entries[key], old.pulled == true, old.digest == entry.digest { entry.pulled = true }
+            if let old = entries[key] {
+                if entry.error != nil, entry.digest == nil {
+                    entry.digest = old.digest
+                    entry.pulled = old.pulled
+                } else if old.pulled == true, old.digest == entry.digest {
+                    entry.pulled = true
+                }
+            }
             entries[key] = entry
         }
         imageUpdateCache.set(entries, profile: p)
@@ -157,10 +228,9 @@ extension ColimaModel {
 
     // MARK: - Pull
 
-    /// True if ColimaBar may pull now. A debug run pulls nothing.
-    var canPullImages: Bool {
-        !isDebug && !updateRestarting && state == .running && hasDockerSocket
-    }
+    /// True if ColimaBar may pull now: the setting is on and nothing else
+    /// holds the VM. A debug run pulls nothing.
+    var canPullImages: Bool { imageCallsAllowed(checking: false) }
 
     /// Pulls the tags in `refs` of the selected profile, one after the other,
     /// and returns true if all were pulled. A failed pull sends a notification.
@@ -178,7 +248,8 @@ extension ColimaModel {
         let host = await runner.hostArchitecture()
         var allPulled = true
         for ref in todo {
-            guard gen == generation else { return false }
+            // Turning the setting off stops the run before the next call.
+            guard gen == generation, imageUpdateCheck else { return false }
             let platform = imageScan.images[ref.normalized].flatMap {
                 ImageUpdateCheck.platform(of: $0, hostArchitecture: host)
             }
@@ -258,7 +329,7 @@ extension ColimaModel {
         Task {
             let pulled = refs.isEmpty ? true : await pullImages(refs)
             setComposeBusy(composeBusy.subtracting([key]))
-            if pulled, p == profile { compose(.up, project: project) }
+            if pulled, p == profile, imageUpdateCheck { compose(.up, project: project) }
         }
     }
 
