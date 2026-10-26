@@ -51,6 +51,14 @@ struct SystemTab: View {
             if model.scheduledPrune {
                 Text(prunedCaption).font(.caption2).foregroundStyle(.secondary).padding(.leading, 22)
             }
+            Toggle("Check registries for newer images daily", isOn: $model.imageUpdateCheck)
+                .toggleStyle(.checkbox)
+                .hint(Help.imageUpdateCheck)
+            if model.imageUpdateCheck {
+                Text(model.isDebug ? "Not checked in a debug run." : model.imageUpdates.caption(now: Date()))
+                    .font(.caption2).foregroundStyle(.secondary).padding(.leading, 22)
+                    .hint(model.isDebug ? Help.imageUpdateDebug : Help.imageUpdateFailures(model.imageUpdates.failures))
+            }
 
             Divider()
             SectionHeader(title: "Auto-start & auto-stop")

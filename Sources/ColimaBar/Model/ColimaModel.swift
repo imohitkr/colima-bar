@@ -70,6 +70,19 @@ final class ColimaModel {
             if !scheduledPrune { pruneRetryAt = [:] }
         }
     }
+    /// Check the registries for newer images once a day (`ColimaModel+ImageUpdates`).
+    /// Off by default. It is saved in `domainsStore`, like the other settings
+    /// that a test must not persist.
+    var imageUpdateCheck = false {
+        didSet {
+            guard imageUpdateCheck != oldValue else { return }
+            // A debug run never writes a setting.
+            if !isDebug { domainsStore.set(imageUpdateCheck, forKey: Defaults.Key.imageUpdateCheck.rawValue) }
+            imageUpdateSettingChanged()
+        }
+    }
+    /// The image updates of the selected profile, for the badges and the strip.
+    private(set) var imageUpdates = ImageUpdateState()
     private(set) var profiles: [ProfileRow] = []
     /// VM actions that run for profiles other than the selected one, by
     /// profile: the busy label, for example "Starting". The profile menu
@@ -346,6 +359,24 @@ final class ColimaModel {
     @ObservationIgnored var logProbe: @Sendable (String) async -> CleanupProbe.LogCheck = {
         await CleanupProbe.logSizes(profile: $0)
     }
+    /// The registry answers of all profiles (`Defaults.Key.imageUpdateCache`).
+    @ObservationIgnored var imageUpdateCache = ImageUpdateCache()
+    /// What the daemon said about the images of the containers at the last scan.
+    @ObservationIgnored var imageScan = ImageUpdateRunner.Scan()
+    @ObservationIgnored var imageScanning = false
+    @ObservationIgnored var imageScanAgain = false
+    /// A registry check runs now.
+    @ObservationIgnored var imageChecking = false
+    /// Counts the resets of the check (setting change, profile switch). Only
+    /// the run with the current value may end the check or rebuild the results.
+    @ObservationIgnored var imageCheckToken = 0
+    /// The task of the registry check that runs now. Tests wait for it.
+    @ObservationIgnored var imageCheckTask: Task<Void, Never>?
+    /// When the last registry check of each profile started, in this launch.
+    @ObservationIgnored var imageRunAt: [String: Date] = [:]
+    @ObservationIgnored var imageCheckNowAt: Date?
+    /// The full references with a pull in progress, by profile. A pull blocks auto-stop.
+    @ObservationIgnored var imagePulls: [String: Set<String>] = [:]
     /// A debug run loaded COLIMABAR_CLEANUP_FIXTURE: no df or log call replaces it.
     @ObservationIgnored var cleanupFixtureLoaded = false
     @ObservationIgnored private var dfToken = 0  // bumps when dfGate resets; older df tasks then stop
@@ -540,6 +571,13 @@ final class ColimaModel {
             httpsEnabled ?? (store.object(forKey: Defaults.Key.domainsHTTPS.rawValue) as? Bool) ?? false
         self.domainSuffix = (domainSuffix ?? store.string(forKey: Defaults.Key.domainSuffix.rawValue))
             .flatMap(DomainSuffix.valid)
+        imageUpdateCheck = (store.object(forKey: Defaults.Key.imageUpdateCheck.rawValue) as? Bool) ?? false
+        let (cache, cacheProblem) = ImageUpdateCache.decodeChecked(
+            store.string(forKey: Defaults.Key.imageUpdateCache.rawValue))
+        imageUpdateCache = cache
+        if let cacheProblem {
+            log.error("image update check: \(cacheProblem, privacy: .public)")
+        }
         let p = named ?? Defaults.string(.profile) ?? "default"
         profile = p
         isDebug = readOnly
@@ -661,7 +699,7 @@ final class ColimaModel {
         names.formUnion(actionsInFlight.keys)
         var labels: [String] = []
         for p in names.sorted() {
-            if let label = Self.updateBusyLabel(marker: readBusy(p), actionsInFlight: actionsInFlight[p] ?? 0) {
+            if let label = Self.updateBusyLabel(marker: readBusy(p), actionsInFlight: busyActions(p)) {
                 labels.append(label)
             }
         }
@@ -742,6 +780,7 @@ final class ColimaModel {
         checkIdle()
         checkOtherProfilesIdle()
         checkScheduledPrune()
+        checkImageUpdates()
         publishAppStatus()
     }
 
@@ -751,7 +790,11 @@ final class ColimaModel {
     var hasDockerSocket: Bool { Self.hasDockerSocket(runtime: vm.runtime) }
 
     /// True while an action of the selected profile runs.
-    var hasActionInFlight: Bool { (actionsInFlight[profile] ?? 0) > 0 }
+    var hasActionInFlight: Bool { busyActions(profile) > 0 }
+
+    /// The actions and the pulls of ColimaBar that run for a profile. Each
+    /// one blocks auto-stop, the weekly cleanup and the check of images.
+    func busyActions(_ p: String) -> Int { (actionsInFlight[p] ?? 0) + (imagePulls[p]?.count ?? 0) }
 
     /// The selected profile's busy marker, or the label of an action this app
     /// just launched whose script hasn't written its marker yet.
@@ -944,6 +987,7 @@ final class ColimaModel {
         set(\.logSizesError, nil)
         set(\.logSizesChecking, false)
         logSizesCheckedAt = nil
+        resetImageUpdates()
         set(\.cpuHistory, [])
         set(\.memHistory, [])
     }
@@ -962,13 +1006,19 @@ final class ColimaModel {
         Task { await refreshAll() }
     }
 
+    /// The part of a profile switch that makes the answers of the old socket
+    /// late: tasks that started before it then drop their results.
+    func dropDataOfOldSocket() {
+        generation += 1
+        clearVMData(because: .profileChanged)
+    }
+
     /// Points the API client, the saved logs and the stable proxy at the
     /// socket of the selected profile, and forgets the data of the old socket.
     private func retargetSocket() {
-        generation += 1
         alertGate = ContainerAlertGate()
         deferredUnhealthy = [:]
-        clearVMData(because: .profileChanged)
+        dropDataOfOldSocket()
         set(\.diskImage, nil)
         for h in statStreams.values { h.cancel() }
         statStreams = [:]
@@ -1010,12 +1060,13 @@ final class ColimaModel {
                 image: c.Image, state: c.State, status: c.Status,
                 ports: Array(Set((c.Ports ?? []).compactMap { $0.IP != nil ? $0.PublicPort : nil })).sorted(),
                 project: c.Labels?["com.docker.compose.project"],
-                compose: c.Labels.flatMap { ComposeProject.from(labels: $0) })
+                compose: c.Labels.flatMap { ComposeProject.from(labels: $0) }, imageID: c.ImageID ?? "")
         }
         // Stable order by name: rows never reorder because a number changed.
         set(\.containers, mapped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
         updateDomainRoutes(visible)
         syncStatStreams()
+        scheduleImageUpdateScan()
         await refreshComposeIssues()
         sweepHelperLeftoversOnce()
         return true
@@ -1270,6 +1321,7 @@ final class ColimaModel {
     private func syncProfiles() {
         guard !isDebug, !profiles.isEmpty else { return }
         pruneGoodStarts(keeping: Set(profiles.map(\.name)))
+        pruneImageUpdateCache(keeping: Set(profiles.map(\.name)))
         let wanted = Set(
             profiles.filter { Self.hasDockerSocket(runtime: $0.runtime) && ProfileName.isValid($0.name) }.map(\.name))
         // A VM action can delete a profile for a short time (disk shrink):
@@ -1347,7 +1399,7 @@ final class ColimaModel {
             PruneSchedule.mayRun(
                 enabled: scheduledPrune, isDebug: isDebug, updateRestarting: updateRestarting,
                 running: state == .running, hasDockerSocket: hasDockerSocket, busyMarker: busy,
-                actionsInFlight: actionsInFlight[profile] ?? 0, waking: wakes[profile] != nil,
+                actionsInFlight: busyActions(profile), waking: wakes[profile] != nil,
                 transferring: volumeTransfer != nil, proxyTransfers: selectedTransfers(), trimming: isTrimming)
         else { return false }
         guard PruneSchedule.isDue(lastRun: pruneLastRun[profile], retryAt: pruneRetryAt[profile], now: now) else {
@@ -1355,6 +1407,46 @@ final class ColimaModel {
         }
         pruneRetryAt[profile] = now.addingTimeInterval(PruneSchedule.retryAfter)
         return true
+    }
+
+    /// True if no state of the VM blocks a call to the registry or a pull
+    /// now. `checking` is true for a registry check: only one runs at a time.
+    func imageCallsAllowed(checking: Bool) -> Bool {
+        ImageUpdateSchedule.mayRun(
+            enabled: imageUpdateCheck, isDebug: isDebug, updateRestarting: updateRestarting,
+            running: state == .running, hasDockerSocket: hasDockerSocket, busyMarker: busy,
+            actionsInFlight: busyActions(profile), waking: wakes[profile] != nil,
+            transferring: volumeTransfer != nil, proxyTransfers: selectedTransfers(), trimming: isTrimming,
+            recreating: recreate != nil, checking: checking)
+    }
+
+    /// The references that a registry check of the selected profile starts
+    /// with now, or nil. The check then holds the profile back for an hour.
+    /// `force` is Check Now: it skips the hourly gap and the 24 hours of each
+    /// reference, but not the Docker Hub budget. The claim writes the Docker Hub
+    /// calls of the run into the budget.
+    func claimImageUpdates(now: Date, force: Bool = false) -> [ImageRef]? {
+        guard
+            imageCallsAllowed(checking: imageChecking),
+            force || ImageUpdateSchedule.isDue(lastRun: imageRunAt[profile], now: now)
+        else { return nil }
+        let checkable = imageUpdates.checkable
+        adoptFreshAnswers(for: checkable, now: now)
+        let refs = ImageUpdateSchedule.plan(
+            refs: checkable, entries: imageUpdateCache.entries(of: profile), hub: imageUpdateCache.hub, now: now,
+            force: force)
+        guard !refs.isEmpty else { return nil }
+        imageRunAt[profile] = now
+        // The calls count when the run starts, not when it ends: a reset or a quit
+        // in the run must not give the budget back. A call that never starts is
+        // charged too. That errs on the safe side.
+        let hubCalls = refs.filter(\.isDockerHub).count
+        if hubCalls > 0 {
+            imageUpdateCache.hub = ImageUpdateSchedule.hubSpent(
+                imageUpdateCache.hub, calls: hubCalls, rateLimited: false, now: now)
+            saveImageUpdateCache()
+        }
+        return refs
     }
 
     /// Stops the VM once it has had no running containers for the chosen time.
@@ -1371,7 +1463,7 @@ final class ColimaModel {
         let limit = autoStopLimit
         let check = AutoStopRule.evaluate(
             enabled: autoStop, isRunning: state == .running,
-            isBusy: Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0),
+            isBusy: Self.blocksAutoStop(busyMarker: busy, actionsInFlight: busyActions(profile)),
             runningContainers: running.count, transfers: selectedTransfers(), idleSince: idleStart, now: now,
             idleMinutes: limit.minutes)
         if check.idleSince != idleStart {
@@ -1392,7 +1484,7 @@ final class ColimaModel {
             // No fresh list (timeout, error): don't stop on stale data.
             let fresh = await refreshContainers()
             guard fresh, gen == generation, autoStop, state == .running,
-                !Self.blocksAutoStop(busyMarker: busy, actionsInFlight: actionsInFlight[profile] ?? 0),
+                !Self.blocksAutoStop(busyMarker: busy, actionsInFlight: busyActions(profile)),
                 running.isEmpty, selectedTransfers() == 0, recreate == nil
             else {
                 resetSelectedIdle()
@@ -1470,7 +1562,7 @@ final class ColimaModel {
                 let limit = autoStopLimit
                 let check = AutoStopRule.evaluate(
                     enabled: autoStop, isRunning: profiles.contains { $0.name == p && $0.isRunning } && p != profile,
-                    isBusy: Self.blocksAutoStop(busyMarker: readBusy(p), actionsInFlight: actionsInFlight[p] ?? 0),
+                    isBusy: Self.blocksAutoStop(busyMarker: readBusy(p), actionsInFlight: busyActions(p)),
                     runningContainers: count, transfers: profileProxies.activeTransfers(p),
                     idleSince: s.since, now: .now, idleMinutes: limit.minutes)
                 s.since = check.idleSince
@@ -1819,6 +1911,11 @@ final class ColimaModel {
     func run(_ action: CtlAction, args: [String], profile target: String? = nil) {
         // The old copy quits at once after the swap of an update.
         guard !updateRestarting else { return }
+        // A pull makes the daemon contact a registry.
+        if isDebug, action == .imagePull {
+            notify(Help.imageUpdateDebug)
+            return
+        }
         // The backups and the restore of a VM type change need the VM as it is.
         if recreate != nil {
             notify(Help.recreateBusy)
@@ -1948,6 +2045,7 @@ final class ColimaModel {
 
     /// `ColimaModel+Compose` stores its state through these two.
     func setComposeBusy(_ all: Set<String>) { set(\.composeBusy, all) }
+    func setImageUpdates(_ state: ImageUpdateState) { set(\.imageUpdates, state) }
     func setComposeOutput(_ lines: [String], key: String) { composeOutput[key] = lines }
     func setComposeIssues(_ missing: Set<String>, hasDocker: Bool) {
         set(\.composeMissing, missing)

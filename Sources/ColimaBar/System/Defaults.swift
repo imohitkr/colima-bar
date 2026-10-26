@@ -53,6 +53,11 @@ enum Defaults {
         /// The last weekly cleanup of each profile, as profile to seconds
         /// since 1970 (`PruneSchedule`). It is machine state, not a setting.
         case scheduledPruneLastRun
+        /// Check the registries for newer images once a day (`ImageUpdateSchedule`). Off by default.
+        case imageUpdateCheck
+        /// The last registry answers, as JSON (`ImageUpdateCache`). It is
+        /// machine state, not a setting.
+        case imageUpdateCache
         /// Send "Healthy again" after an unhealthy alert. Off by default.
         case notifyOnRecovery
         /// The Compose projects with no banners, as a sorted list of

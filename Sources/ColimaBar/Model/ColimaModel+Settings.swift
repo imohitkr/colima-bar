@@ -17,6 +17,7 @@ extension ColimaModel {
             .profile: .string(profile),
             .launchAtLogin: .bool(LoginItem.isEnabled),
             .scheduledPrune: .bool(scheduledPrune),
+            .imageUpdateCheck: .bool(imageUpdateCheck),
             .domains: .bool(domainsEnabled),
             // Read from Defaults, not from HotKey: the command never touches HotKey.
             .hotKey: .string(Defaults.string(.hotKey).flatMap { KeyCombo(spec: $0)?.spec } ?? ""),
@@ -42,6 +43,7 @@ extension ColimaModel {
         case (.keepRemovedLogs, .bool(let v)): keepRemovedLogs = v
         case (.checkUpdates, .bool(let v)): Updater.shared.enabled = v
         case (.scheduledPrune, .bool(let v)): scheduledPrune = v
+        case (.imageUpdateCheck, .bool(let v)): imageUpdateCheck = v
         case (.domains, .bool(let v)): domainsEnabled = v
         case (.profile, .string(let name)):
             // The profile can be deleted while the confirmation is open.

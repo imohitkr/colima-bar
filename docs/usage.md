@@ -96,6 +96,20 @@ A spinner shows while docker compose runs for the project. If it fails, a notifi
 
 To stop the banners of one project, click the bell icon in its header. You can also right-click the header and choose **Mute Alerts**. The bell then shows a slash. Click it again, or choose **Unmute Alerts**, to send banners again. The mute stops only the banner and the sound. The Containers tab still lists the alerts of the project. ColimaBar keeps the mute for each profile and project on this Mac. The settings file does not hold it. ColimaBar keeps up to 200 mutes.
 
+### Image updates
+
+This feature is off by default, because it contacts container registries. On the System tab, select **Check registries for newer images daily**. ColimaBar then asks the registry of each image that your containers use if the tag has a newer image. It asks through the Docker daemon of the VM, so it uses no sign-in of your Mac. It never starts the VM. A debug run contacts no registry and pulls no image.
+
+- A blue **update** badge next to the name of a container means that the registry has a newer image for this tag.
+- An orange **recreate** badge means that you pulled the new image already, but the container still runs the old one. This needs no registry call. A stopped container shows no badge.
+- The strip below the list shows the number of images with an update. **Pull All** pulls them. **Check Now** asks the registries at once. It works once in 5 minutes. The **Images** tab has **Check for Updates** and the same badge.
+- **Pull New Image** is in the ••• menu of a container with an update. It pulls the image. The container keeps the old image, and the badge changes to **recreate**. A plain container needs a new run, because ColimaBar cannot build the `docker run` command again from the container.
+- **Update and Recreate** is in the ••• menu of a Compose project. It pulls the new images of the project and runs `docker compose up -d`. That command creates again only the services whose image changed.
+
+Docker Hub limits anonymous requests (about 10 an hour for each address), and each check can count as one pull. So ColimaBar checks each image at most once in 24 hours. It makes at most 3 Docker Hub calls in one hour, for all profiles together, and **Check Now** counts too. One run checks at most 25 images of other registries. While images remain that need a check, a run can start each hour. **Check Now** skips an image that ColimaBar checked in the last hour. After a rate limit answer, ColimaBar leaves Docker Hub alone for 6 hours. ColimaBar sends no sign-in, so a `docker login` does not change the limit. An unreachable registry gets a new try after 1 hour. ColimaBar skips images that a digest names, images that you built or loaded on the VM, and images that a registry does not know.
+
+A failed check sends no notification and keeps the badge of the last good check. The line under the setting shows the last check and the number of images that ColimaBar could not check. Hover over it to see the reasons, for example a private registry that needs a sign-in. See [Image updates do not show](troubleshooting.md#image-updates-do-not-show). ColimaBar keeps the last answers on this Mac, so the badges come back after a restart with no new call. A pull outside ColimaBar clears an update at once. A pull that ColimaBar starts blocks auto-stop and the weekly cleanup until it ends. The settings file holds the setting but not the answers.
+
 ### Images and Volumes tabs
 
 These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, remove unused volumes, and back up and restore volumes. See [Back up and restore volumes](#back-up-and-restore-volumes). ColimaBar asks before it deletes volume data.
@@ -140,7 +154,7 @@ If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-res
 - Rosetta needs the `vz` VM type. If `vmType` in `colima.yaml` is not `vz`, the Rosetta switch is disabled, unless Rosetta is on. A missing `vmType` counts as `vz`.
 - **More VM settings…**: DNS, the port forwarder, the IP address, mounts, inotify and Docker registries. See [VM settings](#vm-settings).
 - To change these settings while the VM is stopped, use the [stopped screen](#open-the-dashboard).
-- **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons. **Clean Up…** opens the cleanup page. See [Clean up disk space](#clean-up-disk-space). **Clean up dangling images and build cache weekly** runs the safe cleanup once a week.
+- **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons. **Clean Up…** opens the cleanup page. See [Clean up disk space](#clean-up-disk-space). **Clean up dangling images and build cache weekly** runs the safe cleanup once a week. **Check registries for newer images daily** turns on [Image updates](#image-updates).
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md). **Stop sooner on battery or in Low Power Mode** shortens the idle time. See [On battery and in Low Power Mode](auto-stop.md#on-battery-and-in-low-power-mode).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
 - **Domains**: the switch for container domains. See [Container domains](#container-domains).
@@ -314,7 +328,7 @@ If the VM was stopped, Colima must start it once to create the new disk. Thus Co
 
 Use these buttons to copy your ColimaBar settings to a different Mac.
 
-**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup, the keyboard shortcut and container domains. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup, the daily image update check, the keyboard shortcut and container domains. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 
@@ -456,6 +470,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - After the Mac sleeps, Docker does not answer in a running VM, or the clock of the VM is more than 2 seconds off and ColimaBar could not set it. The notification has a **Restart** button. For one profile, ColimaBar sends each kind at most one time in 30 minutes. Exception: after Docker answers again, a new failure sends a new notification. See [When the Mac sleeps](#when-the-mac-sleeps).
 - **Return Free Space** ends. The notification gives the size of the disk image before and after. See [Clean up disk space](#clean-up-disk-space).
 - The weekly cleanup fails.
+- A pull of a new image fails. See [Image updates](#image-updates).
 - A volume backup or restore ends or fails. The notification has the volume name and the file name, never the path. See [Back up and restore volumes](#back-up-and-restore-volumes).
 - A docker compose command fails, or ColimaBar stops it after 15 minutes. The notification gives the exit code, not the output. See [Compose projects](#compose-projects).
 - A published port answers in the VM but not on the Mac, or the VM cannot resolve host names while the Mac can. The notification has a **Restart** button. See [When the network changes](#when-the-network-changes).

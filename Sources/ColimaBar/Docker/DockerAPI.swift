@@ -177,17 +177,18 @@ final class DockerAPI: Sendable {
     /// JSON object on a background thread. `onEnd` fires when the daemon closes
     /// it (VM stopped, container gone, or a non-2xx reply, see
     /// `StreamHandle.status`) but never after `cancel()`. It receives the
-    /// handle, so owners can check it is still the one they track.
+    /// handle, so owners can check it is still the one they track. A pull is
+    /// a `POST` stream.
     func stream(
-        _ path: String, onLine: @escaping @Sendable (Data) -> Void,
+        _ path: String, method: String = "GET", onLine: @escaping @Sendable (Data) -> Void,
         onEnd: @escaping @Sendable (StreamHandle) -> Void
     ) -> StreamHandle {
         let splitter = LineSplitter(onLine: onLine)
-        return openStream(path, onBody: { splitter.feed($0) }, onEnd: onEnd)
+        return openStream(path, method: method, onBody: { splitter.feed($0) }, onEnd: onEnd)
     }
 
     private func openStream(
-        _ path: String, onBody: @escaping @Sendable (Data) -> Void,
+        _ path: String, method: String = "GET", onBody: @escaping @Sendable (Data) -> Void,
         onEnd: @escaping @Sendable (StreamHandle) -> Void
     ) -> StreamHandle {
         let handle = StreamHandle()
@@ -202,7 +203,7 @@ final class DockerAPI: Sendable {
                 return
             }
             defer { handle.finish() }
-            guard send(fd, method: "GET", path: path) else {
+            guard send(fd, method: method, path: path) else {
                 end()
                 return
             }
@@ -220,11 +221,17 @@ final class DockerAPI: Sendable {
                 pending.append(buf, count: n)
                 guard let split = pending.range(of: Data("\r\n\r\n".utf8)) else { continue }
                 headerDone = true
-                let (status, _) = Self.parseHead(pending[..<split.lowerBound])
+                let (status, headers) = Self.parseHead(pending[..<split.lowerBound])
                 handle.setStatus(status)
                 // An error reply is a JSON message, not stream data: feeding it
-                // to a frame or line parser would misread it.
-                guard (200..<300).contains(status) else { break }
+                // to a frame or line parser would misread it. Keep the start of
+                // it for the caller.
+                guard (200..<300).contains(status) else {
+                    let first = Data(pending[split.upperBound...])
+                    let chunked = headers["transfer-encoding"]?.lowercased() == "chunked"
+                    handle.setErrorBody(Self.errorBody(fd, first: first, chunked: chunked))
+                    break
+                }
                 let rest = Data(pending[split.upperBound...])
                 pending.removeAll()
                 if !rest.isEmpty { onBody(rest) }
@@ -232,6 +239,28 @@ final class DockerAPI: Sendable {
             end()
         }
         return handle
+    }
+
+    /// The most bytes of an error reply that a stream keeps.
+    static let errorBodyLimit = 4096
+
+    /// Reads the rest of an error reply, up to `errorBodyLimit` bytes. The
+    /// read stops after 5 seconds, so a daemon that keeps the connection open
+    /// does not hold the stream.
+    private static func errorBody(_ fd: Int32, first: Data, chunked: Bool) -> Data {
+        var tv = timeval(tv_sec: 5, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, socklen_t(MemoryLayout<timeval>.size))
+        var raw = first
+        var buf = [UInt8](repeating: 0, count: 1024)
+        // A chunked body carries framing bytes, so allow a little more raw data.
+        while raw.count < errorBodyLimit * 2 {
+            let n = read(fd, &buf, buf.count)
+            if n < 0, errno == EINTR { continue }
+            if n <= 0 { break }
+            raw.append(buf, count: n)
+        }
+        let body = chunked ? dechunk(raw) : raw
+        return Data(body.prefix(errorBodyLimit))
     }
 
     // MARK: - Socket plumbing
@@ -282,12 +311,17 @@ final class StreamHandle: @unchecked Sendable {
     private var fd: Int32 = -1
     private var _cancelled = false
     private var _status: Int?
+    private var _errorBody: Data?
 
     var cancelled: Bool { lock.withLock { _cancelled } }
     /// HTTP status of the reply, once its head has arrived.
     var status: Int? { lock.withLock { _status } }
 
+    /// The start of the body of a non-2xx reply (at most 4 KB), once it has been read.
+    var errorBody: Data? { lock.withLock { _errorBody } }
+
     fileprivate func setStatus(_ s: Int) { lock.withLock { _status = s } }
+    fileprivate func setErrorBody(_ d: Data) { lock.withLock { _errorBody = d } }
 
     fileprivate func attach(_ fd: Int32) -> Bool {
         lock.withLock {

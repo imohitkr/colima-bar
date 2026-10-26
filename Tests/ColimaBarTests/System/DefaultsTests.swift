@@ -12,7 +12,7 @@ import Testing
             "toldIconHidden", "apiVersion", "checkUpdates", "notifiedVersion", "didOfferLoginItem",
             "didMigrateLoginItem", "revealOnLaunch", "keepRemovedLogs",
             "goodStartVersions", "installedVersion", "recoveryPath", "askBeforeLinks", "linkHandoff", "hotKey",
-            "debugShellImage", "scheduledPrune", "scheduledPruneLastRun",
+            "debugShellImage", "scheduledPrune", "scheduledPruneLastRun", "imageUpdateCheck", "imageUpdateCache",
             "notifyOnRecovery", "mutedProjects", "domains", "domainsHTTPS", "domainsHTTPSPending",
             "domainsHTTPSRemoving", "domainSuffix", "domainDNSPort",
         ]
