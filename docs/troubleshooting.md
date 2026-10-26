@@ -277,7 +277,7 @@ To fix it, click **Use colimabar** in [Doctor](usage.md#doctor), or run `docker 
 1. Make sure that ColimaBar runs and that auto-start is on. Look at **Auto-start Colima on Demand** in the right-click menu.
 2. Start Colima, then open the System tab. Each route to the ColimaBar socket shows a check mark when it is set. The System tab shows only while Colima runs.
 3. In your terminal, run `echo $DOCKER_HOST`. If it shows a different socket, replace that line in your `~/.zshrc` with the [shell snippet](auto-start.md#shell-setup).
-4. Run `docker context show`. It must show `colimabar`, or `colimabar-PROFILE` for a profile that is not selected. ColimaBar does not change a context that points to a different daemon.
+4. Run `docker context show`. It must show `colimabar`, or `colimabar-PROFILE` for a profile that is not selected. ColimaBar does not change a context that points to a different daemon. If you picked `default` or another context in the [context switcher](usage.md#context-switchers), docker uses it, and auto-start does not apply. Pick `colimabar` to use auto-start again.
 5. If an IDE test cannot connect, restart the IDE. An IDE reads the launchd `DOCKER_HOST` only when it starts.
 
 ## ColimaBar uses the wrong Colima folder

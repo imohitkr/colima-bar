@@ -53,7 +53,7 @@ A debug run ignores `colimabar://` links, so test them with a normal build. Whil
 
 ### Debug flags
 
-The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test`, `--diagnostics` or `--cli` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It ignores links. It also skips system sleep, power and network changes, and auto-stop. It writes no VM settings. It makes no volume backup or restore and removes no helper container. It runs no docker compose and opens no debug shell. Thus it can run next to the installed app.
+The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--notify-test`, `--diagnostics` or `--cli` is a debug run. A debug run does not touch the proxy sockets, the docker routes and contexts or the login item. It registers no keyboard shortcut. It ignores links. It also skips system sleep, power and network changes, and auto-stop. It writes no VM settings. It makes no volume backup or restore and removes no helper container. It runs no docker compose and opens no debug shell. It switches no docker or kubectl context and changes no namespace. Thus it can run next to the installed app.
 
 | Flag | What it does |
 |---|---|
@@ -74,6 +74,7 @@ The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--no
 - `COLIMABAR_CLEANUP`: set it to `1`. The PNG then shows the Cleanup page. It may read the log sizes with `colima ssh` and measure the disk image. The remove, empty and Return Free Space buttons are disabled.
 - `COLIMABAR_CLEANUP_FIXTURE`: the path of a JSON file. The Cleanup page then shows its rows instead of the live data. The format is `{"df": <the raw body of GET /system/df>, "logs": {"<64 hex container ID>": BYTES}, "diskImage": {"allocated": BYTES, "apparent": BYTES}}`. Each ID in `logs` must be the `Id` of a container in `df.Containers`. Only a debug run reads the file. Set it together with `COLIMABAR_CLEANUP=1`.
 - `COLIMABAR_IMAGE_UPDATES_FIXTURE`: the path of a JSON file that stands for the registry. The badges and the strip then show its answers. The format is `{"results": {"nginx:latest": {"digest": "sha256:…"}, "ghcr.io/x/y:1": {"error": "signInNeeded"}}}`. The error is one of `unreachable`, `signInNeeded`, `notFound`, `rateLimited` and `other`. A debug run reads the local images only, makes no registry call and writes no cache. Only a debug run reads the file.
+- `COLIMABAR_CONTEXTS_FIXTURE`: the path of a JSON file. The menus then show its contexts instead of the real ones, and the kubectl row shows in memory only. The format is `{"docker": {"current": "colimabar", "contexts": [{"name": "colimabar", "description": "ColimaBar"}]}, "kube": {"current": "colima", "contexts": [{"name": "colima", "namespace": "shop"}], "namespaces": {"colima": ["default", "shop"]}}}`. Each part is optional. A debug run switches nothing, and only a debug run reads the file.
 - `COLIMABAR_DOMAINS`: set it to `1`. The PNG then shows the domain links. Nothing listens.
 - `COLIMABAR_RECREATE_DEMO`: set it to `1`. The PNG then shows the progress strip of a VM type change with fake values. It runs nothing and writes nothing.
 - `COLIMABAR_RUNNING_ONLY`: set it to `1`. The Containers tab then shows only running containers. The app does not save this filter.

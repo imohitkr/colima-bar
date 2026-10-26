@@ -157,10 +157,11 @@ If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-res
 - **Disk usage**: the space that images, containers, volumes and the build cache use, with cleanup buttons. **Clean Up…** opens the cleanup page. See [Clean up disk space](#clean-up-disk-space). **Clean up dangling images and build cache weekly** runs the safe cleanup once a week. **Check registries for newer images daily** turns on [Image updates](#image-updates).
 - **Auto-start and auto-stop**: see [Auto-start](auto-start.md) and [Auto-stop](auto-stop.md). **Stop sooner on battery or in Low Power Mode** shortens the idle time. See [On battery and in Low Power Mode](auto-stop.md#on-battery-and-in-low-power-mode).
 - **Hide menu bar icon while Colima is stopped**: see [Hide the icon](#hide-the-icon).
+- **docker context**: the current docker context, as a menu. See [Context switchers](#context-switchers).
 - **Domains**: the switch for container domains. See [Container domains](#container-domains).
 - **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Profiles**: shown only when you have more than one profile.
-- **App**: the daily update check, crash notifications, **Notify when a container is healthy again after an alert**, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
+- **App**: the daily update check, crash notifications, **Notify when a container is healthy again after an alert**, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Show kubectl context and namespace** (only if kubectl is installed, see [Context switchers](#context-switchers)), **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
 
 ### VM settings
 
@@ -328,7 +329,7 @@ If the VM was stopped, Colima must start it once to create the new disk. Thus Co
 
 Use these buttons to copy your ColimaBar settings to a different Mac.
 
-**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup, the daily image update check, the keyboard shortcut and container domains. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup, the daily image update check, the keyboard shortcut, container domains and the kubectl switchers. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 
@@ -339,6 +340,8 @@ Use these buttons to copy your ColimaBar settings to a different Mac.
 - It ignores unknown keys. A setting that is not in the file keeps its current value.
 - It skips a profile that does not exist on this Mac. To create it, use **New Profile…** in the profile menu. See [Create a profile](#create-a-profile). Then import again.
 - It shows the changes and asks before it applies them. Then it shows the applied and skipped settings.
+
+The `kubectlSwitcher` value is `true` or `false`. It turns the [kubectl switchers](#context-switchers) on or off.
 
 The `hotKey` value is a text with these parts, joined with `+`:
 
@@ -405,6 +408,7 @@ Right-click or Control-click the menu bar icon for these menu items:
 - **Open Dashboard Window**
 - **Doctor…** (opens the dashboard on the [Doctor](#doctor) page)
 - **Report an Issue…** (saves the [diagnostics file](#save-diagnostics-and-report-an-issue), then opens the bug report form). While the file is saved, the item is **Saving Diagnostics…** and is disabled.
+- **Docker Context**, and with the [kubectl switchers](#context-switchers) **Kubernetes Context** and **Kubernetes Namespace**
 - **Launch at Login**
 - **Auto-start Colima on Demand**
 - **Hide Icon While Colima Is Stopped**
@@ -414,6 +418,47 @@ Right-click or Control-click the menu bar icon for these menu items:
 - **Quit ColimaBar**
 
 When you quit ColimaBar, Colima and your containers continue to run. Auto-start stops until you open ColimaBar again.
+
+## Context switchers
+
+The docker CLI and kubectl each have a current context. The switchers change them without a terminal. ColimaBar changes a context only after you click it.
+
+### Docker context
+
+Open **Docker Context** in the right-click menu, or click the name next to **docker context:** on the System tab. A check mark shows the current context.
+
+- `colimabar` and `colimabar-PROFILE` come first. They reach the Colima daemon of a profile and start Colima on demand. `colimabar` is the selected profile.
+- `default` and your own contexts follow, with their description.
+- While [auto-start](auto-start.md) is on, the list hides `colima` and `colima-PROFILE`. ColimaBar would move you back to `colimabar` within 15 seconds, and `colimabar` reaches the same daemon. Turn auto-start off to see them.
+
+A pick runs `docker context use NAME`. It changes only the docker CLI. It does not change the launchd `DOCKER_HOST`, `~/.testcontainers.properties` or a `DOCKER_HOST` in your shell.
+
+If you pick `default` or one of your own contexts, ColimaBar remembers the pick. While auto-start is on and `colima start` switches the docker context to `colima`, ColimaBar returns to your pick, not to `colimabar`. A pick of `default` also stays when ColimaBar starts. ColimaBar forgets the pick when you pick a ColimaBar or Colima context, when you switch to a ColimaBar context in a terminal, when the context no longer exists, and when you click **Use colimabar** in [Doctor](#doctor).
+
+The list comes from the files of the docker contexts (`$DOCKER_CONFIG/contexts` or `~/.docker/contexts`). ColimaBar starts no docker process to read it, and contacts no daemon.
+
+If a switch fails, ColimaBar sends one notification and changes nothing. The log has the reason.
+
+### Kubernetes context and namespace
+
+This needs kubectl in `/opt/homebrew/bin`, `/usr/local/bin` or `/usr/bin`. If ColimaBar does not find kubectl, it shows nothing. A kubectl in another folder is not supported.
+
+On the System tab, in **App**, turn on **Show kubectl context and namespace**. It is off by default. Then:
+
+- The right-click menu has **Kubernetes Context** and **Kubernetes Namespace**.
+- Under the Kubernetes switch, a row shows `kubectl: CONTEXT · NAMESPACE`. Click it to pick a context or a namespace. It shows on the System tab and on the stopped screen.
+
+**Other…** in the namespace list asks for a name. Use 1 to 63 lower-case letters, digits and `-`. The first and the last character must be a letter or a digit.
+
+ColimaBar uses `kubectl config`. A context pick runs `kubectl config use-context`. A namespace pick runs `kubectl config set-context NAME --namespace=NS` for the current context. It never adds, removes or renames a context, a cluster or a user. kubectl reads `~/.kube/config`, or the file of `KUBECONFIG` if an app gets that variable. A Mac app normally does not.
+
+ColimaBar lists the namespaces only for the cluster of a Colima profile whose VM runs, at most once in 30 seconds. This call goes to the API port of the VM. It does not start a VM. ColimaBar never contacts another cluster. For another cluster, the namespace list has the current namespace, the namespaces that the kubeconfig names and **Other…**.
+
+If ColimaBar cannot read the kubeconfig, the row shows `kubectl: cannot read the kubeconfig`.
+
+### In a debug run
+
+The menus show the contexts, but each item is disabled. A debug run switches no docker or kubectl context and changes no namespace.
 
 ## When the Mac sleeps
 
