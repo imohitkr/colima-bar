@@ -229,6 +229,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     self?.model.loadCleanupFixture(data)
                 }
             }
+            // COLIMABAR_IMAGE_UPDATES_FIXTURE=PATH: show the badges of a JSON
+            // file instead of registry answers. For screenshots. A debug run
+            // only. It makes no registry call and writes no cache.
+            if let path = ProcessInfo.processInfo.environment["COLIMABAR_IMAGE_UPDATES_FIXTURE"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    guard let data = FileManager.default.contents(atPath: path) else { return }
+                    self?.model.loadImageUpdateFixture(data)
+                }
+            }
             // COLIMABAR_VMCONFIG=1: show the "More VM settings" page.
             if ProcessInfo.processInfo.environment["COLIMABAR_VMCONFIG"] == "1" { ui.showVMConfig = true }
             // COLIMABAR_RECREATE_DEMO=1: show the progress strip of a VM type

@@ -19,6 +19,7 @@ import Testing
         .profile: .string("work"),
         .launchAtLogin: .bool(true),
         .scheduledPrune: .bool(false),
+        .imageUpdateCheck: .bool(false),
         .hotKey: .string("control+option+command+C"),
         .domains: .bool(true),
     ]
@@ -77,6 +78,15 @@ import Testing
         #expect(plan.changes.map(\.setting) == [.scheduledPrune])
         #expect(plan.changes.first?.to == .bool(true))
         #expect(T.Setting.scheduledPrune.title == "Weekly cleanup")
+    }
+
+    @Test func theImageUpdateCheckIsASettingAndTheCacheIsNot() throws {
+        let settings = try #require(try object(try T.encode(sample, appVersion: "1"))["settings"] as? [String: Any])
+        #expect(settings["imageUpdateCheck"] as? Bool == false)
+        let plan = try T.plan(file(#"{"imageUpdateCheck": true}"#), current: sample, profiles: [])
+        #expect(plan.changes.map(\.setting) == [.imageUpdateCheck])
+        #expect(T.Setting.imageUpdateCheck.title == "Daily image update check")
+        #expect(!T.Setting.allCases.map(\.rawValue).contains("imageUpdateCache"))
     }
 
     /// The date of the last weekly cleanup is machine state, not a setting.

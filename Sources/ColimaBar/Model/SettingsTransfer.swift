@@ -34,6 +34,8 @@ enum SettingsTransfer {
         case launchAtLogin
         /// The weekly cleanup of dangling images and build cache.
         case scheduledPrune
+        /// The daily check of the registries for newer images.
+        case imageUpdateCheck
         /// The keyboard shortcut for the dashboard, as a spec. An empty string means none.
         case hotKey
         /// Open containers at .localhost names. HTTPS and the custom suffix are not in the file.
@@ -54,6 +56,7 @@ enum SettingsTransfer {
             case .profile: "Profile"
             case .launchAtLogin: "Launch at login"
             case .scheduledPrune: "Weekly cleanup"
+            case .imageUpdateCheck: "Daily image update check"
             case .hotKey: "Keyboard shortcut"
             case .domains: "Container domains"
             }
