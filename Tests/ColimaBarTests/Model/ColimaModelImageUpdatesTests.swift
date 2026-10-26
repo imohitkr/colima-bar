@@ -737,4 +737,17 @@ import Testing
         m.applyImageAnswers([nginx: .init(digest: d1, checkedAt: now)], profile: profile)
         #expect(m.imageUpdateCache.entries(of: profile)[nginx]?.pulled != true)
     }
+
+    @Test func aRowShowsTheCreatedReferenceInsteadOfAnImageID() {
+        let d = FakeDaemon(path: TestSocketPath.unique())
+        let m = ColimaModel(profile: profile, readOnly: true, dockerAPI: DockerAPI(socketPath: d.path))
+        let moved = Container(
+            id: "c1", name: "web", image: "sha256:6baf4358", state: "running", status: "Up", ports: [], project: nil)
+        #expect(m.displayImage(of: moved) == "sha256:6baf4358")
+        m.imageScan.configImages = ["c1": "alpine:latest"]
+        #expect(m.displayImage(of: moved) == "alpine:latest")
+        let tagged = Container(
+            id: "c1", name: "web", image: "alpine:3.19", state: "running", status: "Up", ports: [], project: nil)
+        #expect(m.displayImage(of: tagged) == "alpine:3.19")
+    }
 }

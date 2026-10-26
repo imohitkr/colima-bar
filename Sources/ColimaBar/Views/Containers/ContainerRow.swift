@@ -24,7 +24,7 @@ struct ContainerRow: View {
                     if let u = model.imageUpdates.badge(for: c) { ImageUpdateBadge(status: u) }
                 }
                 inspectTarget(
-                    Text(c.isRunning ? c.image : "\(c.image) · \(c.status)")
+                    Text(c.isRunning ? model.displayImage(of: c) : "\(model.displayImage(of: c)) · \(c.status)")
                         .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle))
             }
             Spacer(minLength: 4)
@@ -103,7 +103,7 @@ struct ContainerRow: View {
                 Divider()
                 Button("Copy name") { Pasteboard.copy(c.name) }
                 Button("Copy ID") { Pasteboard.copy(String(c.id.prefix(12))) }
-                Button("Copy image") { Pasteboard.copy(c.image) }
+                Button("Copy image") { Pasteboard.copy(model.displayImage(of: c)) }
                 Button("Copy exec command") { Pasteboard.copy("docker exec -it \(c.name) sh") }
                 if !c.ports.isEmpty {
                     Divider()

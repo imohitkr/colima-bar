@@ -307,6 +307,13 @@ extension ColimaModel {
         imageScan.configImages[id].flatMap { (try? ImageUpdateCheck.reference(of: $0).get()) }
     }
 
+    /// The image of a row. The container list gives the image ID once the tag
+    /// moves to a newer image, so show the reference it was created from.
+    func displayImage(of c: Container) -> String {
+        guard c.image.hasPrefix("sha256:"), let created = imageScan.configImages[c.id] else { return c.image }
+        return created
+    }
+
     // MARK: - Compose
 
     /// True when a container of the project shows an update or a recreate.
