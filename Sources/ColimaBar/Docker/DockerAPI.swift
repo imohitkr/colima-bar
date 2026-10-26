@@ -177,17 +177,18 @@ final class DockerAPI: Sendable {
     /// JSON object on a background thread. `onEnd` fires when the daemon closes
     /// it (VM stopped, container gone, or a non-2xx reply, see
     /// `StreamHandle.status`) but never after `cancel()`. It receives the
-    /// handle, so owners can check it is still the one they track.
+    /// handle, so owners can check it is still the one they track. A pull is
+    /// a `POST` stream.
     func stream(
-        _ path: String, onLine: @escaping @Sendable (Data) -> Void,
+        _ path: String, method: String = "GET", onLine: @escaping @Sendable (Data) -> Void,
         onEnd: @escaping @Sendable (StreamHandle) -> Void
     ) -> StreamHandle {
         let splitter = LineSplitter(onLine: onLine)
-        return openStream(path, onBody: { splitter.feed($0) }, onEnd: onEnd)
+        return openStream(path, method: method, onBody: { splitter.feed($0) }, onEnd: onEnd)
     }
 
     private func openStream(
-        _ path: String, onBody: @escaping @Sendable (Data) -> Void,
+        _ path: String, method: String = "GET", onBody: @escaping @Sendable (Data) -> Void,
         onEnd: @escaping @Sendable (StreamHandle) -> Void
     ) -> StreamHandle {
         let handle = StreamHandle()
@@ -202,7 +203,7 @@ final class DockerAPI: Sendable {
                 return
             }
             defer { handle.finish() }
-            guard send(fd, method: "GET", path: path) else {
+            guard send(fd, method: method, path: path) else {
                 end()
                 return
             }
