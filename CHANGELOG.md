@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-26
+
 ### Added
 
 - Context switchers. The right-click menu has **Docker Context**, and the System tab shows the current docker context as a menu. ColimaBar remembers a pick of `default` or of another context of yours. While auto-start is on, ColimaBar returns to it after `colima start`. A pick of `default` also stays at the next launch. While auto-start is on, the Colima contexts are hidden, because `colimabar` reaches the same daemon. With kubectl installed, **Show kubectl context and namespace** (off by default) adds **Kubernetes Context** and **Kubernetes Namespace** to the right-click menu, and a row under the Kubernetes switch. ColimaBar changes `current-context` or the namespace of one context only after a click. See [Context switchers](docs/usage.md#context-switchers).
@@ -299,7 +301,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/imohitkr/colima-bar/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/imohitkr/colima-bar/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/imohitkr/colima-bar/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/imohitkr/colima-bar/compare/v0.13.0...v0.14.0
