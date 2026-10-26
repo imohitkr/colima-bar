@@ -78,6 +78,12 @@ enum Defaults {
         case domainSuffix
         /// The UDP port in that resolver file. Machine state.
         case domainDNSPort
+        /// The docker context that the user picked in ColimaBar and that is
+        /// not a ColimaBar or Colima context (`ColimaModel+Contexts`). Unset
+        /// means none. Machine state, not in the settings file.
+        case dockerContextChoice
+        /// Show the kubectl context and namespace switchers. Off by default.
+        case kubectlSwitcher
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

@@ -284,7 +284,16 @@ enum Help {
     static let autoStart =
         "Docker clients (terminal, IDE test runs, testcontainers) use the ColimaBar socket. While Colima is stopped, the first real docker request starts it. Turn it off to connect directly to Colima."
     static let routeContext =
-        "The current docker context points to the ColimaBar socket. The docker CLI uses it when DOCKER_HOST is not set. Most GUIs also use it."
+        "The current docker context. The check mark means that it points to the ColimaBar socket. The docker CLI uses it when DOCKER_HOST is not set. Most GUIs also use it."
+    static let dockerContextMenu =
+        "Pick the docker context for the docker CLI. A pick changes only the docker CLI, not the launchd DOCKER_HOST or testcontainers. While auto-start is on, ColimaBar returns to a context that you picked after colima start. While auto-start is on, the Colima contexts are hidden: colimabar reaches the same daemon and starts Colima on demand."
+    static let kubectlSwitcher =
+        "Show the kubectl context and namespace in the right-click menu and under the Kubernetes switch. ColimaBar changes them only after a click, with kubectl config. It uses ~/.kube/config, or the file that KUBECONFIG names for apps."
+    static let kubeContext =
+        "The current kubectl context and namespace. A pick runs kubectl config use-context or set-context. ColimaBar changes nothing else in the kubeconfig. ColimaBar lists namespaces only for a Colima cluster whose VM runs. For another cluster, use Other… and type the name."
+    static let kubeNamespace =
+        "The namespace of the current kubectl context. ColimaBar lists namespaces only for a Colima cluster whose VM runs. For another cluster, use Other… and type the name."
+    static let contextDebug = "Not in a debug run."
     static let routeLaunchd =
         "Apps that you open from the Dock or Finder get DOCKER_HOST. Thus IDE test runners (GoLand, PyCharm, VS Code) use the ColimaBar socket. Restart an IDE that was already open."
     static let routeTestcontainers = "testcontainers (Java, Go, …) reads docker.host from ~/.testcontainers.properties."

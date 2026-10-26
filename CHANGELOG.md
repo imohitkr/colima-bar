@@ -8,6 +8,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ### Added
 
+- Context switchers. The right-click menu has **Docker Context**, and the System tab shows the current docker context as a menu. ColimaBar remembers a pick of `default` or of another context of yours. While auto-start is on, ColimaBar returns to it after `colima start`. A pick of `default` also stays at the next launch. While auto-start is on, the Colima contexts are hidden, because `colimabar` reaches the same daemon. With kubectl installed, **Show kubectl context and namespace** (off by default) adds **Kubernetes Context** and **Kubernetes Namespace** to the right-click menu, and a row under the Kubernetes switch. ColimaBar changes `current-context` or the namespace of one context only after a click. See [Context switchers](docs/usage.md#context-switchers).
+
 - Image update check (off by default). On the System tab, turn on **Check registries for newer images daily**. A blue **update** badge shows a container whose tag has a newer image in the registry. An orange **recreate** badge shows a container that runs an older image than the one that you pulled. **Pull New Image**, **Pull All** and **Update and Recreate** for a Compose project pull the new images. ColimaBar checks each image once a day and makes at most 3 Docker Hub calls in one hour, to keep inside the rate limit of Docker Hub. See [Image updates](docs/usage.md#image-updates).
 
 ## [0.15.0] - 2026-10-23

@@ -19,6 +19,7 @@ extension ColimaModel {
             .scheduledPrune: .bool(scheduledPrune),
             .imageUpdateCheck: .bool(imageUpdateCheck),
             .domains: .bool(domainsEnabled),
+            .kubectlSwitcher: .bool(kubectlSwitcher),
             // Read from Defaults, not from HotKey: the command never touches HotKey.
             .hotKey: .string(Defaults.string(.hotKey).flatMap { KeyCombo(spec: $0)?.spec } ?? ""),
         ]
@@ -45,6 +46,7 @@ extension ColimaModel {
         case (.scheduledPrune, .bool(let v)): scheduledPrune = v
         case (.imageUpdateCheck, .bool(let v)): imageUpdateCheck = v
         case (.domains, .bool(let v)): domainsEnabled = v
+        case (.kubectlSwitcher, .bool(let v)): kubectlSwitcher = v
         case (.profile, .string(let name)):
             // The profile can be deleted while the confirmation is open.
             guard profileNames.contains(name) else { return "Profile: \(name) does not exist on this Mac." }

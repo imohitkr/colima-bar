@@ -15,6 +15,7 @@ import Testing
             "debugShellImage", "scheduledPrune", "scheduledPruneLastRun", "imageUpdateCheck", "imageUpdateCache",
             "notifyOnRecovery", "mutedProjects", "domains", "domainsHTTPS", "domainsHTTPSPending",
             "domainsHTTPSRemoving", "domainSuffix", "domainDNSPort",
+            "dockerContextChoice", "kubectlSwitcher",
         ]
         #expect(Set(Defaults.Key.allCases.map(\.rawValue)) == expected)
     }

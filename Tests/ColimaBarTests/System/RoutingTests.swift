@@ -50,10 +50,12 @@ import Testing
 
     // MARK: - docker context
 
-    private func target(_ current: String, _ existing: Set<String>, selected: String = "default", launch: Bool = false)
-        -> String?
-    {
-        Routing.contextTarget(current: current, existing: existing, selected: selected, launch: launch)
+    private func target(
+        _ current: String, _ existing: Set<String>, selected: String = "default", launch: Bool = false,
+        choice: String? = nil
+    ) -> String? {
+        Routing.contextTarget(
+            current: current, existing: existing, selected: selected, launch: launch, choice: choice)
     }
 
     @Test func colimabarContextStays() {
@@ -95,6 +97,45 @@ import Testing
         #expect(target("remote", ["colimabar", "remote"], launch: true) == nil)
         #expect(target("remote", ["colimabar"], launch: true) == "colimabar")
         #expect(target("remote", ["colimabar"]) == "colimabar")
+    }
+
+    @Test func colimaStartReturnsToTheChoice() {
+        let all: Set<String> = ["colimabar", "colima", "colima-work", "remote", "default"]
+        #expect(target("colima", all, choice: "remote") == "remote")
+        #expect(target("colima-work", all, selected: "work", choice: "remote") == "remote")
+        #expect(target("colima", all, choice: "default") == "default")
+    }
+
+    @Test func aMissingChoiceFallsBackToColimabar() {
+        #expect(target("colima", ["colimabar", "colima"], choice: "remote") == "colimabar")
+        #expect(target("colima-work", ["colimabar", "colimabar-work"], choice: "remote") == "colimabar-work")
+    }
+
+    @Test func aChoiceThatColimaOwnsIsIgnored() {
+        #expect(target("colima", ["colimabar", "colima", "colima-work"], choice: "colima-work") == "colimabar")
+        #expect(target("colima", ["colimabar", "colimabar-work"], choice: "colimabar-work") == "colimabar")
+    }
+
+    @Test func theChoiceChangesNothingForAnotherContext() {
+        #expect(target("remote", ["colimabar", "remote", "other"], choice: "other") == nil)
+        #expect(target("colimabar", ["colimabar", "remote"], choice: "remote") == nil)
+    }
+
+    @Test func aChoiceOfDefaultStaysAtLaunch() {
+        #expect(target("default", ["colimabar", "default"], launch: true, choice: "default") == nil)
+        #expect(target("", ["colimabar", "default"], launch: true, choice: "default") == nil)
+        #expect(target("default", ["colimabar", "default"], launch: true, choice: "remote") == "colimabar")
+    }
+
+    @Test func aChoiceStaysOnlyWhileItIsStillPicked() {
+        let all: Set<String> = ["colimabar", "colima", "remote", "default"]
+        #expect(Routing.keptChoice("remote", current: "colima", existing: all) == "remote")
+        #expect(Routing.keptChoice("remote", current: "remote", existing: all) == "remote")
+        #expect(Routing.keptChoice("default", current: "", existing: all) == "default")
+        #expect(Routing.keptChoice("remote", current: "colimabar", existing: all) == nil)
+        #expect(Routing.keptChoice("remote", current: "colimabar-work", existing: all) == nil)
+        #expect(Routing.keptChoice("gone", current: "colima", existing: all) == nil)
+        #expect(Routing.keptChoice(nil, current: "colima", existing: all) == nil)
     }
 
     @Test func colimaProfileInvertsKubeContext() {

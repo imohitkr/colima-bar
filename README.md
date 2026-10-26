@@ -30,6 +30,7 @@
 - **Image updates**: find containers whose image tag has a newer version in the registry, and pull it (off by default, because it contacts registries). See [Image updates](docs/usage.md#image-updates).
 - **Cleanup**: see the largest images, unused volumes, stopped containers, build cache and container logs, remove them one by one, and return free space to the Mac.
 - **Domains**: open containers at names like `web.shop.localhost` (optional), with HTTPS from a local certificate authority and a custom suffix such as `colima.internal`. See [Container domains](docs/usage.md#container-domains).
+- **Context switchers**: pick the docker context, and with kubectl the Kubernetes context and namespace, from the right-click menu. While auto-start is on, ColimaBar returns to your pick after `colima start`. See [Context switchers](docs/usage.md#context-switchers).
 - **Links**: start, stop or restart the VM, or open the dashboard, from Raycast, Alfred, Shortcuts or a script with `colimabar://` links. ColimaBar asks first.
 - **Shortcut**: press a keyboard shortcut that you choose to open or close the dashboard from any app. It needs no extra permission.
 - **Command line**: run `colimabar status`, `start`, `stop` or `doctor` in Terminal. Add `--json` for scripts.

@@ -138,6 +138,7 @@ struct VMSettingsSection: View {
                 Label("Kubernetes (k3s) · context: \(model.kubeContext)", systemImage: "circle.hexagongrid")
             }
             .hint(running ? Help.k8s : Help.k8sWhenStopped)
+            if model.showsKubectl { KubeContextRow(model: model) }
             HStack {
                 Label("Disk: \(shown.diskGB) GB", systemImage: "internaldrive")
                 Spacer()

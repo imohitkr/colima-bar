@@ -98,13 +98,13 @@ ColimaBar sets a route for each kind of docker client. All routes use the Colima
 
 | Client | Route |
 |---|---|
-| docker CLI | The docker context `colimabar`. The docker CLI uses it when `DOCKER_HOST` is not set. Most GUIs and other tools that read docker contexts also use it. |
+| docker CLI | The docker context `colimabar`, or the context that you picked in the [context switcher](usage.md#context-switchers). The docker CLI uses it when `DOCKER_HOST` is not set. Most GUIs and other tools that read docker contexts also use it. |
 | IDEs and Dock apps | `DOCKER_HOST`, set with `launchctl setenv`. Apps that you open from the Dock or Finder get it, for example IDE test runners. |
 | testcontainers | `docker.host` in `~/.testcontainers.properties`. |
 | Scripts and shells | The [shell snippet](#shell-setup) in your `~/.zshrc`, for tools that read only `DOCKER_HOST`. |
 | Tools that use /var/run | An optional symlink. See [The /var/run/docker.sock link](#the-varrundockersock-link). |
 
-ColimaBar sets these routes when it starts. When Colima starts or stops a VM, it switches the docker context to `colima` or deletes it. While auto-start is on, ColimaBar moves the docker CLI back to `colimabar` within 15 seconds. This includes a `docker context use colima` that you ran yourself. For a profile other than the selected one, it moves to `colimabar-PROFILE`. Each time ColimaBar starts, it moves a `colima` or `default` context to `colimabar`, also when auto-start is off. To use Colima for one command, run `docker --context colima ps`. The System tab shows a check mark next to each route that is set.
+ColimaBar sets these routes when it starts. When Colima starts or stops a VM, it switches the docker context to `colima` or deletes it. While auto-start is on, ColimaBar moves the docker CLI back to `colimabar` within 15 seconds. This includes a `docker context use colima` that you ran yourself. For a profile other than the selected one, it moves to `colimabar-PROFILE`. Each time ColimaBar starts, it moves a `colima` or `default` context to `colimabar`, also when auto-start is off. To use another context for the docker CLI, pick it in the [context switcher](usage.md#context-switchers). If you pick `default` or a context of your own, then, while auto-start is on, ColimaBar returns to your pick after `colima start`, and not to `colimabar`. A pick of `default` also stays when ColimaBar starts. To use Colima for one command, run `docker --context colima ps`. The System tab shows a check mark next to each route that is set.
 
 With the launchd `DOCKER_HOST`, ColimaBar also sets `TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE=/var/run/docker.sock` with `launchctl setenv`. testcontainers mounts this path into its Ryuk container, and the path exists inside the VM. This setting applies to all apps that you open from the Dock or Finder.
 
