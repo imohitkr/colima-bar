@@ -13,6 +13,11 @@ struct ImagesTab: View {
         // Lazy: a long list builds only the rows on screen.
         LazyVStack(alignment: .leading, spacing: 6) {
             SectionHeader(title: "\(model.images.count) images · \(unused.count) unused") {
+                if model.imageUpdateCheck {
+                    Button("Check for Updates") { model.checkImagesNow() }.buttonStyle(.borderless).font(.caption)
+                        .disabled(!model.canCheckImagesNow)
+                        .hint(model.isDebug ? Help.imageUpdateDebug : Help.checkImagesNow)
+                }
                 Button("Remove dangling") { model.run(.prune, "dangling") }.buttonStyle(.borderless).font(.caption)
                     .hint(Help.removeDangling)
                 Button("Remove unused") { model.run(.prune, "images") }.buttonStyle(.borderless).font(.caption)
@@ -31,6 +36,10 @@ struct ImagesTab: View {
                             .font(.system(size: 10)).foregroundStyle(.secondary).lineLimit(1)
                     }
                     Spacer(minLength: 4)
+                    if !i.dangling, model.imageUpdates.images[ImageRef.parse(i.ref)?.normalized ?? ""]?.isUpdate == true
+                    {
+                        ImageUpdateBadge(status: .update(digest: ""))
+                    }
                     if i.containers > 0 {
                         Text("in use").font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, 4).padding(.vertical, 1)

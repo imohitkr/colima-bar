@@ -234,6 +234,37 @@ enum Help {
         "Empty the log file of this container. docker logs then shows only new lines. ColimaBar asks first."
     static let scheduledPrune =
         "Once a week, remove dangling images and unused build cache of the selected profile. It runs only while the VM runs, and no action or docker traffic runs. It never starts the VM and never asks."
+    static let imageUpdateCheck =
+        "Once a day, ask the registries if the images of your containers have a newer version. ColimaBar asks through the Docker daemon of the VM, so it uses no sign-in of your Mac. Docker Hub limits anonymous requests, so one run checks at most 3 Docker Hub images. It never starts the VM."
+    static let imageUpdateNone = "The registries answered for every image that ColimaBar checked."
+    static let imageUpdateDebug = "A debug run contacts no registry and pulls no image."
+    static let imageUpdate = "The registry has a newer image for this tag. Pull it from the ••• menu."
+    static let imageRecreate =
+        "The image of this tag is newer than the image that this container runs. Run the container again to use it."
+    static let pullNewImage =
+        "Pull the new image of this tag. The container keeps the old image until you run it again. For a Compose project, use Update and Recreate in the menu of the project."
+    static let composeUpdateRecreate =
+        "Pull the new images of this project. Then run docker compose up -d. It creates again only the services whose image changed."
+    static let pullAllImages = "Pull the new image of each tag that shows an update. Containers keep the old image."
+    static let checkImagesNow =
+        "Ask the registries now. It works once in 5 minutes. A run checks at most 3 Docker Hub images and 25 others."
+    static let imageUpdatesStrip =
+        "Images with a newer version in the registry. Updates of stopped containers count here but show no badge on the row."
+
+    /// The hint of the caption under the setting: what each failure kind means.
+    static func imageUpdateFailures(_ failures: [ImageUpdateStatus.Failure: Int]) -> String {
+        var lines: [String] = []
+        for (kind, text) in [
+            (ImageUpdateStatus.Failure.signInNeeded, "need a sign-in. ColimaBar does not use a docker login."),
+            (.notFound, "are not in the registry, or the tag is private."),
+            (.rateLimited, "hit a rate limit. ColimaBar waits 6 hours."),
+            (.unreachable, "could not reach the registry. ColimaBar tries again in 1 hour."),
+            (.other, "failed for another reason."),
+        ] {
+            if let n = failures[kind], n > 0 { lines.append("\(n) image\(n == 1 ? "" : "s") \(text)") }
+        }
+        return lines.isEmpty ? imageUpdateNone : lines.joined(separator: " ")
+    }
 
     // Profiles
     static let profile =

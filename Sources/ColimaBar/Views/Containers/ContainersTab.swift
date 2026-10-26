@@ -57,6 +57,7 @@ struct ContainersTab: View {
             }
             // Below the list: a new alert must not push the rows you're
             // reading down.
+            if model.imageUpdateCheck, !model.containers.isEmpty { ImageUpdatesStrip(model: model).padding(.top, 6) }
             if model.hasNetworkProblem { NetworkNotice(model: model, ui: ui).padding(.top, 6) }
             if !model.alerts.isEmpty || !model.notificationsAllowed {
                 AlertsStrip(model: model).padding(.top, 6)

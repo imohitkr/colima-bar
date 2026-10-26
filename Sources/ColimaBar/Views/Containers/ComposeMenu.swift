@@ -35,6 +35,10 @@ struct ComposeMenu: View {
                 Divider()
                 Button("Pull Images") { model.compose(.pull, project: project) }
                     .disabled(reason != nil).hint(Help.composePull)
+                if model.projectNeedsUpdate(project.name) {
+                    Button("Update and Recreate") { model.updateAndRecreate(project: project) }
+                        .disabled(reason != nil || !model.canPullImages).hint(Help.composeUpdateRecreate)
+                }
                 Button("Up (Detached)") { model.compose(.up, project: project) }
                     .disabled(reason != nil).hint(Help.composeUp)
                 Button("Down…") { model.compose(.down, project: project) }

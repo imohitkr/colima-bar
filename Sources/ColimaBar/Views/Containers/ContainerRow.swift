@@ -21,6 +21,7 @@ struct ContainerRow: View {
                             .foregroundStyle(healthColor(h))
                             .hint(h == "healthy" ? Help.healthy : h == "unhealthy" ? Help.unhealthy : Help.starting)
                     }
+                    if let u = model.imageUpdates.badge(for: c) { ImageUpdateBadge(status: u) }
                 }
                 inspectTarget(
                     Text(c.isRunning ? c.image : "\(c.image) · \(c.status)")
@@ -87,6 +88,11 @@ struct ContainerRow: View {
             }
             Menu {
                 Button("Inspect…") { ui.inspectID = c.id }
+                if model.imageUpdates.containers[c.id]?.isUpdate == true {
+                    Button("Pull New Image") { model.pullNewImage(containerID: c.id) }
+                        .disabled(!model.canPullImages || !model.imageUpdates.pulling.isEmpty)
+                        .hint(model.isDebug ? Help.imageUpdateDebug : Help.pullNewImage)
+                }
                 Divider()
                 Button("Logs in Terminal") { model.terminal(.containerLogs, c.name) }
                 if c.state == "running" {
