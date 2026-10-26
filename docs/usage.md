@@ -104,7 +104,7 @@ This feature is off by default, because it contacts container registries. On the
 - An orange **recreate** badge means that you pulled the new image already, but the container still runs the old one. This needs no registry call. A stopped container shows no badge.
 - The strip below the list shows the number of images with an update. **Pull All** pulls them. **Check Now** asks the registries at once. It works once in 5 minutes. The **Images** tab has **Check for Updates** and the same badge.
 - **Pull New Image** is in the ••• menu of a container with an update. It pulls the image. The container keeps the old image, and the badge changes to **recreate**. A plain container needs a new run, because ColimaBar cannot build the `docker run` command again from the container.
-- **Update and Recreate** is in the ••• menu of a Compose project. It pulls the new images of the project and runs `docker compose up -d`. That command creates again only the services whose image changed.
+- **Update and Recreate** is in the ••• menu of a Compose project. It shows when a container of the project has an **update** or **recreate** badge. It pulls the new images of the project and runs `docker compose up -d`. That command creates again only the services whose image changed.
 
 Docker Hub limits anonymous requests (about 10 an hour for each address), and each check can count as one pull. So ColimaBar checks each image at most once in 24 hours. It makes at most 3 Docker Hub calls in one hour, for all profiles together, and **Check Now** counts too. One run checks at most 25 images of other registries. While images remain that need a check, a run can start each hour. **Check Now** skips an image that ColimaBar checked in the last hour. After a rate limit answer, ColimaBar leaves Docker Hub alone for 6 hours. ColimaBar sends no sign-in, so a `docker login` does not change the limit. An unreachable registry gets a new try after 1 hour. ColimaBar skips images that a digest names, images that you built or loaded on the VM, and images that a registry does not know.
 
@@ -433,7 +433,7 @@ Open **Docker Context** in the right-click menu, or click the name next to **doc
 
 A pick runs `docker context use NAME`. It changes only the docker CLI. It does not change the launchd `DOCKER_HOST`, `~/.testcontainers.properties` or a `DOCKER_HOST` in your shell.
 
-If you pick `default` or one of your own contexts, ColimaBar remembers the pick. While auto-start is on and `colima start` switches the docker context to `colima`, ColimaBar returns to your pick, not to `colimabar`. A pick of `default` also stays when ColimaBar starts. ColimaBar forgets the pick when you pick a ColimaBar or Colima context, when you switch to a ColimaBar context in a terminal, when the context no longer exists, and when you click **Use colimabar** in [Doctor](#doctor).
+If you pick `default` or one of your own contexts, ColimaBar remembers the pick. When `colima start` switches the docker context to `colima`, ColimaBar returns to your pick, not to `colimabar`. It does this within 15 seconds while auto-start is on, and when ColimaBar starts. A pick of `default` also stays when ColimaBar starts. ColimaBar forgets the pick when you pick a ColimaBar or Colima context, when you switch to a ColimaBar context in a terminal, when the context no longer exists, and when you click **Use colimabar** in [Doctor](#doctor).
 
 The list comes from the files of the docker contexts (`$DOCKER_CONFIG/contexts` or `~/.docker/contexts`). ColimaBar starts no docker process to read it, and contacts no daemon.
 
@@ -441,7 +441,7 @@ If a switch fails, ColimaBar sends one notification and changes nothing. The log
 
 ### Kubernetes context and namespace
 
-This needs kubectl in `/opt/homebrew/bin`, `/usr/local/bin` or `/usr/bin`. If ColimaBar does not find kubectl, it shows nothing. A kubectl in another folder is not supported.
+This needs kubectl in `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin`, `/bin`, `/usr/sbin` or `/sbin`. If ColimaBar does not find kubectl, it shows nothing. A kubectl in another folder is not supported.
 
 On the System tab, in **App**, turn on **Show kubectl context and namespace**. It is off by default. Then:
 
