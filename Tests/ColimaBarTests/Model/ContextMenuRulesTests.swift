@@ -90,6 +90,15 @@ import Testing
         #expect(ContextMenuRules.kubeLabel(config, failed: false) == "kubectl: \(short) · ns")
     }
 
+    @Test func aLongestNamespaceIsShortenedInTheRowLabel() {
+        let namespace = String(repeating: "a", count: 31) + "-" + String(repeating: "z", count: 31)
+        #expect(namespace.count == 63)
+        let config = KubeConfig(current: "c", contexts: [.init(name: "c", cluster: "", namespace: namespace)])
+        let short = ContextMenuRules.shortened(namespace, to: ContextMenuRules.namespaceLimit)
+        #expect(short.count == ContextMenuRules.namespaceLimit)
+        #expect(ContextMenuRules.kubeLabel(config, failed: false) == "kubectl: c · \(short)")
+    }
+
     @Test func theKubeLabelShowsContextAndNamespaceOrTheProblem() {
         let config = KubeConfig(current: "c", contexts: [.init(name: "c", cluster: "", namespace: "shop")])
         #expect(ContextMenuRules.kubeLabel(config, failed: false) == "kubectl: c · shop")

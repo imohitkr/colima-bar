@@ -119,11 +119,19 @@ extension ColimaModel {
         return true
     }
 
-    /// Sets the namespace of the current kubectl context.
+    /// Sets the namespace of `context`, the context that the menu showed. If
+    /// another context is current now, it writes nothing and tells the user.
     @discardableResult
-    func setKubeNamespace(_ namespace: String) async -> Bool {
-        guard !isDebug, showsKubectl, let context = kubeConfig?.current else { return false }
-        guard await kubeProbe.setNamespace(namespace, context: context) else {
+    func setKubeNamespace(_ namespace: String, context: String) async -> Bool {
+        guard !isDebug, showsKubectl else { return false }
+        switch await kubeProbe.setNamespace(namespace, context: context) {
+        case .done: break
+        case .contextChanged:
+            log.notice("the kubectl context changed before a namespace pick")
+            notify("The kubectl context changed. Open the menu again.")
+            await refreshKube()
+            return false
+        case .failed:
             log.error("kubectl config set-context failed or was refused for a namespace")
             notify("ColimaBar could not set the namespace of \(context) to \(namespace). See the log.")
             return false

@@ -40,6 +40,8 @@ enum SettingsTransfer {
         case hotKey
         /// Open containers at .localhost names. HTTPS and the custom suffix are not in the file.
         case domains
+        /// The kubectl context and namespace switchers.
+        case kubectlSwitcher
 
         /// The name that the confirmation and the summary show.
         var title: String {
@@ -59,6 +61,7 @@ enum SettingsTransfer {
             case .imageUpdateCheck: "Daily image update check"
             case .hotKey: "Keyboard shortcut"
             case .domains: "Container domains"
+            case .kubectlSwitcher: "kubectl switchers"
             }
         }
     }

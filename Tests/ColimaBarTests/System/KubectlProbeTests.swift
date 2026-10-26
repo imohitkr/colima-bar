@@ -38,21 +38,21 @@ import Testing
     }
 
     private let viewArgs = ["kubectl", "config", "view", "-o", "json"]
-    private let view = #"{"current-context":"colima","contexts":[{"name":"colima"},{"name":"prod"}]}"#
+    private let view = #"{"current-context":"prod","contexts":[{"name":"colima"},{"name":"prod"}]}"#
 
     @Test func setNamespaceReadsAgainAndNamesTheContextAndNotCurrent() async {
         let calls = Recorder()
         let probe = KubectlProbe(run: calls.run(out: [viewArgs: view]))
-        #expect(await probe.setNamespace("shop", context: "prod"))
+        #expect(await probe.setNamespace("shop", context: "prod") == .done)
         #expect(calls.all == [viewArgs, ["kubectl", "config", "set-context", "prod", "--namespace=shop"]])
     }
 
     @Test func setNamespaceRefusesABadNamespaceOrContext() async {
         let calls = Recorder()
         let probe = KubectlProbe(run: calls.run(out: [viewArgs: view]))
-        #expect(await probe.setNamespace("Bad Name", context: "prod") == false)
-        #expect(await probe.setNamespace("x", context: "nope") == false)
-        #expect(await probe.setNamespace("x", context: "--current") == false)
+        #expect(await probe.setNamespace("Bad Name", context: "prod") == .failed)
+        #expect(await probe.setNamespace("x", context: "nope") == .failed)
+        #expect(await probe.setNamespace("x", context: "--current") == .failed)
         #expect(calls.all.filter { $0.contains("set-context") }.isEmpty)
     }
 
@@ -60,13 +60,21 @@ import Testing
         let calls = Recorder()
         let gone = #"{"current-context":"colima","contexts":[{"name":"colima"}]}"#
         #expect(
-            await KubectlProbe(run: calls.run(out: [viewArgs: gone])).setNamespace("shop", context: "prod") == false)
+            await KubectlProbe(run: calls.run(out: [viewArgs: gone])).setNamespace("shop", context: "prod") == .failed)
+        #expect(calls.all == [viewArgs])
+    }
+
+    @Test func setNamespaceWritesNothingWhenAnotherContextIsCurrentNow() async {
+        let calls = Recorder()
+        let other = #"{"current-context":"colima","contexts":[{"name":"colima"},{"name":"prod"}]}"#
+        let probe = KubectlProbe(run: calls.run(out: [viewArgs: other]))
+        #expect(await probe.setNamespace("shop", context: "prod") == .contextChanged)
         #expect(calls.all == [viewArgs])
     }
 
     @Test func setNamespaceWritesNothingWhenTheKubeconfigCannotBeRead() async {
         let calls = Recorder()
-        #expect(await KubectlProbe(run: calls.run(status: 1)).setNamespace("shop", context: "prod") == false)
+        #expect(await KubectlProbe(run: calls.run(status: 1)).setNamespace("shop", context: "prod") == .failed)
         #expect(calls.all == [viewArgs])
     }
 

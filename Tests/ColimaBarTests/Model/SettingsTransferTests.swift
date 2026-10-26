@@ -22,6 +22,7 @@ import Testing
         .imageUpdateCheck: .bool(false),
         .hotKey: .string("control+option+command+C"),
         .domains: .bool(true),
+        .kubectlSwitcher: .bool(true),
     ]
 
     /// A settings file with `settings` as its JSON settings object.

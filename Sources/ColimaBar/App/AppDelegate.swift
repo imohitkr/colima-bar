@@ -238,6 +238,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     self?.model.loadImageUpdateFixture(data)
                 }
             }
+            // COLIMABAR_CONTEXTS_FIXTURE=PATH: show the contexts of a JSON file
+            // instead of the real ones. For screenshots. A debug run only.
+            // It switches nothing, and it turns the kubectl row on in memory.
+            if let path = ProcessInfo.processInfo.environment["COLIMABAR_CONTEXTS_FIXTURE"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                    guard let data = FileManager.default.contents(atPath: path) else { return }
+                    self?.model.loadContextsFixture(data)
+                }
+            }
             // COLIMABAR_VMCONFIG=1: show the "More VM settings" page.
             if ProcessInfo.processInfo.environment["COLIMABAR_VMCONFIG"] == "1" { ui.showVMConfig = true }
             // COLIMABAR_RECREATE_DEMO=1: show the progress strip of a VM type
@@ -464,6 +473,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         } else {
             add("Report an Issue…", #selector(reportIssue))
         }
+        addContextItems(to: menu)
+        menu.addItem(.separator())
         let login = NSMenuItem(title: "Launch at Login", action: #selector(toggleLogin), keyEquivalent: "")
         login.target = self
         login.state = LoginItem.isEnabled ? .on : .off

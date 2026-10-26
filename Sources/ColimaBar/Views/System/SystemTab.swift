@@ -67,8 +67,7 @@ struct SystemTab: View {
             }
             .hint(Help.autoStart)
             VStack(alignment: .leading, spacing: 3) {
-                RouteRow(
-                    ok: model.routing.context, text: "docker context: \(Routing.contextName)", help: Help.routeContext)
+                DockerContextMenu(model: model)
                 RouteRow(
                     ok: model.routing.launchd, text: "Apps & IDE test runners (launchd DOCKER_HOST)",
                     help: Help.routeLaunchd)
@@ -217,6 +216,11 @@ struct SystemTab: View {
             }
             Toggle("Ask before a link starts, stops or restarts Colima", isOn: $model.askBeforeLinks)
                 .hint(Help.askBeforeLinks)
+            if model.kubectlAvailable {
+                Toggle("Show kubectl context and namespace", isOn: $model.kubectlSwitcher)
+                    .hint(Help.kubectlSwitcher)
+                    .onChange(of: model.kubectlSwitcher) { Task { await model.refreshKube() } }
+            }
             ShortcutRecorder(recording: form.shortcut)
             HStack(spacing: 6) {
                 Button("Export Settings…") { SettingsFilePanel.export(model: model) }

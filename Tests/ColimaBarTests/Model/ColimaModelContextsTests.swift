@@ -200,8 +200,17 @@ import Testing
         let after = Recorder()
         let gone = #"{"current-context":"prod","contexts":[{"name":"prod","context":{}}]}"#
         rig.model.contextRunner = after.run(out: [viewArgs: gone])
-        #expect(await rig.model.setKubeNamespace("blog") == false)
+        #expect(await rig.model.setKubeNamespace("blog", context: "colima") == false)
         #expect(after.all == [viewArgs])
+    }
+
+    @Test func aNamespaceForAContextThatIsNotCurrentAnymoreWritesNothingAndTellsTheUser() async throws {
+        let rig = try Rig(out: [viewArgs: kubeView])
+        rig.model.kubectlSwitcher = true
+        await rig.model.refreshKube()
+        #expect(await rig.model.setKubeNamespace("blog", context: "prod") == false)
+        #expect(rig.calls.all.contains { $0.contains("set-context") } == false)
+        #expect(rig.notices == ["The kubectl context changed. Open the menu again."])
     }
 
     @Test func switchingTheKubeContextRunsUseContextAndReadsAgain() async throws {
@@ -217,7 +226,7 @@ import Testing
         let rig = try Rig(out: [viewArgs: kubeView])
         rig.model.kubectlSwitcher = true
         await rig.model.refreshKube()
-        #expect(await rig.model.setKubeNamespace("blog"))
+        #expect(await rig.model.setKubeNamespace("blog", context: "colima"))
         #expect(rig.calls.all.contains(["kubectl", "config", "set-context", "colima", "--namespace=blog"]))
     }
 
@@ -225,7 +234,7 @@ import Testing
         let rig = try Rig(out: [viewArgs: kubeView])
         rig.model.kubectlSwitcher = true
         await rig.model.refreshKube()
-        #expect(await rig.model.setKubeNamespace("Bad Name") == false)
+        #expect(await rig.model.setKubeNamespace("Bad Name", context: "colima") == false)
         #expect(rig.calls.all == [viewArgs])
         #expect(rig.notices == ["ColimaBar could not set the namespace of colima to Bad Name. See the log."])
     }
@@ -264,9 +273,19 @@ import Testing
         rig.model.kubectlSwitcher = true
         await rig.model.refreshKube()
         #expect(await rig.model.switchKubeContext(to: "prod") == false)
-        #expect(await rig.model.setKubeNamespace("blog") == false)
+        #expect(await rig.model.setKubeNamespace("blog", context: "colima") == false)
         await rig.model.refreshKubeNamespaces(running: ["default"])
         #expect(rig.calls.all == [viewArgs])
+    }
+
+    @Test func theSettingIsPartOfTheSettingsFile() throws {
+        let rig = try Rig()
+        #expect(rig.model.settingsSnapshot[.kubectlSwitcher] == .bool(false))
+        #expect(
+            rig.model.apply(SettingsTransfer.Change(setting: .kubectlSwitcher, from: .bool(false), to: .bool(true)))
+                == nil)
+        #expect(rig.model.kubectlSwitcher)
+        #expect(rig.model.settingsSnapshot[.kubectlSwitcher] == .bool(true))
     }
 
     // MARK: - fixture

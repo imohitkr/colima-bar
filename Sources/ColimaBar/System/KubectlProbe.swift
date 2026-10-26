@@ -18,14 +18,25 @@ struct KubectlProbe: Sendable {
         return await run(["kubectl", "config", "use-context", name], 10).ok
     }
 
+    enum NamespaceOutcome: Sendable, Equatable {
+        case done
+        case failed
+        /// The current context is not the one that the user saw.
+        case contextChanged
+    }
+
     /// Sets the namespace of the context `context`, by its name (not `--current`).
-    /// It reads the kubeconfig again first: `set-context` makes a context that
-    /// is missing, so a context that went away since the last read gets no write.
-    func setNamespace(_ namespace: String, context: String) async -> Bool {
+    /// It reads the kubeconfig again first. `set-context` makes a context that
+    /// is missing, so a context that went away gets no write. A write goes only
+    /// to the context that is still current: the user picked it in a menu that
+    /// showed that context.
+    func setNamespace(_ namespace: String, context: String) async -> NamespaceOutcome {
         guard KubeNamespace.isValid(namespace), KubeConfig.isSafe(context),
             let fresh = await read(), fresh.contexts.contains(where: { $0.name == context })
-        else { return false }
+        else { return .failed }
+        guard fresh.current == context else { return .contextChanged }
         return await run(["kubectl", "config", "set-context", context, "--namespace=\(namespace)"], 10).ok
+            ? .done : .failed
     }
 
     /// The namespaces of a Colima cluster whose VM runs, or nil. Other
