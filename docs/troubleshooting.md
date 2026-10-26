@@ -210,6 +210,17 @@ If a restore into a volume with files fails after you clicked **Replace All File
 
 If a backup or restore ends because the VM stopped, ColimaBar removes the helper container at the first container refresh after the next launch. It looks only for containers that have both labels `com.imohitkr.colimabar.helper=1` and `com.imohitkr.colimabar.helper.kind=volume`.
 
+## Image updates do not show
+
+Image updates are off by default. See [Image updates](usage.md#image-updates). If no badge shows, check these points:
+
+- The VM must run. ColimaBar never starts the VM for a check, and a debug run makes no registry call.
+- A run checks each image once in 24 hours. **Check Now** works once in 5 minutes.
+- Docker Hub limits anonymous requests. After a rate limit answer, ColimaBar waits 6 hours for Docker Hub, and a run checks at most 3 Docker Hub images. Wait, or sign in to Docker Hub in the VM with `docker login`.
+- A private registry needs a sign-in. ColimaBar sends no credentials of its own, so it shows no badge for an image that the daemon of the VM cannot read. Hover over the line under the setting to see how many images need a sign-in.
+- ColimaBar skips an image that you built or loaded on the VM, an image that a digest names, and an image that the registry does not know.
+- If the Mac is offline, ColimaBar tries again after 1 hour.
+
 ## Auto-start fails
 
 If auto-start cannot start the VM, the docker client gets HTTP status 503 with this message:

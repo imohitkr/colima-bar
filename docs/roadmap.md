@@ -6,7 +6,6 @@ These milestones are planned next. Each milestone gets its own release. Features
 
 ## Images and contexts (0.16.0)
 
-- **Image update check**: find containers whose image tag has a newer version in the registry, and pull it. This contacts registries, so it is off by default.
 - **Context switchers**: switch the docker context, and the kubectl context and namespace.
 
 ## Integrations (0.17.0)

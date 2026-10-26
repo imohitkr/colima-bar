@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Image update check (off by default). On the System tab, turn on **Check registries for newer images daily**. A blue **update** badge shows a container whose tag has a newer image in the registry. An orange **recreate** badge shows a container that runs an older image than the one that you pulled. **Pull New Image**, **Pull All** and **Update and Recreate** for a Compose project pull the new images. ColimaBar checks each image once a day and at most 3 Docker Hub images in one run, to keep inside the rate limit of Docker Hub. See [Image updates](docs/usage.md#image-updates).
+
 ## [0.15.0] - 2026-10-23
 
 ### Added
