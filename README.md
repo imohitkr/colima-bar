@@ -33,7 +33,7 @@
 - **Context switchers**: pick the docker context, and with kubectl the Kubernetes context and namespace, from the right-click menu. While auto-start is on, ColimaBar returns to your pick after `colima start`. See [Context switchers](docs/usage.md#context-switchers).
 - **Links**: start, stop or restart the VM, or open the dashboard, from Raycast, Alfred, Shortcuts or a script with `colimabar://` links. ColimaBar asks first.
 - **Shortcut**: press a keyboard shortcut that you choose to open or close the dashboard from any app. It needs no extra permission.
-- **Shortcuts**: start, stop or restart the VM, or read its state, in the Shortcuts app with the action **Run Shell Script**. It needs no confirmation, so it suits an unattended automation. See [Shortcuts](docs/usage.md#shortcuts).
+- **Shortcuts app**: start, stop or restart the VM, or read its state, with the action **Run Shell Script**. It asks no question, so it suits an automation that runs without you. See [Shortcuts](docs/usage.md#shortcuts).
 - **Command line**: run `colimabar status`, `start`, `stop` or `doctor` in Terminal. Add `--json` for scripts.
 - **Quiet**: ColimaBar uses almost no CPU. It sends few notifications: when something fails, one when a container keeps restarting, one when a container is healthy again (off by default), when a Doctor fix ends, when a volume backup or restore ends, when Return Free Space ends, when a weekly cleanup fails, when a pull of a new image fails, when a published port or the DNS of the VM breaks, when ColimaBar refuses a link, after an auto-start that follows a Colima or Lima upgrade, one for each new version and one after an in-app update, and one the first time the icon hides.
 
