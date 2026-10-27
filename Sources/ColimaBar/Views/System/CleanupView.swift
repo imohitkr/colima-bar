@@ -161,7 +161,7 @@ struct CleanupView: View {
             SectionHeader(title: title, hint: hint) {
                 if let button {
                     Button(button.title, action: button.action)
-                        .buttonStyle(.borderless).font(.caption).disabled(model.isDebug)
+                        .buttonStyle(.header).disabled(model.isDebug)
                         .hint(model.isDebug ? Help.cleanupDebug : button.hint)
                 }
             }

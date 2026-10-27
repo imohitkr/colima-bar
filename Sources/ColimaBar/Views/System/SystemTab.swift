@@ -15,7 +15,7 @@ struct SystemTab: View {
             Divider()
             SectionHeader(title: "Disk usage") {
                 Button("Clean Up…") { ui.showCleanup = true }
-                    .buttonStyle(.borderless).font(.caption)
+                    .buttonStyle(.header)
                     .hint(Help.cleanupOpen)
             }
             Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {

@@ -14,14 +14,14 @@ struct ImagesTab: View {
         LazyVStack(alignment: .leading, spacing: 6) {
             SectionHeader(title: "\(model.images.count) images · \(unused.count) unused") {
                 if model.imageUpdateCheck {
-                    Button("Check for Updates") { model.checkImagesNow() }.buttonStyle(.borderless).font(.caption)
+                    Button("Check for Updates") { model.checkImagesNow() }.buttonStyle(.header)
                         .disabled(!model.canCheckImagesNow)
                         .hint(
                             model.isDebug ? Help.imageUpdateDebug : model.checkNowBlockedReason ?? Help.checkImagesNow)
                 }
-                Button("Remove dangling") { model.run(.prune, "dangling") }.buttonStyle(.borderless).font(.caption)
+                Button("Remove dangling") { model.run(.prune, "dangling") }.buttonStyle(.header)
                     .hint(Help.removeDangling)
-                Button("Remove unused") { model.run(.prune, "images") }.buttonStyle(.borderless).font(.caption)
+                Button("Remove unused") { model.run(.prune, "images") }.buttonStyle(.header)
                     .hint(Help.removeUnusedImages)
             }
             if list.isEmpty { EmptyStateText(text: model.images.isEmpty ? "No images" : "No matches") }

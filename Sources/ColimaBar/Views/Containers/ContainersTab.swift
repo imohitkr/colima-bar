@@ -34,7 +34,7 @@ struct ContainersTab: View {
                         }
                         if let compose = g.compose { ComposeMenu(model: model, project: compose) }
                     } else if g.key == "~standalone", model.running.count > 1 {
-                        Button("Stop all") { model.run(.stopAll) }.buttonStyle(.borderless).font(.caption)
+                        Button("Stop all") { model.run(.stopAll) }.buttonStyle(.header)
                             .hint(Help.stopAll)
                     }
                 }

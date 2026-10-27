@@ -21,7 +21,7 @@ struct AlertsStrip: View {
             }
             if !model.alerts.isEmpty {
                 SectionHeader(title: "Recent alerts") {
-                    Button("Clear") { model.clearAlerts() }.buttonStyle(.borderless).font(.caption)
+                    Button("Clear") { model.clearAlerts() }.buttonStyle(.header)
                         .hint("Dismiss these alerts.")
                 }
                 ForEach(model.alerts.prefix(5)) { a in

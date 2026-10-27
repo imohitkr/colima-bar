@@ -24,7 +24,7 @@ struct SectionHeader<Trailing: View>: View {
                 Image(systemName: "info.circle").font(.caption2).foregroundStyle(.tertiary).hint(hint)
             }
             Spacer()
-            trailing
+            HStack(spacing: 6) { trailing }
         }
         .foregroundStyle(.secondary)
         .padding(.top, 4)
