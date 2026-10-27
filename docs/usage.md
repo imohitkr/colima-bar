@@ -856,7 +856,7 @@ Use the shell route for an automation that runs without you, for example at a ti
 
 ### One-time setup
 
-Shortcuts does not run shell scripts until you allow it. Open Shortcuts, choose **Shortcuts > Settings…**, open the **Advanced** tab and turn on **Allow Running Scripts**. If you cannot find the setting, search for "scripts" in the Shortcuts settings, because Apple can change the place between macOS versions. You do this once for all shortcuts.
+Shortcuts does not run shell scripts until you allow it. Open Shortcuts, choose **Shortcuts > Settings…**, open the **Advanced** tab and turn on **Allow Running Scripts**. You do this once for all shortcuts.
 
 ### Write the recipes
 
@@ -867,25 +867,25 @@ The recipes print the exit code, so that the shortcut can test it. Without this,
 Start:
 
 ```sh
-/Applications/ColimaBar.app/Contents/Resources/bin/colimabar start ${1:+--profile "$1"} >/dev/null 2>&1; echo $?
+/Applications/ColimaBar.app/Contents/Resources/bin/colimabar start ${1:+--profile} ${1:+"$1"} >/dev/null 2>&1; echo $?
 ```
 
 Stop:
 
 ```sh
-/Applications/ColimaBar.app/Contents/Resources/bin/colimabar stop ${1:+--profile "$1"} >/dev/null 2>&1; echo $?
+/Applications/ColimaBar.app/Contents/Resources/bin/colimabar stop ${1:+--profile} ${1:+"$1"} >/dev/null 2>&1; echo $?
 ```
 
 Restart:
 
 ```sh
-/Applications/ColimaBar.app/Contents/Resources/bin/colimabar restart ${1:+--profile "$1"} >/dev/null 2>&1; echo $?
+/Applications/ColimaBar.app/Contents/Resources/bin/colimabar restart ${1:+--profile} ${1:+"$1"} >/dev/null 2>&1; echo $?
 ```
 
 Status. The output is `running`, `stopped`, `broken`, `missing`, `notInstalled` or `unknown`. The command `plutil` is part of macOS, so you need no other tool:
 
 ```sh
-/Applications/ColimaBar.app/Contents/Resources/bin/colimabar status --json ${1:+--profile "$1"} | plutil -extract vm.state raw -o - -
+/Applications/ColimaBar.app/Contents/Resources/bin/colimabar status --json ${1:+--profile} ${1:+"$1"} | plutil -extract vm.state raw -o - -
 ```
 
 To test the state, add an **If** action that tests whether the output **is** `running`.
