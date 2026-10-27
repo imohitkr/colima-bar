@@ -28,6 +28,7 @@
 - **Network health**: ColimaBar finds published ports that stopped answering on the Mac, and a VM that cannot resolve names after a VPN change. It offers a restart.
 - **Doctor**: one click checks the docker setup (context, routes, shell, plugins, VM, disk, published ports and DNS) and fixes common problems. **Repair** gets a Broken profile running again.
 - **Image updates**: find containers whose image tag has a newer version in the registry, and pull it (off by default, because it contacts registries). See [Image updates](docs/usage.md#image-updates).
+- **Image scan**: scan an image for known vulnerabilities with Trivy or Grype, if you installed one (off by default). The scanner reads a temporary copy of the image and gets no docker socket. See [Image scan](docs/usage.md#image-scan).
 - **Cleanup**: see the largest images, unused volumes, stopped containers, build cache and container logs, remove them one by one, and return free space to the Mac.
 - **Domains**: open containers at names like `web.shop.localhost` (optional), with HTTPS from a local certificate authority and a custom suffix such as `colima.internal`. See [Container domains](docs/usage.md#container-domains).
 - **Context switchers**: pick the docker context, and with kubectl the Kubernetes context and namespace, from the right-click menu. While auto-start is on, ColimaBar returns to your pick after `colima start`. See [Context switchers](docs/usage.md#context-switchers).

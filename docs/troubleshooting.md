@@ -221,6 +221,26 @@ Image updates are off by default. See [Image updates](usage.md#image-updates). I
 - ColimaBar skips an image that you built or loaded on the VM, an image that a digest names, and an image that the registry does not know.
 - If the Mac is offline, ColimaBar tries again after 1 hour.
 
+## An image scan fails
+
+The image scan is off by default. See [Image scan](usage.md#image-scan). If a scan fails, check these points:
+
+- **The setting does not show.** ColimaBar finds `trivy` and `grype` in `/opt/homebrew/bin`, `/usr/local/bin` and the system folders. A tool in another folder is not found.
+- **The first scan takes minutes.** The scanner downloads its vulnerability database. The page says so. Wait for it.
+- **"Connect to the internet for the first scan. The scanner downloads its database."** The scanner has no database yet and the Mac is offline. Connect to the internet and scan again. With a database on disk, an offline scan works.
+- **"The scanner could not update its vulnerability database. Check the connection, then scan again."** The scanner has a database, but it could not download a new one, or the database is too old. Check the connection, a VPN or a proxy, then scan again.
+- **"The scanner could not reach the internet. Check the connection, then scan again."** The scanner lost the connection during the scan. Check the connection, a VPN or a proxy, then scan again.
+- **"Not enough free disk space to export the image (needs ~SIZE)."** The scan needs 2.4 times the size of the image plus 2 GB on the Mac. Free some space. ColimaBar deletes the temporary file when the scan ends.
+- **"Docker could not export the image: …"** The text after the colon gives the reason. With the containerd image store, Docker cannot save an image whose other platforms are not on disk: the reason says "it is not on disk for every platform. Pull the image again." Pull the image again for the platform of the VM, then scan. A scan also stops when Docker sends no data for 60 seconds ("Docker sent no data for 60 seconds."), sends more than twice the size of the image ("the file is larger than expected."), or does not report the size of the image ("it has no known size.").
+- **"Docker could not export the image: Docker did not answer."** Docker did not reply to the request. Check that the VM runs, then scan again.
+- **"Docker could not export the image: the image is gone."** Someone removed the image after you started the scan. Check the **Images** tab.
+- **"The disk of your Mac is full."** The disk had no space left during the scan. Free some space, then scan again.
+- **"ColimaBar could not read the report of the scanner."** The scanner wrote a report that ColimaBar cannot read, or a report that is too large. Update the scanner, then scan again.
+- **"Docker could not export the image: ColimaBar cannot use its work folder."** `~/.cache/colima-bar/scan` is a link, a file, or a folder of another user. Remove it and scan again.
+- **"The scanner is gone. Install Trivy or Grype, then scan again."** ColimaBar found the scanner earlier, but it is not there now.
+- **"The scan took too long. ColimaBar stopped it."** ColimaBar stops a scanner after 15 minutes.
+- **The menu items are disabled.** The VM must run. Another scan, a VM wake, a VM type change or a volume transfer blocks a scan. A debug run never scans.
+
 ## Auto-start fails
 
 If auto-start cannot start the VM, the docker client gets HTTP status 503 with this message:
