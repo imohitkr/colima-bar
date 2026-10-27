@@ -129,11 +129,11 @@ The scanner reads only the temporary file. It gets no docker socket, so it canno
 
 The scanner downloads its vulnerability database from the internet. The first scan can take minutes because of that download. Later scans update the database. The databases stay on the Mac when you turn the setting off. The database of Trivy needs more than 1 GB. Trivy keeps it in `~/Library/Caches/trivy` (also a Java database, which an online scan fetches when the image has jar files). Grype keeps its database in `~/Library/Caches/grype/db`. To remove them, run `trivy clean --all` or `grype db delete`. When the Mac is offline, ColimaBar tells the scanner to use the database that it has. That database can be old, so the findings can miss new vulnerabilities. If the scanner has no database yet, the scan stops and asks you to connect to the internet. See [An image scan fails](troubleshooting.md#an-image-scan-fails).
 
-ColimaBar keeps the findings in memory only, for each profile and image ID. A restart clears them. A new pull of the tag gives a new image ID, so its badge goes away. ColimaBar logs counts, never image names or vulnerabilities. A failed scan sends one notification, for example "Scan of nginx:latest failed: …", unless the page is on screen. A successful scan sends none. The settings file holds the setting and the scanner, but not the findings.
+ColimaBar keeps the findings in memory only, for each profile and image ID. A restart, or turning the setting off, clears them. A new pull of the tag gives a new image ID, so its badge goes away. ColimaBar logs counts, never image names or vulnerabilities. A failed scan sends one notification, for example "Scan of nginx:latest failed: …", unless the page is on screen. A successful scan sends none. The settings file holds the setting and the scanner, but not the findings.
 
 ### Images and Volumes tabs
 
-These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, remove unused volumes, and back up and restore volumes. See [Back up and restore volumes](#back-up-and-restore-volumes). ColimaBar asks before it deletes volume data.
+These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, remove unused volumes, and back up and restore volumes. See [Back up and restore volumes](#back-up-and-restore-volumes). You can scan an image for known vulnerabilities. See [Image scan](#image-scan). ColimaBar asks before it deletes volume data.
 
 #### Back up and restore volumes
 

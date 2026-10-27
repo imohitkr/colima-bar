@@ -2,18 +2,14 @@
 
 [Docs index](README.md)
 
-These milestones are planned next. Each milestone gets its own release. Features that need an extra tool, such as kubectl, mkcert, Trivy or Grype, are off by default and appear only when the tool is installed.
-
-## Integrations (0.17.0)
-
-- **Shortcuts actions** to start, stop and restart the VM and to read its status.
-- **Image scan**: scan an image for known vulnerabilities with Trivy or Grype, when one is installed.
+These features are planned. A feature that needs an extra tool, such as mkcert, is off by default and appears only when the tool is installed.
 
 ## Later
 
 These features have no target version and no fixed order.
 
 - A build history view.
+- Shortcuts actions of ColimaBar (App Intents) to start, stop and restart the VM and to read its state, without **Run Shell Script**. Today, use the [Shortcuts recipes](usage.md#shortcuts).
 - mkcert support for container domains. mkcert has a root that is not limited to a few names, so ColimaBar does not sign with it.
 - VM snapshots.
 
