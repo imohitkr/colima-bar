@@ -93,6 +93,14 @@ struct ContainerRow: View {
                         .disabled(!model.canPullImages || !model.imageUpdates.pulling.isEmpty)
                         .hint(model.isDebug ? Help.imageUpdateDebug : Help.pullNewImage)
                 }
+                if model.imageScanOn, let id = ImageScanRules.normalizedID(c.imageID) {
+                    Button("Scan Image…") {
+                        ui.scanImageID = id
+                        model.startImageScan(imageID: id, name: model.displayImage(of: c))
+                    }
+                    .disabled(!model.canScanImages)
+                    .hint(model.isDebug ? Help.imageScanDebug : Help.scanImage)
+                }
                 Divider()
                 Button("Logs in Terminal") { model.terminal(.containerLogs, c.name) }
                 if c.state == "running" {

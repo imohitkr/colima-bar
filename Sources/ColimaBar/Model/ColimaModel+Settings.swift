@@ -20,6 +20,8 @@ extension ColimaModel {
             .imageUpdateCheck: .bool(imageUpdateCheck),
             .domains: .bool(domainsEnabled),
             .kubectlSwitcher: .bool(kubectlSwitcher),
+            .imageScan: .bool(imageScanEnabled),
+            .imageScanner: .string(imageScanTool.rawValue),
             // Read from Defaults, not from HotKey: the command never touches HotKey.
             .hotKey: .string(Defaults.string(.hotKey).flatMap { KeyCombo(spec: $0)?.spec } ?? ""),
         ]
@@ -47,6 +49,10 @@ extension ColimaModel {
         case (.imageUpdateCheck, .bool(let v)): imageUpdateCheck = v
         case (.domains, .bool(let v)): domainsEnabled = v
         case (.kubectlSwitcher, .bool(let v)): kubectlSwitcher = v
+        case (.imageScan, .bool(let v)): imageScanEnabled = v
+        case (.imageScanner, .string(let v)):
+            guard let tool = ImageScanner(rawValue: v) else { return "\(s.title): the value must be trivy or grype." }
+            imageScanTool = tool
         case (.profile, .string(let name)):
             // The profile can be deleted while the confirmation is open.
             guard profileNames.contains(name) else { return "Profile: \(name) does not exist on this Mac." }

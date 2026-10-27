@@ -110,6 +110,27 @@ Docker Hub limits anonymous requests (about 10 an hour for each address), and ea
 
 A failed check sends no notification and keeps the badge of the last good check. The line under the setting shows the last check and the number of images that ColimaBar could not check. Hover over it to see the reasons, for example a private registry that needs a sign-in. See [Image updates do not show](troubleshooting.md#image-updates-do-not-show). ColimaBar keeps the last answers on this Mac, so the badges come back after a restart with no new call. A pull outside ColimaBar clears an update at once. A pull that ColimaBar starts blocks auto-stop and the weekly cleanup until it ends. The settings file holds the setting but not the answers.
 
+### Image scan
+
+This feature is off by default. It needs Trivy or Grype on the Mac, for example from Homebrew (`brew install trivy`). The setting shows on the System tab only when ColimaBar finds `trivy` or `grype`. Select **Scan images for known vulnerabilities**. If both scanners exist, **Scanner** picks one. The default is Trivy.
+
+To scan an image:
+
+1. The VM must run. In the **Images** tab, click **•••** next to the image and choose **Scan for Vulnerabilities…**. For the image of a container, click **•••** next to the container and choose **Scan Image…**. A dangling image works too.
+2. ColimaBar exports the image from the running VM to a temporary file in `~/.cache/colima-bar/scan`. The page shows the progress.
+3. ColimaBar runs the scanner on that file. The page shows **Scanning…**.
+4. The page lists the findings, the most severe first: the ID, the package, the installed version and the fixed version, and a title. **Only fixable** hides the findings that have no fix. **•••** copies the ID. The page shows the first 1000 findings.
+
+**Scan Again** scans the image again. **Cancel** stops a scan. **Done** goes back to the tabs. After a scan, the image row in the **Images** tab shows a badge with the highest severity, for example **3 critical**, or **clean**. A click on the badge opens the page. While a scan runs, the row shows **scanning…**. After a failed scan, it shows **scan failed**. A click on either opens the page again, also after **Done**.
+
+One scan runs at a time. The menu items are disabled while the VM does not run, while another scan runs, while the VM wakes, while a VM type change or a volume transfer runs, and in a debug run.
+
+The scanner reads only the temporary file. It gets no docker socket, so it cannot start the VM and cannot pull the image from a registry. ColimaBar deletes the file when the scan ends, also after a failure or a cancel, and when you quit. The next launch removes the files of a scan that a crash left. The folder has the mode 0700 and the export file has the mode 0600. Trivy keeps the data of the image in memory, so it leaves no package list in its cache folder. The scanner also unpacks the image into its own temporary folder in `$TMPDIR` while it runs, and removes that folder when it ends. ColimaBar's file is not the only copy while the scan runs. The scan needs free space on the Mac: 2.4 times the size of the image, plus 2 GB.
+
+The scanner downloads its vulnerability database from the internet. The first scan can take minutes because of that download. Later scans update the database. The databases stay on the Mac when you turn the setting off. The database of Trivy needs more than 1 GB. Trivy keeps it in `~/Library/Caches/trivy` (also a Java database, which an online scan fetches when the image has jar files). Grype keeps its database in `~/Library/Caches/grype/db`. To remove them, run `trivy clean --all` or `grype db delete`. When the Mac is offline, ColimaBar tells the scanner to use the database that it has. That database can be old, so the findings can miss new vulnerabilities. If the scanner has no database yet, the scan stops and asks you to connect to the internet. See [An image scan fails](troubleshooting.md#an-image-scan-fails).
+
+ColimaBar keeps the findings in memory only, for each profile and image ID. A restart clears them. A new pull of the tag gives a new image ID, so its badge goes away. ColimaBar logs counts, never image names or vulnerabilities. A failed scan sends one notification, for example "Scan of nginx:latest failed: …", unless the page is on screen. A successful scan sends none. The settings file holds the setting and the scanner, but not the findings.
+
 ### Images and Volumes tabs
 
 These tabs show sizes and the items that containers use. You can pull the latest version of an image tag that you already have. You can also remove and prune images, remove unused volumes, and back up and restore volumes. See [Back up and restore volumes](#back-up-and-restore-volumes). ColimaBar asks before it deletes volume data.
@@ -161,7 +182,7 @@ If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-res
 - **Domains**: the switch for container domains. See [Container domains](#container-domains).
 - **Doctor**: the summary of the last Doctor run, and the **Open Doctor** button. See [Doctor](#doctor).
 - **Profiles**: shown only when you have more than one profile.
-- **App**: the daily update check, crash notifications, **Notify when a container is healthy again after an alert**, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Show kubectl context and namespace** (only if kubectl is installed, see [Context switchers](#context-switchers)), **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
+- **App**: the daily update check, crash notifications, **Notify when a container is healthy again after an alert**, **Keep logs of removed containers that fail**, **Launch ColimaBar at login**, **Show kubectl context and namespace** (only if kubectl is installed, see [Context switchers](#context-switchers)), **Scan images for known vulnerabilities** (only if Trivy or Grype is installed, see [Image scan](#image-scan)), **Ask before a link starts, stops or restarts Colima** (see [Links](#links-url-scheme)), **Keyboard shortcut for the dashboard** (see [The dashboard shortcut](#the-dashboard-shortcut)), and **Export Settings…** and **Import Settings…**. See [Export and import settings](#export-and-import-settings).
 
 ### VM settings
 
@@ -329,7 +350,7 @@ If the VM was stopped, Colima must start it once to create the new disk. Thus Co
 
 Use these buttons to copy your ColimaBar settings to a different Mac.
 
-**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup, the daily image update check, the keyboard shortcut, container domains and the kubectl switchers. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
+**Export Settings…** saves a JSON file. The default name is `ColimaBar-settings.json`. The file holds these settings: auto-start, auto-stop and its time, **Stop sooner on battery or in Low Power Mode**, **Hide menu bar icon while Colima is stopped**, crash notifications, recovery notifications, **Keep logs of removed containers that fail**, the daily update check, the selected profile, the login item, the weekly cleanup, the daily image update check, the keyboard shortcut, container domains, the kubectl switchers, the image scan and its scanner. It does not hold Colima settings such as CPU or memory, or internal ColimaBar data.
 
 **Import Settings…** reads such a file. ColimaBar does this:
 
@@ -342,6 +363,8 @@ Use these buttons to copy your ColimaBar settings to a different Mac.
 - It shows the changes and asks before it applies them. Then it shows the applied and skipped settings.
 
 The `kubectlSwitcher` value is `true` or `false`. It turns the [kubectl switchers](#context-switchers) on or off.
+
+The `imageScan` value is `true` or `false`. It turns the [image scan](#image-scan) on or off. The `imageScanner` value is `"trivy"` or `"grype"`. ColimaBar skips any other value.
 
 The `hotKey` value is a text with these parts, joined with `+`:
 
@@ -516,6 +539,7 @@ ColimaBar sends few notifications. It sends one in these cases:
 - **Return Free Space** ends. The notification gives the size of the disk image before and after. See [Clean up disk space](#clean-up-disk-space).
 - The weekly cleanup fails.
 - A pull of a new image fails. See [Image updates](#image-updates).
+- An image scan fails, and its page is not on screen. A cancel and a good scan send none. See [Image scan](#image-scan).
 - A volume backup or restore ends or fails. The notification has the volume name and the file name, never the path. See [Back up and restore volumes](#back-up-and-restore-volumes).
 - A docker compose command fails, or ColimaBar stops it after 15 minutes. The notification gives the exit code, not the output. See [Compose projects](#compose-projects).
 - A published port answers in the VM but not on the Mac, or the VM cannot resolve host names while the Mac can. The notification has a **Restart** button. See [When the network changes](#when-the-network-changes).

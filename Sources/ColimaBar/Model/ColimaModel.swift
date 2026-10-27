@@ -109,6 +109,30 @@ final class ColimaModel {
             if !isDebug { domainsStore.set(kubectlSwitcher, forKey: Defaults.Key.kubectlSwitcher.rawValue) }
         }
     }
+    /// Scan images for known vulnerabilities (`ColimaModel+ImageScan`). Off by
+    /// default. It is saved in `domainsStore`, like the other settings that a
+    /// test must not persist. Off forgets the scan and its reports.
+    var imageScanEnabled = false {
+        didSet {
+            guard imageScanEnabled != oldValue else { return }
+            // A debug run never writes a setting.
+            if !isDebug { domainsStore.set(imageScanEnabled, forKey: Defaults.Key.imageScan.rawValue) }
+            if !imageScanEnabled { resetImageScan(dropReports: true) }
+        }
+    }
+    /// The scanner that the user picked. It counts only if it is installed.
+    var imageScanTool = ImageScanner.trivy {
+        didSet {
+            guard imageScanTool != oldValue, !isDebug else { return }
+            domainsStore.set(imageScanTool.rawValue, forKey: Defaults.Key.imageScanner.rawValue)
+        }
+    }
+    /// The scanners that are on the search path, Trivy first.
+    private(set) var scannersAvailable: [ImageScanner] = []
+    /// The last scan, or nil. The page and the Images tab read it.
+    private(set) var imageScanState: ImageScanState?
+    /// The finished scans of this launch, by `profile/imageID`. In memory only.
+    private(set) var imageScanReports: [String: ImageScanReport] = [:]
     /// The last Doctor run (see ColimaModel+Doctor), or nil before the first.
     private(set) var doctorReport: DoctorReport?
     /// A Doctor check or fix runs now.
@@ -416,6 +440,34 @@ final class ColimaModel {
     @ObservationIgnored var kubeNamespaceAt: [String: Date] = [:]
     /// A debug run loaded COLIMABAR_CONTEXTS_FIXTURE: no refresh replaces it.
     @ObservationIgnored var contextsFixtureLoaded = false
+    /// Finds a scanner. A test process finds none unless the test says so.
+    @ObservationIgnored var scannerLocator: (String) -> String? = { TestProcess.isRunning ? nil : Shell.which($0) }
+    /// How the image scan starts a scanner. A test passes a fake.
+    @ObservationIgnored var scanRun: ImageScanRunner.Run = ImageScanRunner.system
+    /// The work folder of the image scan. A test process gets its own.
+    @ObservationIgnored var scanDir =
+        TestProcess.isRunning ? NSTemporaryDirectory() + "colimabar-no-scan-\(getpid())" : Paths.scanDir
+    /// The free bytes where the export goes. A test passes a fake.
+    @ObservationIgnored var scanFreeSpace: @Sendable () -> Int64? = { ImageScanRunner.freeSpace(near: Paths.cacheDir) }
+    /// The Mac has a route to the internet. A test passes a fake.
+    @ObservationIgnored var scanOnline: @Sendable () async -> Bool = { await NetworkReachability.isOnline() }
+    /// The scanner has a database on disk. A test passes a fake.
+    @ObservationIgnored var scanHasDatabase: (ImageScanner) -> Bool = { ColimaModel.databaseOnDisk($0) }
+    /// The versions of the scanners, read once in this launch.
+    @ObservationIgnored var scannerVersions: [ImageScanner: String] = [:]
+    @ObservationIgnored var imageScanRunner: ImageScanRunner?
+    /// The task of the scan that runs now. Tests wait for it.
+    @ObservationIgnored var imageScanTask: Task<Void, Never>?
+    /// Counts the starts and resets of the scan. Only the scan with the current value may report.
+    @ObservationIgnored var imageScanToken = 0
+    /// The profile whose actions the export holds, or nil.
+    @ObservationIgnored var imageScanHold: String?
+    /// The scan page is on screen. The model sends no failure notice then.
+    @ObservationIgnored var imageScanOnScreen = false
+    /// A debug run loaded COLIMABAR_SCAN_FIXTURE: no refresh replaces it.
+    @ObservationIgnored var scanFixtureLoaded = false
+    /// The data of that fixture. Each refresh of the image list applies it again.
+    @ObservationIgnored var scanFixture: ImageScanFixture?
     /// The proxy of container domains. It listens only while the setting is on.
     @ObservationIgnored let domainProxy: any DomainProxying
     /// Where the setting is saved. A test process gets its own empty store, so no test reads or writes the real one.
@@ -604,6 +656,9 @@ final class ColimaModel {
             .flatMap(DomainSuffix.valid)
         imageUpdateCheck = (store.object(forKey: Defaults.Key.imageUpdateCheck.rawValue) as? Bool) ?? false
         kubectlSwitcher = (store.object(forKey: Defaults.Key.kubectlSwitcher.rawValue) as? Bool) ?? false
+        imageScanEnabled = (store.object(forKey: Defaults.Key.imageScan.rawValue) as? Bool) ?? false
+        imageScanTool =
+            store.string(forKey: Defaults.Key.imageScanner.rawValue).flatMap { ImageScanner(rawValue: $0) } ?? .trivy
         if inTest { dockerConfigDir = NSTemporaryDirectory() + "colimabar-no-docker-\(getpid())" }
         let (cache, cacheProblem) = ImageUpdateCache.decodeChecked(
             store.string(forKey: Defaults.Key.imageUpdateCache.rawValue))
@@ -660,6 +715,8 @@ final class ColimaModel {
             publishAppStatus()
             // Older versions left temporary keychain files in the cache folder.
             domainTLS.cleanStale()
+            // An export that a crash left behind can be as large as an image.
+            removeScanLeftovers()
             if domainsEnabled { startDomainProxy(retryFirst: true) }
             startHTTPSAtLaunch()
             if domainsEnabled, domainSuffix != nil { Task { await startDNSResponder() } }
@@ -760,6 +817,8 @@ final class ColimaModel {
             dnsResponder.stop()
             domainProxy.stop()
             profileProxies.shutdown()
+            // A scan that runs now stops, and its files go. The scanner process ends with the cancel.
+            stopImageScanForQuit()
             AppStatusFile.removeIfOwned()
         }
     }
@@ -870,6 +929,7 @@ final class ColimaModel {
 
     /// `urgentDF`: a user action changed disk use, so df skips the 30 s gap.
     func refreshAll(urgentDF: Bool = false) async {
+        refreshScanners()
         await refreshStatus()
         if state == .running {
             await refreshContainers()
@@ -1027,6 +1087,8 @@ final class ColimaModel {
         set(\.logSizesChecking, false)
         logSizesCheckedAt = nil
         resetImageUpdates()
+        // After the export the scan reads only its file: a stopped VM does not end it.
+        if because == .profileChanged || imageScanHold != nil { resetImageScan(dropReports: false) }
         set(\.cpuHistory, [])
         set(\.memHistory, [])
     }
@@ -1225,6 +1287,7 @@ final class ColimaModel {
                     isAnonymous: $0.Labels?["com.docker.volume.anonymous"] != nil)
             }.sorted { ($0.links, $0.size) > ($1.links, $1.size) })
         set(\.cleanup, CleanupReport.make(from: d))
+        applyImageScanFixture()
         updateLogItems()
     }
 
@@ -1458,6 +1521,15 @@ final class ColimaModel {
             actionsInFlight: busyActions(profile), waking: wakes[profile] != nil,
             transferring: volumeTransfer != nil, proxyTransfers: selectedTransfers(), trimming: isTrimming,
             recreating: recreate != nil, checking: checking)
+    }
+
+    /// True if a scan of an image may start now. The menu items read it.
+    var canScanImages: Bool {
+        ImageScanRules.mayScan(
+            enabled: imageScanEnabled, scannerFound: activeScanner != nil, isDebug: isDebug,
+            updateRestarting: updateRestarting, running: state == .running, hasDockerSocket: hasDockerSocket,
+            waking: wakes[profile] != nil, recreating: recreate != nil, transferring: volumeTransfer != nil,
+            scanning: imageScanState?.isRunning == true)
     }
 
     /// The references that a registry check of the selected profile starts
@@ -2103,6 +2175,10 @@ final class ColimaModel {
     /// `ColimaModel+Compose` stores its state through these two.
     func setComposeBusy(_ all: Set<String>) { set(\.composeBusy, all) }
     func setImageUpdates(_ state: ImageUpdateState) { set(\.imageUpdates, state) }
+    /// `ColimaModel+ImageScan` stores its state through these.
+    func setScanners(_ tools: [ImageScanner]) { set(\.scannersAvailable, tools) }
+    func setImageScan(state: ImageScanState?) { set(\.imageScanState, state) }
+    func setImageScan(reports: [String: ImageScanReport]) { set(\.imageScanReports, reports) }
     func setComposeOutput(_ lines: [String], key: String) { composeOutput[key] = lines }
     func setComposeIssues(_ missing: Set<String>, hasDocker: Bool) {
         set(\.composeMissing, missing)

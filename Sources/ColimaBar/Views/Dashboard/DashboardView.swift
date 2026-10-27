@@ -21,6 +21,8 @@ struct DashboardView: View {
                 CleanupView(model: model, ui: ui)
             } else if let id = ui.inspectID, model.state == .running {
                 InspectView(model: model, ui: ui, id: id)
+            } else if let id = ui.scanImageID, model.state == .running {
+                ImageScanView(model: model, ui: ui, id: id)
             } else if model.state == .running {
                 LiveTiles(model: model).padding(.horizontal, 12).padding(.vertical, 10)
                 Picker("", selection: $ui.tab) {
@@ -35,7 +37,7 @@ struct DashboardView: View {
                     Group {
                         switch ui.tab {
                         case .containers: ContainersTab(model: model, ui: ui)
-                        case .images: ImagesTab(model: model, search: ui.search)
+                        case .images: ImagesTab(model: model, ui: ui)
                         case .volumes: VolumesTab(model: model, search: ui.search)
                         case .system: SystemTab(model: model, form: ui.system, ui: ui)
                         }
@@ -58,8 +60,16 @@ struct DashboardView: View {
         // The model fetches disk usage and routing only for the tabs that show them.
         .onChange(of: ui.tab, initial: true) { model.dashboardTab = ui.tab }
         // The container belongs to the VM that the page was open on.
-        .onChange(of: model.profile) { ui.inspectID = nil }
-        .onChange(of: model.state) { if model.state != .running { ui.inspectID = nil } }
+        .onChange(of: model.profile) {
+            ui.inspectID = nil
+            ui.scanImageID = nil
+        }
+        .onChange(of: model.state) {
+            if model.state != .running {
+                ui.inspectID = nil
+                ui.scanImageID = nil
+            }
+        }
         .background {
             Button("") { Task { await model.refreshAll() } }.keyboardShortcut("r").hidden()
             Button("") { searchFocused = true }.keyboardShortcut("f").hidden()

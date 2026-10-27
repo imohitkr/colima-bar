@@ -19,11 +19,14 @@ final class PrivateFileWriter {
     private var fd: Int32
     private(set) var bytes: Int64 = 0
 
+    /// The path of the file that holds the bytes until `commit`.
+    static func tempPath(for destination: String) -> String { "\(destination).\(getpid()).tmp" }
+
     /// Throws a `POSIXError`: `EEXIST` if `DEST` exists and `replace` is false.
     init(destination: String, replace: Bool) throws {
         self.destination = destination
         self.replace = replace
-        temp = "\(destination).\(getpid()).tmp"
+        temp = Self.tempPath(for: destination)
         // Fail early, before ColimaBar reads the whole volume. `commit` checks again.
         var probe = stat()
         if !replace, lstat(destination, &probe) == 0 { throw POSIXError(.EEXIST) }

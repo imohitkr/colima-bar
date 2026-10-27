@@ -294,6 +294,32 @@ enum Help {
     static let kubeNamespace =
         "The namespace of the current kubectl context. ColimaBar lists namespaces only for a Colima cluster whose VM runs. For another cluster, use Other… and type the name."
     static let contextDebug = "Not in a debug run."
+
+    // Image scan
+    static let imageScanSetting =
+        "Show Scan for Vulnerabilities… in the image menu and Scan Image… in the container menu. ColimaBar runs Trivy or Grype on your Mac only after a click. The scanner downloads its vulnerability database from the internet."
+    static let imageScanner = "The scanner for image scans. ColimaBar shows this choice because both are installed."
+    static let imageScan =
+        "Scan this image with Trivy (or Grype) on the Mac. ColimaBar exports the image from the running VM to a temporary file, then deletes it. The scanner downloads its vulnerability database from the internet on the first scan and updates it later."
+    static let scanImage =
+        "Scan the image of this container with Trivy (or Grype) on the Mac. ColimaBar exports the image from the running VM to a temporary file, then deletes it. The scanner downloads its vulnerability database from the internet on the first scan and updates it later."
+    static let imageScanDebug = "Not in a debug run."
+    static let scanAgain = "Scan this image again. ColimaBar exports it again and replaces the report."
+    static let scanCancel = "Stop the scan. ColimaBar deletes the temporary files."
+    static let scanDone = "Close the scan and go back to the list."
+    static let scanStrip = "The number of findings for each severity."
+    static let onlyFixable = "Show only the findings that have a fixed version."
+    static let scanMore =
+        "The page shows the first \(ImageScanReport.maxRows) findings, the most severe first."
+    static let scanRunningBadge = "ColimaBar is scanning this image. Click to see the progress or to cancel."
+    static let scanFailedBadge = "The last scan of this image failed. Click to see the reason."
+    static let scanFixed = "The installed version and the version that fixes the finding."
+    static let scanNoFix = "The installed version. No fixed version exists yet."
+    static let scanRowMenu = "Copy the ID of the vulnerability."
+    static func scanBadge(_ text: String) -> String {
+        "Last scan of this image: \(text). Click to see the findings. ColimaBar keeps the result until you quit."
+    }
+    static func scanSeverity(_ title: String) -> String { "Severity: \(title.lowercased())." }
     static let routeLaunchd =
         "Apps that you open from the Dock or Finder get DOCKER_HOST. Thus IDE test runners (GoLand, PyCharm, VS Code) use the ColimaBar socket. Restart an IDE that was already open."
     static let routeTestcontainers = "testcontainers (Java, Go, …) reads docker.host from ~/.testcontainers.properties."
