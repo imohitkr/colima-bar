@@ -7,12 +7,12 @@ import Testing
     private func may(
         enabled: Bool = true, scannerFound: Bool = true, isDebug: Bool = false, updateRestarting: Bool = false,
         running: Bool = true, hasDockerSocket: Bool = true, waking: Bool = false, recreating: Bool = false,
-        transferring: Bool = false, proxyTransfers: Int = 0, scanning: Bool = false
+        transferring: Bool = false, scanning: Bool = false
     ) -> Bool {
         ImageScanRules.mayScan(
             enabled: enabled, scannerFound: scannerFound, isDebug: isDebug, updateRestarting: updateRestarting,
             running: running, hasDockerSocket: hasDockerSocket, waking: waking, recreating: recreating,
-            transferring: transferring, proxyTransfers: proxyTransfers, scanning: scanning)
+            transferring: transferring, scanning: scanning)
     }
 
     @Test func aScanMayStartWhenNothingBlocks() { #expect(may()) }
@@ -27,7 +27,6 @@ import Testing
         #expect(!may(waking: true))
         #expect(!may(recreating: true))
         #expect(!may(transferring: true))
-        #expect(!may(proxyTransfers: 1))
         #expect(!may(scanning: true))
     }
 
@@ -42,6 +41,22 @@ import Testing
     @Test func theByteCapIsTwiceTheImageSize() {
         #expect(ImageScanRules.byteCap(imageSize: 500) == 1000)
         #expect(ImageScanRules.byteCap(imageSize: -5) == 0)
+    }
+
+    @Test func aFailureNotifiesUnlessTheUserCancelledOrLooksAtThePage() {
+        #expect(ImageScanRules.mayNotify(.timeout, pageVisible: false))
+        #expect(!ImageScanRules.mayNotify(.timeout, pageVisible: true))
+        #expect(!ImageScanRules.mayNotify(.cancelled, pageVisible: false))
+    }
+
+    @Test func aTaggedImageRowKeepsTheImageIDInFront() {
+        let id = "sha256:" + String(repeating: "ab", count: 32)
+        let row = ImageRow(
+            id: id + "nginx:latest", repo: "nginx", tag: "latest", size: 1, created: Date(), containers: 0)
+        #expect(row.imageID == id)
+        #expect(ImageScanRules.normalizedID(row.imageID) == String(repeating: "ab", count: 32))
+        let dangling = ImageRow(id: id, repo: "<none>", tag: "<none>", size: 1, created: Date(), containers: 0)
+        #expect(dangling.imageID == id)
     }
 
     @Test func onlyHexIDsPass() {

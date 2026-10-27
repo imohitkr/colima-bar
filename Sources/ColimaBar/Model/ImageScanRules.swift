@@ -17,11 +17,10 @@ enum ImageScanRules {
     /// and nothing else changes it. A debug run never scans.
     static func mayScan(
         enabled: Bool, scannerFound: Bool, isDebug: Bool, updateRestarting: Bool, running: Bool,
-        hasDockerSocket: Bool, waking: Bool, recreating: Bool, transferring: Bool, proxyTransfers: Int,
-        scanning: Bool
+        hasDockerSocket: Bool, waking: Bool, recreating: Bool, transferring: Bool, scanning: Bool
     ) -> Bool {
         enabled && scannerFound && !isDebug && !updateRestarting && running && hasDockerSocket && !waking
-            && !recreating && !transferring && proxyTransfers == 0 && !scanning
+            && !recreating && !transferring && !scanning
     }
 
     /// The free space that the export of an image of `imageSize` bytes needs.
@@ -42,6 +41,12 @@ enum ImageScanRules {
             hex.utf8.allSatisfy({ ($0 >= 0x30 && $0 <= 0x39) || ($0 >= 0x61 && $0 <= 0x66) })
         else { return nil }
         return hex
+    }
+
+    /// A failed scan sends a notification, unless the user cancelled it or
+    /// looks at the page of the scan now.
+    static func mayNotify(_ error: ImageScanError, pageVisible: Bool) -> Bool {
+        error != .cancelled && !pageVisible
     }
 
     static func shortID(_ hex: String) -> String { String(hex.prefix(12)) }

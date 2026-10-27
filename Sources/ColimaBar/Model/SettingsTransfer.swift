@@ -42,6 +42,10 @@ enum SettingsTransfer {
         case domains
         /// The kubectl context and namespace switchers.
         case kubectlSwitcher
+        /// The scan of images for known vulnerabilities.
+        case imageScan
+        /// The scanner for that: `trivy` or `grype`.
+        case imageScanner
 
         /// The name that the confirmation and the summary show.
         var title: String {
@@ -62,6 +66,8 @@ enum SettingsTransfer {
             case .hotKey: "Keyboard shortcut"
             case .domains: "Container domains"
             case .kubectlSwitcher: "kubectl switchers"
+            case .imageScan: "Image scan"
+            case .imageScanner: "Image scanner"
             }
         }
     }
@@ -204,6 +210,9 @@ enum SettingsTransfer {
         case .profile:
             guard let name = raw as? String, ProfileName.isValid(name) else { return nil }
             return .string(name)
+        case .imageScanner:
+            guard let text = raw as? String, let tool = ImageScanner(rawValue: text) else { return nil }
+            return .string(tool.rawValue)
         case .hotKey:
             guard let text = raw as? String else { return nil }
             if text.isEmpty { return .string("") }
@@ -220,6 +229,7 @@ enum SettingsTransfer {
         case .autoStopMinutes:
             "the value must be a whole number from \(IdleMinutes.range.lowerBound) to \(IdleMinutes.range.upperBound)."
         case .profile: "the value is not a valid profile name."
+        case .imageScanner: "the value must be trivy or grype."
         case .hotKey: "the value is not a valid keyboard shortcut, for example control+option+command+C."
         default: "the value must be true or false."
         }

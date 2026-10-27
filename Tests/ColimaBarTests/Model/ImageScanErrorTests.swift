@@ -21,6 +21,29 @@ import Testing
         #expect(ImageScanError.classify(status: status, log: log) == expected)
     }
 
+    @Test func aMissingProgramGivesStatus127BecauseShellRunsEnv() {
+        let log = "env: trivy: No such file or directory"
+        #expect(ImageScanError.classify(status: 127, log: log) == .toolMissing)
+    }
+
+    @Test func aStoppedScannerIsATimeoutWhateverItPrints() {
+        let log = "FATAL context canceled"
+        #expect(ImageScanError.classify(status: 1, log: log, timedOut: true) == .timeout)
+        #expect(ImageScanError.classify(status: 1, log: log) == .other(log))
+    }
+
+    @Test(arguments: [
+        ("the vulnerability database was built 9 days ago (max allowed age is 5 days)", true),
+        ("failed to download vulnerability DB: dial tcp: i/o timeout", true),
+        ("unable to update vulnerability database", true),
+        ("failed to download vulnerability DB: dial tcp: i/o timeout", false),
+    ])
+    func aScannerWithADatabaseNeedsAnUpdateNotAFirstScan(log: String, hadDatabase: Bool) {
+        let error = ImageScanError.classify(status: 1, log: log, hadDatabase: hadDatabase)
+        #expect(error == (hadDatabase ? .databaseUpdate : .noDatabase))
+        #expect(!ImageScanError.databaseUpdate.message.contains("first scan"))
+    }
+
     @Test func anUnknownFailureShowsTheLastLineCutTo120Characters() {
         let long = String(repeating: "x", count: 200)
         let error = ImageScanError.classify(status: 2, log: "first\n\(long)\n\n")

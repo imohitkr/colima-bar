@@ -84,6 +84,10 @@ enum Defaults {
         case dockerContextChoice
         /// Show the kubectl context and namespace switchers. Off by default.
         case kubectlSwitcher
+        /// Scan images for known vulnerabilities (`ColimaModel+ImageScan`). Off by default.
+        case imageScan
+        /// The scanner for that, `trivy` or `grype`. Unset means Trivy.
+        case imageScanner
     }
 
     static func string(_ k: Key) -> String? { UserDefaults.standard.string(forKey: k.rawValue) }

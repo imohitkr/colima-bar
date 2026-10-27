@@ -73,6 +73,8 @@ enum Shell {
     struct Result {
         let status: Int32
         let out: String
+        /// ColimaBar stopped the process because it ran past its time limit.
+        var timedOut = false
         var ok: Bool { status == 0 }
     }
 
@@ -145,7 +147,9 @@ enum Shell {
                     return
                 }
                 handle?.attach(p)
+                var timedOut = false
                 if exited.wait(timeout: .now() + timeout) == .timedOut {
+                    timedOut = true
                     p.terminate()
                     if exited.wait(timeout: .now() + 10) == .timedOut {
                         kill(p.processIdentifier, SIGKILL)
@@ -158,7 +162,7 @@ enum Shell {
                 if eof.wait(timeout: .now() + 0.5) == .timedOut {
                     pipe.fileHandleForReading.readabilityHandler = nil
                 }
-                cont.resume(returning: Result(status: p.terminationStatus, out: out.string))
+                cont.resume(returning: Result(status: p.terminationStatus, out: out.string, timedOut: timedOut))
             }
         }
     }

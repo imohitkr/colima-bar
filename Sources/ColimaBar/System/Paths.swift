@@ -31,6 +31,9 @@ enum Paths {
     /// The work folder of an in-app update: the download, the unpacked copy
     /// and the previous version. The next launch after an update removes it.
     static let updateDir = "\(cacheDir)/update"
+    /// The work folder of an image scan: the exported tar file and the report
+    /// of the scanner (mode 0700). The scan removes both. The next launch removes leftovers.
+    static let scanDir = "\(cacheDir)/scan"
     /// The proxy socket of one profile, or nil if the name is invalid or the
     /// path is too long for a unix socket (see ProfileSocket).
     static func profileSocket(_ profile: String) -> String? { ProfileSocket.path(dir: profilesDir, profile: profile) }

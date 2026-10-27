@@ -23,6 +23,8 @@ import Testing
         .hotKey: .string("control+option+command+C"),
         .domains: .bool(true),
         .kubectlSwitcher: .bool(true),
+        .imageScan: .bool(false),
+        .imageScanner: .string("trivy"),
     ]
 
     /// A settings file with `settings` as its JSON settings object.
@@ -88,6 +90,16 @@ import Testing
         #expect(plan.changes.map(\.setting) == [.imageUpdateCheck])
         #expect(T.Setting.imageUpdateCheck.title == "Daily image update check")
         #expect(!T.Setting.allCases.map(\.rawValue).contains("imageUpdateCache"))
+    }
+
+    @Test func theImageScanSettingsAreValidated() throws {
+        let plan = try T.plan(file(#"{"imageScan": true, "imageScanner": "grype"}"#), current: sample, profiles: [])
+        #expect(Set(plan.changes.map(\.setting)) == [.imageScan, .imageScanner])
+        let bad = try T.decode(file(#"{"imageScanner": "clamav", "imageScan": "yes"}"#))
+        #expect(bad.values.isEmpty)
+        #expect(bad.skipped.count == 2)
+        #expect(bad.skipped.contains { $0.contains("trivy or grype") })
+        #expect(T.Setting.imageScan.title == "Image scan")
     }
 
     /// The date of the last weekly cleanup is machine state, not a setting.

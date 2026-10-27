@@ -96,6 +96,8 @@ struct ImageRow: Identifiable, Equatable {
     let created: Date
     let containers: Int
     var dangling: Bool { repo == "<none>" }
+    /// The ID of the image: `sha256:` and 64 hex digits. A tagged row adds the tag to its `id`.
+    var imageID: String { String(id.prefix(71)) }
     var ref: String {
         dangling ? String(id.replacingOccurrences(of: "sha256:", with: "").prefix(12)) : "\(repo):\(tag)"
     }
