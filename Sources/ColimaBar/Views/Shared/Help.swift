@@ -317,7 +317,7 @@ enum Help {
     static let scanNoFix = "The installed version. No fixed version exists yet."
     static let scanRowMenu = "Copy the ID of the vulnerability."
     static func scanBadge(_ text: String) -> String {
-        "Last scan of this image: \(text). Click to see the findings. ColimaBar keeps the result until you quit."
+        "Last scan of this image: \(text). Click to see the findings. ColimaBar keeps the result until you quit or turn the scan off."
     }
     static func scanSeverity(_ title: String) -> String { "Severity: \(title.lowercased())." }
     static let routeLaunchd =

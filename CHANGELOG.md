@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-27
+
 ### Added
 
 - Image scan (off by default, shown only when Trivy or Grype is installed). On the System tab, turn on **Scan images for known vulnerabilities**. **Scan for Vulnerabilities…** in the menu of an image, or **Scan Image…** in the menu of a container, exports the image from the running VM to a temporary file and runs the scanner on that file. The scan page lists the findings by severity, and the Images tab shows a badge with the highest severity. The scanner gets no docker socket and pulls no image. ColimaBar deletes the file when the scan ends. A debug run exports no image and runs no scanner. See [Image scan](docs/usage.md#image-scan).
@@ -311,7 +313,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/imohitkr/colima-bar/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/imohitkr/colima-bar/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/imohitkr/colima-bar/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/imohitkr/colima-bar/compare/v0.14.0...v0.14.1
