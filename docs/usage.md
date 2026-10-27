@@ -844,9 +844,64 @@ Examples:
 - Terminal: `open -g 'colimabar://start?profile=work'`
 - Raycast: make a Quicklink with the link `colimabar://stop`.
 - Alfred: make a Custom Search with the link `colimabar://start?profile={query}`.
-- Shortcuts: use the action **Open URLs** with the link.
+- Shortcuts: use the action **Open URLs** with the link. By default, a link asks first. For an automation that runs without you, use the [Shortcuts recipes](#shortcuts).
 
 macOS learns the scheme when ColimaBar runs from an Applications folder. If a link does nothing, see [A link does nothing](troubleshooting.md#a-link-does-nothing).
+
+## Shortcuts
+
+The Shortcuts app can start, stop and restart the VM, and read its state, with the action **Run Shell Script** and the [command line](#command-line). ColimaBar has no actions of its own in Shortcuts.
+
+Use **Run Shell Script** for an automation that runs without you, for example at a time of day or when you connect to a Wi-Fi network. By default, a [`colimabar://` link](#links-url-scheme) asks before it starts, stops or restarts a VM, so an automation that runs without you waits for your answer. A link also gives no data back.
+
+### One-time setup
+
+Shortcuts does not run shell scripts until you allow it. Open Shortcuts, choose **Shortcuts > Settings…**, open the **Advanced** tab and turn on **Allow Running Scripts**. You do this once for all shortcuts.
+
+### Write the recipes
+
+In each recipe, add one **Run Shell Script** action and paste the script. Keep the shell `zsh` (the default). Shortcuts runs a script with a short `PATH`. Use the full path of the command. If you did not install ColimaBar in `/Applications`, change the path.
+
+The recipes print the exit code. The output of the action is `0` when the command works. Add an **If** action that tests whether the output **is** `0`. The recipes also print the code when the command fails, so the shortcut does not stop with an error.
+
+Start:
+
+```sh
+/Applications/ColimaBar.app/Contents/Resources/bin/colimabar start ${1:+--profile} ${1:+"$1"} >/dev/null 2>&1 && printf 0 || printf %s $?
+```
+
+Stop:
+
+```sh
+/Applications/ColimaBar.app/Contents/Resources/bin/colimabar stop ${1:+--profile} ${1:+"$1"} >/dev/null 2>&1 && printf 0 || printf %s $?
+```
+
+Restart:
+
+```sh
+/Applications/ColimaBar.app/Contents/Resources/bin/colimabar restart ${1:+--profile} ${1:+"$1"} >/dev/null 2>&1 && printf 0 || printf %s $?
+```
+
+Status:
+
+```sh
+s=$(/Applications/ColimaBar.app/Contents/Resources/bin/colimabar status --json ${1:+--profile} ${1:+"$1"} 2>/dev/null | plutil -extract vm.state raw -o - - 2>/dev/null) || s=unknown; printf %s "$s"
+```
+
+The output is `running`, `stopped`, `broken`, `missing`, `notInstalled` or `unknown`. A profile name that is not valid gives `unknown`. The command `plutil` is part of macOS, so you need no other tool. To test the state, add an **If** action that tests whether the output **is** `running`.
+
+### Choose a profile
+
+Without an argument, the commands use the profile that ColimaBar shows. To use another profile, set **Pass Input** of the action to **as arguments**. Then give the action the name of the profile as its input, for example with a **Text** action before it. The script reads the name as `$1`. If the input is empty, the script uses the profile that ColimaBar shows. Do not put a Shortcuts variable in the script. Use `$1` and keep the quotes, so that the profile name stays one argument.
+
+### Exit codes
+
+`start`, `stop` and `restart` wait until the action ends. With the docker runtime, `start` and `restart` return when Docker is ready, so the next action of the shortcut can use `docker`. The codes are the codes in the [Command line](#command-line) table:
+
+- `0`: done. This includes `start` on a running VM and `stop` on a stopped VM.
+- `1`: failed. For example, the action failed, the profile is missing (not `default`), Colima is not installed, Docker is not ready after a start, or another action of the profile ran for more than 15 minutes. The log is `~/.cache/colima-bar/ctl.log`.
+- `2`: usage error, for example a profile name that is not valid.
+- `3`: another VM action holds the lock of the profile.
 
 ## The login item
 

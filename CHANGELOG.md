@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Shortcuts recipes. The guide shows how to start, stop and restart the VM, and how to read its state, with the Shortcuts action **Run Shell Script** and the `colimabar` command. See [Shortcuts](docs/usage.md#shortcuts).
+
 ## [0.16.0] - 2026-10-26
 
 ### Added
