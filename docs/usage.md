@@ -899,7 +899,7 @@ Without an argument, the commands use the profile that ColimaBar shows. To use a
 `start`, `stop` and `restart` wait until the action ends. With the docker runtime, `start` and `restart` return when Docker is ready, so the next action of the shortcut can use `docker`. The codes are the codes in the [Command line](#command-line) table:
 
 - `0`: done. This includes `start` on a running VM and `stop` on a stopped VM.
-- `1`: failed. The profile is missing, Colima is not installed, Docker is not ready after a start, or another action of the profile ran for more than 15 minutes. The log is `~/.cache/colima-bar/ctl.log`.
+- `1`: failed. For example, the action failed, the profile is missing (not `default`), Colima is not installed, Docker is not ready after a start, or another action of the profile ran for more than 15 minutes. The log is `~/.cache/colima-bar/ctl.log`.
 - `2`: usage error, for example a profile name that is not valid.
 - `3`: another VM action holds the lock of the profile.
 
