@@ -247,6 +247,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
                     self?.model.loadContextsFixture(data)
                 }
             }
+            // COLIMABAR_SCAN_FIXTURE=PATH: show the scan reports of a JSON file
+            // instead of scanning. For screenshots. A debug run only. It
+            // exports no image and runs no scanner.
+            if let path = ProcessInfo.processInfo.environment["COLIMABAR_SCAN_FIXTURE"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    guard let data = FileManager.default.contents(atPath: path) else { return }
+                    self?.model.loadImageScanFixture(data)
+                }
+            }
+            // COLIMABAR_SCAN=<reference>: show the scan page of that image,
+            // for example nginx:latest, after the fixture loaded.
+            if let ref = ProcessInfo.processInfo.environment["COLIMABAR_SCAN"] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4) { [weak self] in
+                    guard let self, let row = self.model.images.first(where: { $0.ref == ref }) else { return }
+                    self.ui.scanImageID = ImageScanRules.normalizedID(row.imageID)
+                }
+            }
             // COLIMABAR_VMCONFIG=1: show the "More VM settings" page.
             if ProcessInfo.processInfo.environment["COLIMABAR_VMCONFIG"] == "1" { ui.showVMConfig = true }
             // COLIMABAR_RECREATE_DEMO=1: show the progress strip of a VM type

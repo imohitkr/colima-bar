@@ -221,6 +221,17 @@ struct SystemTab: View {
                     .hint(Help.kubectlSwitcher)
                     .onChange(of: model.kubectlSwitcher) { Task { await model.refreshKube() } }
             }
+            if model.showsImageScan {
+                Toggle("Scan images for known vulnerabilities", isOn: $model.imageScanEnabled)
+                    .hint(Help.imageScanSetting)
+                if model.showsScannerPicker, model.imageScanEnabled {
+                    Picker("Scanner", selection: $model.imageScanTool) {
+                        ForEach(model.scannersAvailable, id: \.self) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.menu).fixedSize().padding(.leading, 22)
+                    .hint(Help.imageScanner)
+                }
+            }
             ShortcutRecorder(recording: form.shortcut)
             HStack(spacing: 6) {
                 Button("Export Settings…") { SettingsFilePanel.export(model: model) }

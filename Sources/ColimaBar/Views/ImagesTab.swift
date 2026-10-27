@@ -2,10 +2,10 @@ import SwiftUI
 
 struct ImagesTab: View {
     let model: ColimaModel
-    let search: String
+    let ui: ViewState
 
     var body: some View {
-        let q = search.lowercased()
+        let q = ui.search.lowercased()
         let list = model.images.filter {
             q.isEmpty || $0.repo.lowercased().contains(q) || $0.tag.lowercased().contains(q)
         }
@@ -41,6 +41,13 @@ struct ImagesTab: View {
                     {
                         ImageUpdateBadge(status: .update(digest: ""), inImagesTab: true)
                     }
+                    if let state = model.imageScanState(forImageID: i.imageID),
+                        ScanProgressBadge.text(for: state) != nil
+                    {
+                        ScanProgressBadge(state: state) { ui.scanImageID = state.imageID }
+                    } else if let report = model.imageScanReport(forImageID: i.imageID) {
+                        ScanBadge(report: report) { ui.scanImageID = report.imageID }
+                    }
                     if i.containers > 0 {
                         Text("in use").font(.system(size: 9, weight: .medium))
                             .padding(.horizontal, 4).padding(.vertical, 1)
@@ -56,6 +63,14 @@ struct ImagesTab: View {
                             Button("Pull latest of this tag") { model.run(.imagePull, i.ref) }
                                 .disabled(model.isDebug)
                                 .hint(model.isDebug ? Help.imageUpdateDebug : Help.pullLatestOfTag)
+                        }
+                        if model.imageScanOn, let id = ImageScanRules.normalizedID(i.imageID) {
+                            Button("Scan for Vulnerabilities…") {
+                                ui.scanImageID = id
+                                model.startImageScan(imageID: id, name: i.ref)
+                            }
+                            .disabled(!model.canScanImages)
+                            .hint(model.isDebug ? Help.imageScanDebug : Help.imageScan)
                         }
                         Divider()
                         Button("Remove…") { model.run(.imageRemove, i.ref) }

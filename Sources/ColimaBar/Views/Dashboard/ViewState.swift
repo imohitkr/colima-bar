@@ -23,6 +23,11 @@ final class ViewState {
     var inspectID: String? {
         didSet { if inspectID != oldValue { inspect.reset() } }
     }
+    /// The image that the scan page shows (an ID without `sha256:`). The page
+    /// replaces the tabs while the VM runs. The findings stay in the model.
+    var scanImageID: String?
+    /// The scan page lists only the findings that have a fix.
+    var onlyFixable = false
     let inspect = InspectState()
     let system = SystemForm()
     let vmConfig = VMConfigForm()
