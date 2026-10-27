@@ -15,7 +15,7 @@ struct VolumesTab: View {
         LazyVStack(alignment: .leading, spacing: 6) {
             if let transfer = model.volumeTransfer { VolumeTransferStrip(model: model, transfer: transfer) }
             SectionHeader(title: "\(model.volumes.count) volumes · \(unused.count) unused") {
-                Button("Remove unused") { model.run(.prune, "volumes") }.buttonStyle(.borderless).font(.caption)
+                Button("Remove unused") { model.run(.prune, "volumes") }.buttonStyle(.header)
                     .hint(Help.removeUnusedVolumes)
                 Menu {
                     Button("Restore to New Volume…") { VolumeBackupPanel.restoreToNew(model: model) }
