@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-30
+
 ### Fixed
 
 - A Homebrew install no longer offers a release before `brew upgrade` can install it. ColimaBar offers only a version that the Homebrew cask has, and checks the cask again each hour while it lags. A release now starts the cask update at once, so the cask follows within minutes.
@@ -327,7 +329,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/imohitkr/colima-bar/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/imohitkr/colima-bar/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/imohitkr/colima-bar/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/imohitkr/colima-bar/compare/v0.15.0...v0.16.0
