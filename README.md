@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/demo.gif" width="720" alt="Colima is stopped. docker compose up -d starts it, and the menu bar icon shows 4 running containers. The dashboard shows the shop project with health, ports, CPU and memory. The logs button opens live logs, a click on a container opens its Inspect page, and Clean Up shows what takes disk space.">
+  <img src="docs/screenshots/demo.gif" width="720" alt="Without ColimaBar, docker compose up -d fails because Colima is stopped. With ColimaBar, the same command starts Colima by itself and four containers start. The menu bar dashboard shows the shop project with health, ports, CPU and memory, the logs button opens live logs, and Clean Up shows what takes disk space. After a while idle, ColimaBar stops Colima again.">
 </p>
 
 - **Auto-start**: run `docker`, a test suite or an IDE test while Colima is stopped. ColimaBar starts the VM, and the command continues.
