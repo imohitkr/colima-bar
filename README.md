@@ -22,7 +22,7 @@
 </p>
 
 - **Auto-start**: run `docker`, a test suite or an IDE test while Colima is stopped. ColimaBar starts the VM, and the command continues.
-- **Live dashboard**: see containers by Compose project, with health, ports, CPU, memory and logs. Inspect a container, open a debug shell in one that has no shell, and pull, start or remove a Compose project. Back up and restore volumes. Images and VM settings are one click away. Change the VM type or mount type with a guided recreate (backup, image save, restore).
+- **Live dashboard**: see containers by Compose project, with health, ports, CPU, memory and logs. Inspect a container, open a debug shell in one that has no shell, and pull, start or remove a Compose project. A stopped project has a trash button, and you choose to keep or delete its volumes. Back up and restore volumes. Images and VM settings are one click away. Change the VM type or mount type with a guided recreate (backup, image save, restore).
 - **Auto-stop**: ColimaBar can stop the VM when it is idle.
 - **VM type change**: switch a profile between `vz` and `qemu`, or between the `virtiofs`, `sshfs` and `9p` mounts. ColimaBar backs up the volumes and images, recreates the VM and restores what is missing.
 - **Network health**: ColimaBar finds published ports that stopped answering on the Mac, and a VM that cannot resolve names after a VPN change. It offers a restart.
