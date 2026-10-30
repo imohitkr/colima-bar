@@ -13,6 +13,18 @@ import Testing
         #expect(model.composeOutput.isEmpty)
     }
 
+    @Test func projectStateSaysWhetherAContainerRunsAndWhetherOneIsStopped() {
+        func ctr(_ project: String?, _ state: String) -> Container {
+            Container(id: state, name: state, image: "i", state: state, status: "", ports: [], project: project)
+        }
+        let list = [ctr("web", "exited"), ctr("web", "running"), ctr("db", "exited"), ctr(nil, "running")]
+        #expect(ColimaModel.projectState("web", in: list) == (true, true))
+        #expect(ColimaModel.projectState("db", in: list) == (false, true))
+        #expect(ColimaModel.projectState("gone", in: list) == (false, false))
+        let up = [ctr("web", "running"), ctr("db", "exited")]
+        #expect(ColimaModel.projectState("web", in: up) == (true, false))
+    }
+
     @Test func composeRunsOnlyWhenNothingStopsIt() {
         #expect(ColimaModel.mayRunCompose(updateRestarting: false, isDebug: false, projectBusy: false))
         #expect(!ColimaModel.mayRunCompose(updateRestarting: true, isDebug: false, projectBusy: false))

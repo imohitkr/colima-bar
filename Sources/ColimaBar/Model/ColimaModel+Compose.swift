@@ -1,8 +1,8 @@
 import Foundation
 
 /// The Compose shortcuts of the project menu (`ComposeMenu`). Each one runs
-/// `colima-ctl.sh compose-pull|compose-up|compose-down`. The script owns the
-/// checks and the confirmation of `down`. It prints the output of
+/// `colima-ctl.sh compose-pull|compose-up|compose-down|compose-remove`. The
+/// script owns the checks, and asks before `down` and `remove`. It prints the output of
 /// `docker compose` on stdout only, so it never reaches ctl.log.
 extension ColimaModel {
     /// The most lines of output that ColimaBar keeps for a project.
@@ -30,6 +30,15 @@ extension ColimaModel {
     nonisolated static func composeKey(profile: String, name: String) -> String { "\(profile)/\(name)" }
 
     func composeKey(_ project: ComposeProject) -> String { Self.composeKey(profile: profile, name: project.name) }
+
+    /// Whether some container of the project runs, and whether some is
+    /// stopped. The project header shows its buttons from these, like a
+    /// container row. It reads all containers, not the list after the search:
+    /// a search must not hide a running one.
+    nonisolated static func projectState(_ name: String, in containers: [Container]) -> (running: Bool, stopped: Bool) {
+        let members = containers.filter { $0.project == name }
+        return (members.contains(where: \.isRunning), members.contains { !$0.isRunning })
+    }
 
     /// The time limit of one compose action, in seconds.
     nonisolated static let composeTimeout: TimeInterval = 900

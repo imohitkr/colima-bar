@@ -47,6 +47,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     case composePull = "compose-pull"
     case composeUp = "compose-up"
     case composeDown = "compose-down"
+    case composeRemove = "compose-remove"
     case imageRemove = "img-rm"
     case imagePull = "img-pull"
     case volumeRemove = "vol-rm"
@@ -92,7 +93,7 @@ enum CtlAction: String, CaseIterable, Sendable {
     var changesDisk: Bool {
         switch self {
         case .containerRemove, .imageRemove, .imagePull, .volumeRemove, .prune, .stopAll, .diskShrink, .vmRecreate,
-            .composePull, .composeDown, .autoPrune:
+            .composePull, .composeDown, .composeRemove, .autoPrune:
             true
         default: false
         }
@@ -119,7 +120,7 @@ enum CtlAction: String, CaseIterable, Sendable {
         case .resources, .rosetta, .k8s, .vmConfig: running
         case .disk, .diskShrink, .vmRecreate, .profileDelete, .repair, .containerRemove, .imageRemove, .volumeRemove,
             .stopAll,
-            .prune, .composeDown, .logTruncate:
+            .prune, .composeDown, .composeRemove, .logTruncate:
             true
         default: false
         }

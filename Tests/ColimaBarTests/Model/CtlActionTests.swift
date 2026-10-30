@@ -103,7 +103,7 @@ import Testing
     @Test func diskActionsAreUrgent() {
         let disk: Set<CtlAction> = [
             .imageRemove, .volumeRemove, .prune, .imagePull, .containerRemove, .stopAll, .diskShrink,
-            .vmRecreate, .composePull, .composeDown, .autoPrune,
+            .vmRecreate, .composePull, .composeDown, .composeRemove, .autoPrune,
         ]
         for a in CtlAction.allCases { #expect(a.changesDisk == disk.contains(a), "\(a.rawValue)") }
     }
@@ -301,7 +301,7 @@ import Testing
 
     @Test func composeActionsMatchTheScriptLabels() throws {
         let labels = try scriptActions()
-        for a in [CtlAction.composePull, .composeUp, .composeDown] {
+        for a in [CtlAction.composePull, .composeUp, .composeDown, .composeRemove] {
             #expect(labels.contains(a.rawValue), "\(a.rawValue)")
             #expect(!a.isVMAction && a.busyLabel(running: true) == nil && a.busyLabel(running: false) == nil)
             #expect(!a.checksExpectedState && !a.warnsAfterUpgrade(running: true))
@@ -309,11 +309,13 @@ import Testing
         #expect(CtlAction.composePull.rawValue == "compose-pull")
         #expect(CtlAction.composeUp.rawValue == "compose-up")
         #expect(CtlAction.composeDown.rawValue == "compose-down")
+        #expect(CtlAction.composeRemove.rawValue == "compose-remove")
     }
 
-    @Test func onlyComposeDownAsksFirst() {
+    @Test func onlyComposeDownAndRemoveAskFirst() {
         for running in [true, false] {
             #expect(CtlAction.composeDown.showsDialog(running: running))
+            #expect(CtlAction.composeRemove.showsDialog(running: running))
             #expect(!CtlAction.composePull.showsDialog(running: running))
             #expect(!CtlAction.composeUp.showsDialog(running: running))
         }

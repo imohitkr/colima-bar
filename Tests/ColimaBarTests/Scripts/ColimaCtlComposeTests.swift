@@ -17,11 +17,19 @@ import Testing
         try sb.write(".config/colima/work/colima.yaml", "cpu: 2\n")
         // STUB_COMPOSE_VERSION_EXIT is the exit status of `docker compose version`.
         // STUB_DOCKER_OUT and STUB_DOCKER_ERR are what other calls print.
+        // STUB_VOLUMES, STUB_PS and STUB_MOUNTS are what `volume ls`, `ps` and
+        // `inspect` print. STUB_VOLUME_LS_EXIT is the exit status of `volume ls`.
         try sb.stub(
             "docker",
             """
             printf 'docker %s host=%s\\n' "$*" "$DOCKER_HOST" >> "\(sb.log)"
             if [ "$1 $2" = "compose version" ]; then exit "${STUB_COMPOSE_VERSION_EXIT:-0}"; fi
+            # The volume lists of compose-remove: named volumes, containers, their mounts.
+            case "$1" in
+              volume) [ -n "${STUB_VOLUMES:-}" ] && printf '%s\\n' "$STUB_VOLUMES"; exit "${STUB_VOLUME_LS_EXIT:-0}" ;;
+              ps) [ -n "${STUB_PS:-}" ] && printf '%s\\n' "$STUB_PS"; exit 0 ;;
+              inspect) [ -n "${STUB_MOUNTS:-}" ] && printf '%s\\n' "$STUB_MOUNTS"; exit 0 ;;
+            esac
             [ -n "${STUB_DOCKER_OUT:-}" ] && printf '%s\\n' "$STUB_DOCKER_OUT"
             [ -n "${STUB_DOCKER_ERR:-}" ] && printf '%s\\n' "$STUB_DOCKER_ERR" >&2
             exit "${STUB_DOCKER_EXIT:-0}"
@@ -31,6 +39,8 @@ import Testing
 
     private func dockerCalls(_ sb: ScriptSandbox) -> [String] { sb.calls.filter { $0.hasPrefix("docker ") } }
     private func dialogs(_ sb: ScriptSandbox) -> [String] { sb.calls.filter { $0.hasPrefix("osascript") } }
+    /// The whole log: the text of a dialog can span several lines.
+    private func rawLog(_ sb: ScriptSandbox) -> String { (try? String(contentsOfFile: sb.log, encoding: .utf8)) ?? "" }
     private func host(_ sb: ScriptSandbox) -> String { "unix://\(sb.home)/.config/colima/work/docker.sock" }
 
     @Test func pullRunsDockerComposePullWithTheProjectArguments() async throws {
@@ -74,6 +84,132 @@ import Testing
         let r = try await sb.ctl(["compose-down", "demo", dir, "0"] + files, env: ["STUB_OSASCRIPT_EXIT": "1"])
         #expect(r.status == 2, "\(r.out)")
         #expect(dockerCalls(sb).allSatisfy { $0.hasPrefix("docker compose version") })
+        #expect(!dockerCalls(sb).contains { $0.contains(" down") })
+    }
+
+    @Test func removeListsTheVolumesOfTheProjectWithCancelAsTheDefault() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let r = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files,
+            env: ["STUB_VOLUMES": "demo_db\ndemo_cache", "STUB_OSASCRIPT_OUT": "Keep Volumes"])
+        #expect(r.status == 0, "\(r.out)")
+        #expect(
+            dockerCalls(sb).contains {
+                $0.hasPrefix("docker volume ls -q --filter label=com.docker.compose.project=demo")
+            })
+        #expect(dialogs(sb).count == 1)
+        let dialog = dialogs(sb)[0]
+        #expect(dialog.contains("Remove the Compose project demo"))
+        #expect(dialog.contains("profile 'work'"))
+        #expect(rawLog(sb).contains("deletes these volumes and their data: demo_db, demo_cache."))
+        #expect(dialog.contains(#"buttons {"Cancel", "Keep Volumes", "Delete Volumes"} default button "Cancel""#))
+        #expect(dialog.contains("with icon stop"))
+    }
+
+    @Test func removeListsAtMostTenVolumes() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let names = (1...12).map { "demo_v\($0)" }.joined(separator: "\n")
+        _ = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files,
+            env: ["STUB_VOLUMES": names, "STUB_OSASCRIPT_OUT": "Keep Volumes"])
+        #expect(rawLog(sb).contains("demo_v10 and 2 more."))
+        #expect(!rawLog(sb).contains("demo_v11"))
+    }
+
+    @Test func removeListsTenVolumesWithNoMoreNote() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let names = (1...10).map { "demo_v\($0)" }.joined(separator: "\n")
+        let r = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files,
+            env: ["STUB_VOLUMES": names, "STUB_OSASCRIPT_OUT": "Keep Volumes"])
+        #expect(r.status == 0, "\(r.out)")
+        #expect(rawLog(sb).contains("demo_v9, demo_v10."))
+        #expect(!rawLog(sb).contains("more"))
+    }
+
+    @Test func removeCountsTheAnonymousVolumesOfTheContainers() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let r = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files,
+            env: [
+                "STUB_VOLUMES": "demo_db", "STUB_PS": "c1\nc2", "STUB_MOUNTS": "demo_db\nabc123\n\ndef456\nabc123",
+                "STUB_OSASCRIPT_OUT": "Delete Volumes",
+            ])
+        #expect(r.status == 0, "\(r.out)")
+        #expect(dockerCalls(sb).contains { $0.hasPrefix("docker inspect --format") && $0.contains("c1 c2") })
+        #expect(rawLog(sb).contains("their data: demo_db, and 2 anonymous volumes."))
+        #expect(try #require(dockerCalls(sb).last).hasSuffix(" down --remove-orphans --volumes host=\(host(sb))"))
+    }
+
+    @Test func onlyAnonymousVolumesStillOfferDeleteVolumes() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        _ = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files,
+            env: ["STUB_PS": "c1", "STUB_MOUNTS": "abc123", "STUB_OSASCRIPT_OUT": "Keep Volumes"])
+        #expect(rawLog(sb).contains("their data: 1 anonymous volume."))
+        #expect(rawLog(sb).contains(#"buttons {"Cancel", "Keep Volumes", "Delete Volumes"}"#))
+    }
+
+    @Test func aFailedVolumeListExitsWith1WithNoDialog() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let r = try await sb.ctl(["compose-remove", "demo", dir, "0"] + files, env: ["STUB_VOLUME_LS_EXIT": "1"])
+        #expect(r.status == 1, "\(r.out)")
+        #expect(r.out.contains("COLIMABAR_NOTIFY:Couldn't list the volumes of the Compose project demo"))
+        #expect(dialogs(sb).isEmpty)
+        #expect(!dockerCalls(sb).contains { $0.contains(" down") })
+    }
+
+    @Test func aDialogErrorOfRemoveExitsWith1AndTellsTheUser() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let r = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files,
+            env: ["STUB_OSASCRIPT_EXIT": "1", "STUB_OSASCRIPT_ERR": "execution error: Not authorized. (-1743)"])
+        #expect(r.status == 1, "\(r.out)")
+        #expect(r.out.contains("COLIMABAR_NOTIFY:Couldn't show the remove dialog for the Compose project demo"))
+        #expect(!dockerCalls(sb).contains { $0.contains(" down") })
+    }
+
+    @Test func keepVolumesRunsDownWithoutVolumes() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let r = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files, env: ["STUB_OSASCRIPT_OUT": "Keep Volumes"])
+        #expect(r.status == 0, "\(r.out)")
+        let last = try #require(dockerCalls(sb).last)
+        #expect(last.hasSuffix(" down --remove-orphans host=\(host(sb))"))
+        #expect(!last.contains("--volumes") && !last.contains("--rmi"))
+    }
+
+    @Test func deleteVolumesAddsTheVolumesFlag() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let r = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files, env: ["STUB_OSASCRIPT_OUT": "Delete Volumes"])
+        #expect(r.status == 0, "\(r.out)")
+        let last = try #require(dockerCalls(sb).last)
+        #expect(last.hasSuffix(" down --remove-orphans --volumes host=\(host(sb))"))
+        #expect(!last.contains("--rmi"))
+    }
+
+    @Test func aProjectWithNoVolumesGetsARemoveButton() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let r = try await sb.ctl(["compose-remove", "demo", dir, "0"] + files, env: ["STUB_OSASCRIPT_OUT": "Remove"])
+        #expect(r.status == 0, "\(r.out)")
+        let dialog = try #require(dialogs(sb).first)
+        #expect(dialog.contains(#"buttons {"Cancel", "Remove"} default button "Cancel""#))
+        #expect(try #require(dockerCalls(sb).last).hasSuffix(" down --remove-orphans host=\(host(sb))"))
+    }
+
+    @Test(arguments: [
+        ("", "0"), ("OK", "0"), ("Delete Volumes", "1"),
+    ])
+    func cancelOrAnUnknownAnswerOfRemoveExitsWith2AndRunsNothing(out: String, exit: String) async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let r = try await sb.ctl(
+            ["compose-remove", "demo", dir, "0"] + files,
+            env: [
+                "STUB_OSASCRIPT_OUT": out, "STUB_OSASCRIPT_EXIT": exit,
+                "STUB_OSASCRIPT_ERR": "execution error: User canceled. (-128)",
+            ])
+        #expect(r.status == 2, "\(r.out)")
         #expect(!dockerCalls(sb).contains { $0.contains(" down") })
     }
 

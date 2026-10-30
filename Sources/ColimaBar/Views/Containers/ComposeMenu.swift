@@ -1,11 +1,15 @@
 import AppKit
 import SwiftUI
 
-/// The ••• menu in the header of a Compose project: open the folder, and
-/// pull, start or remove the project with `docker compose`.
+/// The remove button and the ••• menu in the header of a Compose project:
+/// open the folder, and pull, start or remove the project with
+/// `docker compose`.
 struct ComposeMenu: View {
     let model: ColimaModel
     let project: ComposeProject
+    /// No container of the project runs. Only then the header shows the
+    /// remove button, like a container row.
+    var stopped = false
 
     private static let vsCodeID = "com.microsoft.VSCode"
 
@@ -19,6 +23,10 @@ struct ComposeMenu: View {
         let output = model.composeOutput[model.composeKey(project)] ?? []
         HStack(spacing: 2) {
             if busy { ProgressView().controlSize(.small).hint(Help.composeRunning) }
+            if stopped {
+                IconButton("trash", reason ?? Help.composeRemove) { model.compose(.remove, project: project) }
+                    .disabled(reason != nil)
+            }
             Menu {
                 Button("Open Project Folder") { NSWorkspace.shared.open(folder) }
                     .disabled(model.composeMissing.contains(model.composeKey(project)))
@@ -44,6 +52,8 @@ struct ComposeMenu: View {
                     .disabled(reason != nil).hint(Help.composeUp)
                 Button("Down…") { model.compose(.down, project: project) }
                     .disabled(reason != nil).hint(Help.composeDown)
+                Button("Remove Project…") { model.compose(.remove, project: project) }
+                    .disabled(reason != nil).hint(Help.composeRemove)
                 if !output.isEmpty {
                     Divider()
                     Button("Copy Last Output") { Pasteboard.copy(output.joined(separator: "\n")) }
@@ -58,7 +68,7 @@ struct ComposeMenu: View {
         }
     }
 
-    /// Why Pull, Up and Down do not run now. It is also the hint of the menu.
+    /// Why Pull, Up, Down and Remove do not run now. It is also the hint of the menu.
     private func disabledReason(missing: Bool, noDocker: Bool) -> String? {
         if model.isDebug { return Help.composeDebug }
         if noDocker { return Help.composeNoDocker }
