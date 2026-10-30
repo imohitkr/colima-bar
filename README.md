@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/containers.png" width="480" alt="Dashboard: containers grouped by Compose project, with health, ports, CPU and memory">
+  <img src="docs/screenshots/demo.gif" width="720" alt="Colima is stopped. docker compose up -d starts it: the menu bar icon shows an hourglass, then 4 running containers. A click opens the dashboard with the shop project, its health, ports, CPU and memory.">
 </p>
 
 - **Auto-start**: run `docker`, a test suite or an IDE test while Colima is stopped. ColimaBar starts the VM, and the command continues.
