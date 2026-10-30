@@ -7,6 +7,7 @@ import Testing
         #expect(ComposeVerb.pull.action == .composePull)
         #expect(ComposeVerb.up.action == .composeUp)
         #expect(ComposeVerb.down.action == .composeDown)
+        #expect(ComposeVerb.remove.action == .composeRemove)
     }
 
     @Test func theActionsAreNotVMActions() {

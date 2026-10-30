@@ -6,6 +6,14 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Remove a Compose project. Click the trash button in the header of a stopped project, or **Remove Project…** in its ••• menu. ColimaBar asks first and lists the volumes of the project: **Keep Volumes** or **Delete Volumes**. If the project has no volumes, the dialog shows **Remove**. **Cancel** is the default button. Images and external volumes stay. See [Compose projects](docs/usage.md#compose-projects).
+
+### Changed
+
+- The header of a Compose project shows only the buttons that apply. The start button shows when a container of the project is stopped. The restart and stop buttons show when a container runs.
+
 ## [0.17.0] - 2026-10-27
 
 ### Added

@@ -112,6 +112,63 @@ confirm() {
     -e 'end run' "$1" >/dev/null 2>&1
 }
 
+# remove_confirm NAME -> asks before compose-remove removes a project. It
+# lists the named volumes of the project (at most 10) and counts the
+# anonymous volumes of its containers: `down --volumes` deletes both kinds.
+# It sets COMPOSE_VOLUMES=1 only after a click on Delete Volumes. Cancel is
+# the default button, so Return removes nothing. Cancel, or no answer within
+# 5 minutes, returns 1. If docker cannot list the volumes, or the dialog
+# cannot show, the script tells the user and exits with 1.
+remove_confirm() {
+  local name="$1" filter="label=com.docker.compose.project=$1" named ids anon=""
+  local count nanon shown msg buttons answer rc
+  if ! named=$(docker volume ls -q --filter "$filter" 2>&1) || ! ids=$(docker ps -aq --filter "$filter" 2>&1) \
+    || { [ -n "$ids" ] && ! anon=$(printf '%s\n' "$ids" | xargs docker inspect \
+      --format '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' 2>&1); }; then
+    echo "volume list failed: $named${ids:-}${anon:-}" >&2
+    notify "Couldn't list the volumes of the Compose project $name in $NAMED - $SEE_LOG"
+    exit 1
+  fi
+  # A volume of a container that has no label of the project is anonymous.
+  anon=$(printf '%s\n' "$anon" | grep . | grep -vxF -f <(printf '%s\n' "$named") | sort -u)
+  count=$(printf '%s' "$named" | grep -c .)
+  nanon=$(printf '%s' "$anon" | grep -c .)
+  msg="Remove the Compose project $name in $NAMED? Its containers and networks are removed. Images and external volumes stay."
+  if [ "$count" -eq 0 ] && [ "$nanon" -eq 0 ]; then
+    buttons='{"Cancel", "Remove"}'
+  else
+    shown=$(printf '%s\n' "$named" | grep . | head -n 10 | paste -sd ',' - | sed 's/,/, /g')
+    [ "$count" -gt 10 ] && shown="$shown and $((count - 10)) more"
+    if [ "$nanon" -gt 0 ]; then
+      [ -n "$shown" ] && shown="$shown, and "
+      shown="$shown$nanon anonymous volume"
+      [ "$nanon" -gt 1 ] && shown="${shown}s"
+    fi
+    msg="$msg
+
+Delete Volumes also deletes these volumes and their data: $shown. Back up a volume first on the Volumes tab."
+    buttons='{"Cancel", "Keep Volumes", "Delete Volumes"}'
+  fi
+  answer=$(osascript -e 'on run argv' \
+    -e "set r to display dialog (item 1 of argv) with title \"Colima\" buttons $buttons default button \"Cancel\" cancel button \"Cancel\" with icon stop giving up after 300" \
+    -e 'if gave up of r then error number -128' \
+    -e 'return button returned of r' \
+    -e 'end run' "$msg" 2>&1)
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    # Error -128 is Cancel, and the give-up of the dialog.
+    case "$answer" in *"(-128)"*) return 1 ;; esac
+    echo "remove dialog failed: $answer" >&2
+    notify "Couldn't show the remove dialog for the Compose project $name - $SEE_LOG"
+    exit 1
+  fi
+  case "$answer" in
+    "Delete Volumes") COMPOSE_VOLUMES=1 ;;
+    Remove | "Keep Volumes") COMPOSE_VOLUMES="" ;;
+    *) return 1 ;;
+  esac
+}
+
 # upgrade_confirm -> 0 if ColimaBar passed no upgrade note, or if the user
 # clicked Continue. ColimaBar sets COLIMABAR_UPGRADE_NOTE when Colima or Lima
 # changed in a risky way since the last good start of this profile. "Release
@@ -958,8 +1015,9 @@ compose_show() {
 }
 
 # compose_run VERB NAME DIR NENV ENV... FILE...: runs docker compose for the
-# profile (DOCKER_HOST). VERB is pull, up or down. A plain down keeps the
-# volumes and the images. The output goes to stdout only, never to ctl.log:
+# profile (DOCKER_HOST). VERB is pull, up, down or remove. A plain down keeps
+# the volumes and the images. remove runs `down --remove-orphans`, and adds
+# `--volumes` if COMPOSE_VOLUMES is set (see remove_confirm). The output goes to stdout only, never to ctl.log:
 # it can show values of the project. Docker runs in the background, so a stop
 # of this script (the time limit of ColimaBar) stops docker too.
 compose_run() {
@@ -970,6 +1028,10 @@ compose_run() {
   for f in "$@"; do argv+=(-f "$f"); done
   case "$verb" in
     up) argv+=(up -d) ;;
+    # Orphans too, so no container of the project stays in the list.
+    remove)
+      argv+=(down --remove-orphans)
+      [ -n "${COMPOSE_VOLUMES:-}" ] && argv+=(--volumes) ;;
     *) argv+=("$verb") ;;
   esac
   (umask 077 && mkdir -p "$STATE_DIR")
@@ -1428,14 +1490,18 @@ $list" || exit 2
     printf 'ps shows the processes of the container. Its files are in /proc/1/root.\n'
     printf 'On the first use, docker downloads the image.\n'
     exec docker run --rm -it --name "$name" --pid "container:$id" --network "container:$id" --cap-add SYS_PTRACE "$img" ;;
-  # Compose projects: compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...
-  # Not VM actions: no lock and no busy marker. Only down asks first.
+  # Compose projects: compose-pull|compose-up|compose-down|compose-remove NAME DIR NENV ENV... FILE...
+  # Not VM actions: no lock and no busy marker. Only down and remove ask first.
   compose-pull) compose_check "${@:2}"; compose_run pull "${@:2}" ;;
   compose-up)   compose_check "${@:2}"; compose_run up "${@:2}" ;;
   compose-down)
     compose_check "${@:2}"
     confirm "Stop and remove the containers and networks of the Compose project $2 in $NAMED? Volumes and images stay." || exit 2
     compose_run down "${@:2}" ;;
+  compose-remove)
+    compose_check "${@:2}"
+    remove_confirm "$2" || exit 2
+    compose_run remove "${@:2}" ;;
   # Idle auto-stop from ColimaBar: no confirmation, just a notification.
   auto-stop)
     lock_vm quiet
@@ -1596,7 +1662,7 @@ $list" || exit 2
     if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
-    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|vm-recreate VMTYPE MOUNTTYPE|ctr-*|compose-pull|compose-up|compose-down NAME DIR NENV ENV... FILE...|img-rm|img-pull|vol-rm|log-truncate ID [NAME]|disk-trim|auto-prune|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME [VMTYPE MOUNTTYPE]]|profile-delete}" >&2
+    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|vm-recreate VMTYPE MOUNTTYPE|ctr-*|compose-pull|compose-up|compose-down|compose-remove NAME DIR NENV ENV... FILE...|img-rm|img-pull|vol-rm|log-truncate ID [NAME]|disk-trim|auto-prune|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME [VMTYPE MOUNTTYPE]]|profile-delete}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
     echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta, k8s and vm-config stop if the VM state differs" >&2
     echo "env: COLIMABAR_UPGRADE_NOTE and COLIMABAR_RELEASE_NOTES make start, restart and the config actions ask after an upgrade" >&2

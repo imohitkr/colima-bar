@@ -26,13 +26,24 @@ struct ContainersTab: View {
                         } else {
                             IconButton("bell", Help.muteProject) { model.setMuted(true, project: project) }
                         }
-                        IconButton("play.fill", "Start all in \(project)") { model.project(project, .start) }
-                        IconButton("arrow.clockwise", "Restart all in \(project)") { model.project(project, .restart) }
-                        IconButton("stop.fill", "Stop all in \(project)") { model.project(project, .stop) }
+                        let state = ColimaModel.projectState(project, in: model.containers)
+                        if state.stopped {
+                            IconButton("play.fill", "Start all in \(project)") { model.project(project, .start) }
+                        }
+                        if state.running {
+                            IconButton("arrow.clockwise", "Restart all in \(project)") {
+                                model.project(project, .restart)
+                            }
+                            IconButton("stop.fill", "Stop all in \(project)") { model.project(project, .stop) }
+                        }
                         if let names = model.domainRoutes.projects[project], !names.isEmpty {
                             DomainMenu(model: model, names: names)
                         }
-                        if let compose = g.compose { ComposeMenu(model: model, project: compose) }
+                        if let compose = g.compose {
+                            ComposeMenu(
+                                model: model, project: compose,
+                                stopped: !state.running)
+                        }
                     } else if g.key == "~standalone", model.running.count > 1 {
                         Button("Stop all") { model.run(.stopAll) }.buttonStyle(.header)
                             .hint(Help.stopAll)
