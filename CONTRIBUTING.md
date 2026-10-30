@@ -83,6 +83,8 @@ The app reads these flags at launch. A run with `--snapshot`, `--popover`, `--no
 - `COLIMABAR_SNAPSHOT_HEIGHT`: the window height in points.
 - `COLIMABAR_SNAPSHOT_DELAY`: seconds to wait before the snapshot (default 6). Use 65 to fill the sparklines.
 
+To show another profile, add `-profile NAME` after the other arguments. The argument does not change the saved setting. For the README screenshots, use a separate profile with only the demo containers.
+
 Example:
 
 ```sh
