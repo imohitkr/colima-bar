@@ -18,7 +18,7 @@ Run this command in Terminal:
 brew install --cask imohitkr/tap/colima-bar
 ```
 
-The cask comes from the [imohitkr/homebrew-tap](https://github.com/imohitkr/homebrew-tap) repository. Homebrew installs ColimaBar in `/Applications`. A workflow in the tap verifies the attestation of each new release before it updates the cask. See [Verify a download](#verify-a-download).
+The cask comes from the [imohitkr/homebrew-tap](https://github.com/imohitkr/homebrew-tap) repository. Homebrew installs ColimaBar in `/Applications`. A workflow in the tap verifies the attestation of each new release before it updates the cask. It updates the cask a few minutes after a release. See [Verify a download](#verify-a-download).
 
 Apple does not notarize ColimaBar. Thus macOS blocks the first launch after you install or upgrade ColimaBar. Homebrew adds the quarantine flag on each install and upgrade, so this occurs again after each `brew upgrade`. When macOS shows "ColimaBar" Not Opened, click **Done**. Do not click **Move to Bin**: it deletes `/Applications/ColimaBar.app`, and Homebrew does not know that it is gone. Then do the steps in [The disk image](#the-disk-image), or remove the quarantine flag:
 
@@ -161,7 +161,7 @@ ColimaBar checks GitHub for a new release one time each day. When a new version 
 | How you installed ColimaBar | The button | What a click does |
 |---|---|---|
 | The installer, the disk image, or a build in `/Applications` or `~/Applications` that you can write to | **Install *version*** | ColimaBar asks first. Then it downloads the release, checks it, replaces itself and restarts. See [Install an update in the app](#install-an-update-in-the-app). |
-| Homebrew | **Update *version*** | ColimaBar shows `brew upgrade --cask colima-bar && open -a ColimaBar`. You can copy it or run it in Terminal. |
+| Homebrew | **Update *version*** | ColimaBar shows `brew upgrade --cask colima-bar && open -a ColimaBar`. You can copy it or run it in Terminal. ColimaBar offers only a version that the Homebrew cask has. While the cask lags behind the release, ColimaBar checks it again each hour. |
 | A copy that runs from a disk image or Downloads, a read-only disk, a folder that you cannot write to, or a development build | **Update *version*** | ColimaBar says why it cannot install the update. Click **Open Release Page** and download it there. |
 
 To check now, click the version in the dashboard footer, or choose **Check for Updates…** in the right-click menu. To turn off the daily check, clear **Check for new versions daily** on the System tab. ColimaBar never installs an update without your click.

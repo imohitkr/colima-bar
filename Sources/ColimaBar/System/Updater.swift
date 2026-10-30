@@ -86,6 +86,8 @@ final class Updater {
     @ObservationIgnored var installTask: Task<Void, Never>?
     @ObservationIgnored var download: UpdateDownload?
     @ObservationIgnored private var loop: Task<Void, Never>?
+    /// The check that runs again when the cask does not have the release yet.
+    @ObservationIgnored private var caskRetry: Task<Void, Never>?
     @ObservationIgnored let log = Logger(category: "update")
 
     /// The button for `available`.
@@ -154,23 +156,73 @@ final class Updater {
             return
         }
         macOSNote = nil
-        available = release
+        var offered = release
+        if case .homebrew = source {
+            let cask = await fetchCaskVersion()
+            guard manual || enabled, phase == .idle else { return }
+            // brew upgrade installs only the version of the cask. Check again
+            // while the cask lags behind the release.
+            if let cask, Version.isNewer(release.version, than: cask), enabled { scheduleCaskRetry() }
+            guard let version = UpdatePolicy.homebrewVersion(running: current, release: release.version, cask: cask)
+            else {
+                // Not announced yet: the check after the retry announces it.
+                available = nil
+                if manual {
+                    let lag = UpdatePolicy.caskLagText(release: release.version, cask: cask, checksOn: enabled)
+                    UpdateAlert.info(lag.title, lag.text)
+                }
+                return
+            }
+            if version != release.version {
+                let tag = "v\(version)"
+                offered = ReleaseInfo(version: version, tag: tag, page: ReleaseLink.page(tag: tag), zip: nil)
+            }
+        }
+        available = offered
         if manual {
-            Defaults.set(release.version, .notifiedVersion)
+            Defaults.set(offered.version, .notifiedVersion)
             await startUpdate()
             return
         }
         // Announce each version once; the footer button stays until updated.
-        if Defaults.string(.notifiedVersion) != release.version {
-            Defaults.set(release.version, .notifiedVersion)
+        if Defaults.string(.notifiedVersion) != offered.version {
+            Defaults.set(offered.version, .notifiedVersion)
             Notifier.shared.post(
-                "ColimaBar \(release.version) is available (you have \(current)). Click to open the release page.",
-                title: "Update available", record: false, url: release.page)
+                "ColimaBar \(offered.version) is available (you have \(current)). Click to open the release page.",
+                title: "Update available", record: false, url: offered.page)
         }
     }
 
     func openReleasePage() {
         NSWorkspace.shared.open(ReleaseLink.page(available?.page))
+    }
+
+    private func scheduleCaskRetry() {
+        guard caskRetry == nil else { return }
+        caskRetry = Task {
+            try? await Task.sleep(for: .seconds(UpdatePolicy.caskRetryDelay))
+            caskRetry = nil
+            if enabled { await check(manual: false) }
+        }
+    }
+
+    /// The version in the Homebrew cask, or nil if ColimaBar cannot read it.
+    private func fetchCaskVersion() async -> String? {
+        var req = URLRequest(url: CaskVersion.url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15)
+        req.setValue("ColimaBar/\(AppDelegate.version)", forHTTPHeaderField: "User-Agent")
+        do {
+            let (data, resp) = try await URLSession.shared.data(for: req)
+            let status = (resp as? HTTPURLResponse)?.statusCode
+            guard status == 200, data.count <= CaskVersion.maxBytes, let text = String(data: data, encoding: .utf8)
+            else {
+                log.notice("cask check: status \(status ?? 0), \(data.count) bytes")
+                return nil
+            }
+            return CaskVersion.parse(text)
+        } catch {
+            log.notice("cask check failed: \(error.localizedDescription, privacy: .public)")
+            return nil
+        }
     }
 
     private func fetchLatest() async -> ReleaseInfo? {

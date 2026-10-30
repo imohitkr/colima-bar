@@ -344,7 +344,7 @@ enum Help {
 
     // App
     static let checkUpdates =
-        "Ask GitHub one time each day if a newer ColimaBar release exists. ColimaBar sends one notification for a new version. Then it shows a button at the bottom of the dashboard. ColimaBar installs an update only after you click that button."
+        "Ask GitHub one time each day if a newer ColimaBar release exists. ColimaBar sends one notification for a new version. Then it shows a button at the bottom of the dashboard. ColimaBar installs an update only after you click that button. With Homebrew, ColimaBar checks again each hour until the cask has the new version."
     static let uninstallConfirm =
         "ColimaBar opens a terminal window (iTerm or Terminal) and runs its uninstall script. The script removes the app, the login item and ColimaBar's docker routes. Docker clients then connect to Colima directly. If you turned on HTTPS for container domains, the script also removes the local certificate authority of ColimaBar, and macOS can ask for your password. It removes the file that ColimaBar added in /etc/resolver, which needs sudo. Colima, your containers and your images stay."
     static func version(_ v: String) -> String { "ColimaBar \(v). Click to check for a new version." }

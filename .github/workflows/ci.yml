@@ -207,3 +207,22 @@ jobs:
               exit 1
             fi
           done
+
+      # The tap checks for a new release on a schedule. Start its update now,
+      # so `brew upgrade` and the update check of a Homebrew install get the
+      # release in minutes. TAP_DISPATCH_TOKEN is a fine-grained token for
+      # imohitkr/homebrew-tap only, with Actions: Read and write. The tap
+      # verifies the attestation of the zip itself, so the token needs no
+      # access to the release.
+      # Without the secret, the tap updates on its schedule.
+      - name: Start the cask update
+        env:
+          GH_TOKEN: ${{ secrets.TAP_DISPATCH_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::notice::TAP_DISPATCH_TOKEN is not set. The tap updates the cask on its schedule."
+            exit 0
+          fi
+          if ! gh workflow run update-cask.yml --repo imohitkr/homebrew-tap --ref main; then
+            echo "::warning::Could not start the cask update. The tap updates the cask on its schedule."
+          fi

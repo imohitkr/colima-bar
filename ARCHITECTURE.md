@@ -110,7 +110,7 @@ HTTPS: `DER` encodes ASN.1 and `X509Builder` builds certificates (pure). `LocalC
 - `ContainerAlertGate`, `RestartLoopTracker`, `QuietWindows`, `ContainerAlertOutcome` and `MutedProjects`: the policy for container alerts, see [Notifications](#notifications). `ColimaModel+ContainerAlerts` feeds the events to the gate.
 - `SystemPowerObserver`: reports system sleep and the end of it. It also reports changes of the power state: the charger (`notify_register_dispatch` with `kIOPSNotifyPowerSource`), Low Power Mode and the thermal state. It is the only place that subscribes to power events.
 - `PowerState`: on battery, Low Power Mode and a hot Mac, and the heartbeat saving that follows (`PowerState.Saving`). `read()` is the only part that calls IOKit and `ProcessInfo`.
-- `Updater`, `Version`, `ReleaseLink`: the daily release check. `Updater+Install` is the in-app install, see [In-app update](#in-app-update). Its parts are `InstallSource`, `ReleaseInfo`, `ReleaseDigest`, `UpdateDownload`, `UpdateVerifier`, `AttestationCheck`, `BundleSwap`, `UpdatePolicy` and `UpdateError`. `UpdateTestHooks` exists only in a test build.
+- `Updater`, `Version`, `ReleaseLink`, `CaskVersion`: the daily release check. `Updater+Install` is the in-app install, see [In-app update](#in-app-update). Its parts are `InstallSource`, `ReleaseInfo`, `ReleaseDigest`, `UpdateDownload`, `UpdateVerifier`, `AttestationCheck`, `BundleSwap`, `UpdatePolicy` and `UpdateError`. `UpdateTestHooks` exists only in a test build.
 - `Defaults`: `UserDefaults` access.
 - `ColimaDirWatcher`: watches the Colima folder, Lima's folder and their subfolders. Lima's folder can be outside the Colima folder (`LIMA_HOME`).
 - `FileLimit`: raises the open file limit.
@@ -455,7 +455,7 @@ The buffers are not observed. The model publishes only `savedLogIDs`, the set of
 
 ### Update check
 
-`Updater` asks the GitHub releases API one time each day. It builds the release link from the tag and accepts only release pages of this repository. `ReleaseInfo.parse` reads the answer. It rejects drafts and prereleases, and never uses `html_url` or `browser_download_url`.
+`Updater` asks the GitHub releases API one time each day. It builds the release link from the tag and accepts only release pages of this repository. `ReleaseInfo.parse` reads the answer. It rejects drafts and prereleases, and never uses `html_url` or `browser_download_url`. A Homebrew install also reads the cask file of the tap (`CaskVersion`, `raw.githubusercontent.com`). It offers a release only when the cask has that version or a newer one (`UpdatePolicy.caskHas`), because `brew upgrade` cannot install another one. If the cask lags but has a version newer than the running one, it offers that version. While the cask lags, it checks again after one hour. A cask that ColimaBar cannot read does not hide the release.
 
 ### In-app update
 
@@ -471,7 +471,7 @@ The install runs in `Updater+Install`. Any failure before the swap stops it, and
 
 At launch, `Updater.finishInstall` shows one notification if `installedVersion` is the running version. In every case it removes the key and the update folder, which holds the previous version. A failed check or swap (`UpdateError.usesReleasePageAfter`) changes the button to the release page until the next launch. A network error, a cancel and busy work keep the install button.
 
-A debug run never updates: `detect` gives `debugRun`, and `install()` checks `isDebugRun`. A test build (`COLIMABAR_UPDATE_TEST=1 ./build.sh`) compiles `UpdateTestHooks`. It reads `COLIMABAR_UPDATE_BASE=http://127.0.0.1:PORT` and moves the API and the download to a local server. A release build must not have it. CI checks the binary for that name. See [CONTRIBUTING.md](CONTRIBUTING.md#test-build-for-the-in-app-update) and [SECURITY.md](SECURITY.md).
+A debug run never updates: `detect` gives `debugRun`, and `install()` checks `isDebugRun`. A test build (`COLIMABAR_UPDATE_TEST=1 ./build.sh`) compiles `UpdateTestHooks`. It reads `COLIMABAR_UPDATE_BASE=http://127.0.0.1:PORT` and moves the API, the download and the cask file to a local server. A release build must not have it. CI checks the binary for that name. See [CONTRIBUTING.md](CONTRIBUTING.md#test-build-for-the-in-app-update) and [SECURITY.md](SECURITY.md).
 
 ### Performance and limits
 
