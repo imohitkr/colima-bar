@@ -23,6 +23,29 @@ import Testing
         #expect(reasons[0].contains("restarting"))
     }
 
+    @Test func homebrewOffersOnlyAVersionThatTheCaskHas() {
+        func offer(_ running: String, _ release: String, _ cask: String?) -> String? {
+            UpdatePolicy.homebrewVersion(running: running, release: release, cask: cask)
+        }
+        #expect(offer("0.17.0", "0.18.0", "0.18.0") == "0.18.0")
+        #expect(offer("0.17.0", "0.18.0", "0.19.0") == "0.18.0")
+        // The cask lags: nothing newer than the running version yet.
+        #expect(offer("0.17.0", "0.18.0", "0.17.0") == nil)
+        #expect(offer("0.9.9", "0.10.0", "0.9.9") == nil)
+        // The cask lags, but has a version newer than the running one.
+        #expect(offer("0.17.0", "0.19.0", "0.18.0") == "0.18.0")
+        // An unreadable cask does not hide the release.
+        #expect(offer("0.17.0", "0.18.0", nil) == "0.18.0")
+    }
+
+    @Test func theLagTextSaysWhenColimaBarChecksAgain() {
+        let on = UpdatePolicy.caskLagText(release: "0.18.0", cask: "0.17.0", checksOn: true)
+        #expect(on.title == "ColimaBar 0.18.0 is not in Homebrew yet")
+        #expect(on.text == "The Homebrew cask has 0.17.0. ColimaBar checks again in an hour.")
+        #expect(
+            UpdatePolicy.caskLagText(release: "0.18.0", cask: nil, checksOn: false).text.hasSuffix("Try again later."))
+    }
+
     @Test func comparesTheVersions() {
         #expect(UpdatePolicy.decision(running: "0.9.0", latest: "0.9.1") == .newer)
         #expect(UpdatePolicy.decision(running: "0.9.0", latest: "0.10.0") == .newer)

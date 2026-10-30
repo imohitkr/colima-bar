@@ -43,7 +43,7 @@ To try the in-app update without a release, make a test build:
 COLIMABAR_UPDATE_TEST=1 COLIMABAR_BUILD_VERSION=0.9.0 ./build.sh
 ```
 
-`COLIMABAR_BUILD_VERSION` sets the version of the app. `COLIMABAR_UPDATE_TEST=1` compiles the hook `UpdateTestHooks.swift` with `-DCOLIMABAR_UPDATE_TEST`. In that build only, `COLIMABAR_UPDATE_BASE=http://127.0.0.1:PORT` moves the release API (`/releases/latest`) and the download (`/releases/download/TAG/ColimaBar.zip`) to a local server. No other host or scheme works. A release build must not contain the hook: CI checks the binary for the name `COLIMABAR_UPDATE_BASE`.
+`COLIMABAR_BUILD_VERSION` sets the version of the app. `COLIMABAR_UPDATE_TEST=1` compiles the hook `UpdateTestHooks.swift` with `-DCOLIMABAR_UPDATE_TEST`. In that build only, `COLIMABAR_UPDATE_BASE=http://127.0.0.1:PORT` moves the release API (`/releases/latest`), the download (`/releases/download/TAG/ColimaBar.zip`) and the Homebrew cask (`/cask/colima-bar.rb`) to a local server. No other host or scheme works. A release build must not contain the hook: CI checks the binary for the name `COLIMABAR_UPDATE_BASE`.
 
 Test in a separate macOS user, because the build has its own login item and proxy sockets. Put the 0.9.0 test build in `~/Applications`. Make a `ColimaBar.zip` of a build with version 0.9.1 and a `releases/latest` JSON file with the tag, `"immutable": true`, and the `size` and `digest` of the zip. Serve both with `python3 -m http.server --bind 127.0.0.1`, and run `launchctl setenv COLIMABAR_UPDATE_BASE http://127.0.0.1:PORT`. Never use `make install` or a real release for this test. Unit tests need none of this: they use fake bundles in temporary folders and never touch `/Applications`.
 
@@ -170,7 +170,7 @@ The maintainer then makes the release:
 2. CI runs the tests and builds `ColimaBar.dmg` and `ColimaBar.zip`. It stops if the binary has the update test hook.
 3. CI signs a build provenance attestation for both files.
 4. CI publishes the GitHub release with generated notes. Then it checks that the release is immutable and that the digest of each asset on GitHub is the digest of the built file. The in-app update trusts that digest.
-5. Within 6 hours, a workflow in imohitkr/homebrew-tap verifies the attestation of `ColimaBar.zip` and updates the cask.
+5. CI starts the `update-cask` workflow in imohitkr/homebrew-tap. That workflow verifies the attestation of `ColimaBar.zip` and updates the cask, in a few minutes. CI needs the secret `TAP_DISPATCH_TOKEN`: a fine-grained token for imohitkr/homebrew-tap only, with the permission **Actions: Read and write**. Without the secret, the tap checks for a new release every hour.
 
 Before the tag, the maintainer moves the `[Unreleased]` entries in `CHANGELOG.md` to a new version section.
 

@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- A Homebrew install no longer offers a release before `brew upgrade` can install it. ColimaBar offers only a version that the Homebrew cask has, and checks the cask again each hour while it lags. A release now starts the cask update at once, so the cask follows within minutes.
+
 ## [0.18.0] - 2026-10-30
 
 ### Added

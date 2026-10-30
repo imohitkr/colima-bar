@@ -49,6 +49,29 @@ enum UpdatePolicy {
         return Version.isNewer(latest, than: running) ? .newer : .upToDate
     }
 
+    /// How long a Homebrew install waits before it checks again when the
+    /// cask does not have the newest release yet.
+    static let caskRetryDelay: TimeInterval = 60 * 60
+
+    /// The version that a Homebrew install offers, or nil if `brew upgrade`
+    /// has nothing newer than `running` yet. That is the release if the cask
+    /// has it, else the version of the cask if it is newer than `running`.
+    /// If ColimaBar could not read the cask (nil), it offers the release, as
+    /// it did before it read the cask.
+    static func homebrewVersion(running: String, release: String, cask: String?) -> String? {
+        guard let cask, Version.isNewer(release, than: cask) else { return release }
+        return Version.isNewer(cask, than: running) ? cask : nil
+    }
+
+    /// The text of a manual check when the cask does not have a newer version.
+    static func caskLagText(release: String, cask: String?, checksOn: Bool) -> (title: String, text: String) {
+        let next = checksOn ? "ColimaBar checks again in an hour." : "Try again later."
+        return (
+            "ColimaBar \(release) is not in Homebrew yet",
+            "The Homebrew cask has \(cask ?? "an older version"). \(next)"
+        )
+    }
+
     /// The short note for a release that needs a newer macOS than `os`, or
     /// nil if the release has no such line or `os` is enough. Such a release
     /// gets no offer and no notification.
