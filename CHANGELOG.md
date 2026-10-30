@@ -6,6 +6,11 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- The menu bar icon no longer moves while the containers restart after a start. The number keeps the width of its largest value until Colima stops or you switch the profile, and the icon symbols have one size. The hourglass shows while Colima starts, for a moment after an action such as a restart ends, and while ColimaBar loads the container list, until the number has stayed the same for 3 seconds (60 seconds at most). Later, a new number shows after 1 second. A drop to 0 shows at once.
+- After a start, the container list could stay empty until a container changed, because Colima restarts the Docker daemon during the start. ColimaBar now reads the list again at the next check of the daemon.
+
 ## [0.18.1] - 2026-10-30
 
 ### Fixed

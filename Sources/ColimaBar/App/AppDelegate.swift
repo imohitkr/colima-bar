@@ -61,6 +61,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     private(set) var window: NSWindow?
     private var windowCounted = false  // dashboard window counted in model.visibleCount
     private var appliedHidden: Bool?  // last icon visibility we set
+    // The last icon values we wrote, so an update writes only a change.
+    private var appliedSymbol: StatusIcon?
+    private var appliedTitle: String?
+    private var appliedValue: String?
+    private var iconCountGate = IconCountGate()  // which count the icon shows
+    private var iconProfile: String?  // the profile that the gate has seen
+    private var iconRecheck: Task<Void, Never>?  // the one pending gate check
     /// Watches clicks in other apps while the popover is open (see popoverDidShow).
     private var outsideClickMonitor: Any?
     private var sigterm: DispatchSourceSignal?
@@ -127,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         item.button?.action = #selector(clicked)
         item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         item.button?.imagePosition = .imageLeading
+        item.button?.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
         item.button?.setAccessibilityLabel("Colima")
         item.button?.setAccessibilityHelp("Left-click for the dashboard, right-click for quick actions")
 
@@ -413,38 +421,87 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
     /// Re-renders the icon whenever the fields it reads change.
     private func updateIcon() {
         withObservationTracking {
-            let symbol: String
-            var title = ""
-            if model.busy != nil {
-                symbol = "hourglass"
-            } else if model.state != .running {
-                symbol = "shippingbox"
-            } else {
-                symbol = model.unhealthyCount > 0 ? "exclamationmark.triangle.fill" : "shippingbox.fill"
-                let n = model.running.count
-                if n > 0 { title = " \(n)" }
-            }
-            let img = NSImage(systemSymbolName: symbol, accessibilityDescription: "Colima")
-            img?.isTemplate = true
-            item.button?.image = img
-            item.button?.title = title
-            item.button?.setAccessibilityValue(
-                model.busy
-                    ?? (model.state == .running
-                        ? "\(model.running.count) containers running" : "stopped"))
-            item.button?.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-            // Write isVisible only when our decision changes, so the system
-            // (or the user) hiding the item isn't undone on every refresh.
-            let hide = model.iconHidden
-            if appliedHidden != hide {
-                appliedHidden = hide
-                item.isVisible = !hide
-                log.notice("menu bar icon \(hide ? "hidden" : "shown", privacy: .public)")
-                if hide { model.noteIconHiddenOnce() }
-            }
+            renderIcon()
         } onChange: {
             // The app delegate lives for the whole process.
             Task { @MainActor in self.updateIcon() }
+        }
+    }
+
+    /// Writes the icon. The count gate can ask for a second run later, when
+    /// the count has settled; that run needs no new observation.
+    private func renderIcon() {
+        // Read every input here, before any branch, so the observation
+        // tracking does not depend on the branch that the last run took.
+        let profile = model.profile
+        let running = model.state == .running
+        let count = model.running.count
+        let busy = model.busy
+        let unhealthy = model.unhealthyCount
+        let hidden = model.iconHidden
+        let listed = model.containersListed
+        let listable = model.hasDockerSocket
+        if iconProfile != profile {
+            iconProfile = profile
+            iconCountGate = IconCountGate()
+        }
+        let now = ContinuousClock.now
+        let out = iconCountGate.update(
+            running: running, busy: busy != nil, listed: listed, listable: listable, count: count,
+            now: now)
+        scheduleIconRecheck(out.recheckAt)
+        let symbol: StatusIcon
+        var title = ""
+        let value: String
+        if let busy {
+            symbol = StatusIcon.busy
+            value = busy
+        } else {
+            switch out.shown {
+            case .stopped:
+                symbol = StatusIcon.stopped
+                value = "stopped"
+            case .starting:
+                symbol = StatusIcon.busy
+                value = "loading containers"
+            case .count(let n):
+                symbol = unhealthy > 0 ? StatusIcon.unhealthy : StatusIcon.running
+                value = "\(n) containers running"
+                title = IconTitle.format(count: n, digits: out.digits)
+            }
+        }
+        if appliedSymbol != symbol {
+            appliedSymbol = symbol
+            item.button?.image = symbol.image
+        }
+        if appliedTitle != title {
+            appliedTitle = title
+            item.button?.title = title
+        }
+        if appliedValue != value {
+            appliedValue = value
+            item.button?.setAccessibilityValue(value)
+        }
+        // Write isVisible only when our decision changes, so the system
+        // (or the user) hiding the item isn't undone on every refresh.
+        if appliedHidden != hidden {
+            appliedHidden = hidden
+            item.isVisible = !hidden
+            log.notice("menu bar icon \(hidden ? "hidden" : "shown", privacy: .public)")
+            if hidden { model.noteIconHiddenOnce() }
+        }
+    }
+
+    /// Replaces the one pending check of the count gate. The check runs
+    /// `renderIcon` again at `instant`; no instant cancels it.
+    private func scheduleIconRecheck(_ instant: ContinuousClock.Instant?) {
+        iconRecheck?.cancel()
+        iconRecheck = nil
+        guard let instant else { return }
+        iconRecheck = Task { @MainActor [weak self] in
+            try? await Task.sleep(until: instant, clock: .continuous)
+            guard !Task.isCancelled else { return }
+            self?.renderIcon()
         }
     }
 
