@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Fixed
+
+- The trash button and **Remove Project…** of a Compose project now work when the project folder, a Compose file or an env file is gone, for example a deleted temporary folder. Before, both were off. Docker finds the containers by the project name. See [Compose projects](docs/usage.md#compose-projects).
+
 ## [0.18.1] - 2026-10-30
 
 ### Fixed
