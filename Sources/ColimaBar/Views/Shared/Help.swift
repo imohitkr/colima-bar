@@ -81,7 +81,7 @@ enum Help {
     static let composeRemoveMoved =
         "The Compose files are missing. You can still remove the project. ColimaBar finds its containers by the project name and asks first. If the project has volumes, you keep or delete them."
     static let composeMenuMoved =
-        "The Compose files are missing. Pull, Up and Down are off. Remove Project still works."
+        "The Compose files are missing. Pull, Update and Recreate, Up and Down are off. Remove Project still works."
     static let composeOutput = "Copy the last lines that docker compose printed for this project."
     static let composeNoDocker = "Install the docker CLI to use docker compose."
     static let composeMoved = "The Compose files are missing. The project folder moved or was deleted."
