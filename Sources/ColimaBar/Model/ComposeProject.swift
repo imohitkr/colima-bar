@@ -43,6 +43,15 @@ struct ComposeProject: Equatable, Sendable {
         [name, directory, String(environmentFiles.count)] + environmentFiles + configFiles
     }
 
+    /// The arguments of `colima-ctl.sh compose-*` for `verb`, or nil if it
+    /// cannot run. Pull, up and down need the folder and the files. Remove
+    /// needs only the name when they are gone: `docker compose -p NAME down`
+    /// finds the containers by their project label.
+    func ctlArgs(for verb: ComposeVerb, exists: (String) -> Bool) -> [String]? {
+        if exists(directory) && missingFiles(exists: exists).isEmpty { return ctlArgs() }
+        return verb == .remove ? [name] : nil
+    }
+
     /// The Compose files and the env file that `exists` does not find.
     func missingFiles(exists: (String) -> Bool) -> [String] {
         (configFiles + environmentFiles).filter { !exists($0) }

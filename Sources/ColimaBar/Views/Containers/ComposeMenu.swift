@@ -17,19 +17,23 @@ struct ComposeMenu: View {
     private var busy: Bool { model.composeBusy.contains(model.composeKey(project)) }
 
     var body: some View {
-        let reason = disabledReason(
-            missing: model.composeMissing.contains(model.composeKey(project)), noDocker: model.composeNoDocker)
+        let missing = model.composeMissing.contains(model.composeKey(project))
+        let reason = disabledReason(missing: missing, noDocker: model.composeNoDocker)
+        // Remove needs only the project name, so it works when the files are gone.
+        let removeReason = disabledReason(missing: false, noDocker: model.composeNoDocker)
         let vsCode = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.vsCodeID)
         let output = model.composeOutput[model.composeKey(project)] ?? []
         HStack(spacing: 2) {
             if busy { ProgressView().controlSize(.small).hint(Help.composeRunning) }
             if stopped {
-                IconButton("trash", reason ?? Help.composeRemove) { model.compose(.remove, project: project) }
-                    .disabled(reason != nil)
+                IconButton("trash", removeReason ?? (missing ? Help.composeRemoveMoved : Help.composeRemove)) {
+                    model.compose(.remove, project: project)
+                }
+                .disabled(removeReason != nil)
             }
             Menu {
                 Button("Open Project Folder") { NSWorkspace.shared.open(folder) }
-                    .disabled(model.composeMissing.contains(model.composeKey(project)))
+                    .disabled(missing)
                     .hint(Help.openProjectFolder)
                 if let vsCode {
                     Button("Open in VS Code") {
@@ -53,7 +57,7 @@ struct ComposeMenu: View {
                 Button("Down…") { model.compose(.down, project: project) }
                     .disabled(reason != nil).hint(Help.composeDown)
                 Button("Remove Project…") { model.compose(.remove, project: project) }
-                    .disabled(reason != nil).hint(Help.composeRemove)
+                    .disabled(removeReason != nil).hint(missing ? Help.composeRemoveMoved : Help.composeRemove)
                 if !output.isEmpty {
                     Divider()
                     Button("Copy Last Output") { Pasteboard.copy(output.joined(separator: "\n")) }
@@ -69,6 +73,7 @@ struct ComposeMenu: View {
     }
 
     /// Why Pull, Up, Down and Remove do not run now. It is also the hint of the menu.
+    /// Remove ignores `missing`.
     private func disabledReason(missing: Bool, noDocker: Bool) -> String? {
         if model.isDebug { return Help.composeDebug }
         if noDocker { return Help.composeNoDocker }

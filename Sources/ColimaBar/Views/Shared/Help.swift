@@ -78,6 +78,8 @@ enum Help {
         "Stop and remove the containers and networks of the project. Volumes and images stay. ColimaBar asks first."
     static let composeRemove =
         "Remove the containers and networks of the project. ColimaBar asks first. If the project has volumes, you keep or delete them."
+    static let composeRemoveMoved =
+        "The Compose files are missing, but you can still remove the project. ColimaBar finds its containers by the project name and asks first."
     static let composeOutput = "Copy the last lines that docker compose printed for this project."
     static let composeNoDocker = "Install the docker CLI to use docker compose."
     static let composeMoved = "The Compose files are missing. The project folder moved or was deleted."

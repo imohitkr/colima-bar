@@ -93,6 +93,7 @@ For a container that docker compose started, ColimaBar reads the project folder 
   - If the project has no volumes, the dialog shows **Remove**. It runs `docker compose down --remove-orphans`.
   - A named volume that the Compose files no longer declare stays. If another container uses a volume, docker keeps that volume and ColimaBar reports a failure.
   - Back up a volume first on the Volumes tab.
+  - If the project folder or a Compose file is gone, Remove still works. ColimaBar runs `docker compose -p NAME down` without the files, and docker finds the containers, networks and volumes by the project name. The other items stay off.
 - **Copy Last Output** copies the last lines that docker compose printed. ColimaBar keeps them in memory only.
 
 A spinner shows while docker compose runs for the project. If it fails, a notification gives the exit code. It shows no output, because the output can hold secrets. Use **Copy Last Output** to read it. After 15 minutes, ColimaBar stops docker compose and says so. The buttons are off if the docker CLI is missing, if the Compose files are gone (the folder moved or was deleted), and in a debug run. Doctor checks the docker CLI and the compose plugin (**Docker plugins**).
