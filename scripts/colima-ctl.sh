@@ -1032,7 +1032,8 @@ compose_show() {
 # of this script (the time limit of ColimaBar) stops docker too.
 # With only NAME, docker compose finds the containers, networks and volumes
 # by their project label. remove uses this when the Compose files are gone.
-# Docker runs in / without COMPOSE_FILE, so it cannot read another compose.yaml.
+# Docker runs in / without COMPOSE_FILE and COMPOSE_ENV_FILES, so it cannot read
+# another compose.yaml. ColimaBar passes the env files of the project with --env-file.
 compose_run() {
   local verb="$1" name="$2" f rc
   local argv=(compose -p "$name")
@@ -1054,7 +1055,7 @@ compose_run() {
   (umask 077 && mkdir -p "$STATE_DIR")
   COMPOSE_OUT="$STATE_DIR/compose-out.$$"
   (umask 077 && : >"$COMPOSE_OUT")
-  (cd / && unset COMPOSE_FILE && exec docker "${argv[@]}") >"$COMPOSE_OUT" 2>&1 &
+  (cd / && unset COMPOSE_FILE COMPOSE_ENV_FILES && exec docker "${argv[@]}") >"$COMPOSE_OUT" 2>&1 &
   CHILD=$!
   wait "$CHILD"
   rc=$?

@@ -68,7 +68,7 @@ struct ComposeMenu: View {
             }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).frame(width: 22)
             .accessibilityLabel("Compose actions for \(project.name)")
-            .hint(reason ?? Help.composeMenu)
+            .hint(missing && removeReason == nil ? Help.composeMenuMoved : reason ?? Help.composeMenu)
         }
     }
 

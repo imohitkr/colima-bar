@@ -91,12 +91,12 @@ For a container that docker compose started, ColimaBar reads the project folder 
 - **Remove Project…** removes the project. When no container of the project runs, the trash button in the header of the project does the same. ColimaBar asks first. **Cancel** is the default button. Images and external volumes always stay.
   - If the project has volumes, the dialog lists up to 10 named volumes and the number of anonymous volumes. **Keep Volumes** runs `docker compose down --remove-orphans`. **Delete Volumes** adds `--volumes` and deletes the data in those volumes.
   - If the project has no volumes, the dialog shows **Remove**. It runs `docker compose down --remove-orphans`.
-  - A named volume that the Compose files no longer declare stays. If another container uses a volume, docker keeps that volume and ColimaBar reports a failure.
+  - If the Compose files exist, a named volume that they no longer declare stays. If another container uses a volume, docker keeps that volume and ColimaBar reports a failure.
   - Back up a volume first on the Volumes tab.
-  - If the project folder or a Compose file is gone, Remove still works. ColimaBar runs `docker compose -p NAME down` without the files, and docker finds the containers, networks and volumes by the project name. The other items stay off.
+  - If the project folder, a Compose file or an env file is gone, **Remove Project…** and the trash button still work. ColimaBar runs `docker compose -p NAME down --remove-orphans` without the files. Docker finds the containers, networks and volumes by the project name. **Open Project Folder**, **Pull Images**, **Update and Recreate**, **Up (Detached)** and **Down…** stay off.
 - **Copy Last Output** copies the last lines that docker compose printed. ColimaBar keeps them in memory only.
 
-A spinner shows while docker compose runs for the project. If it fails, a notification gives the exit code. It shows no output, because the output can hold secrets. Use **Copy Last Output** to read it. After 15 minutes, ColimaBar stops docker compose and says so. The buttons are off if the docker CLI is missing, if the Compose files are gone (the folder moved or was deleted), and in a debug run. Doctor checks the docker CLI and the compose plugin (**Docker plugins**).
+A spinner shows while docker compose runs for the project. If it fails, a notification gives the exit code. It shows no output, because the output can hold secrets. Use **Copy Last Output** to read it. After 15 minutes, ColimaBar stops docker compose and says so. The buttons are off if the docker CLI is missing, and in a debug run. If the Compose files are gone (the folder moved or was deleted), only **Remove Project…** and the trash button work. Doctor checks the docker CLI and the compose plugin (**Docker plugins**).
 
 #### Mute a Compose project
 

@@ -125,22 +125,23 @@ import Testing
         #expect(plain?.ctlArgs() == ["web", "/Users/ab/web", "0", "/Users/ab/web/compose.yaml"])
     }
 
-    @Test func ctlArgsForAVerbUseTheFilesWhenTheyExist() {
-        let p = ComposeProject.from(labels: labels())
+    @Test func ctlArgsForAVerbUseTheFilesWhenTheyExist() throws {
+        let p = try #require(ComposeProject.from(labels: labels(env: "/Users/ab/web/.env")))
         for verb in ComposeVerb.allCases {
-            #expect(p?.ctlArgs(for: verb) { _ in true } == p?.ctlArgs(), "\(verb)")
+            #expect(p.ctlArgs(for: verb) { _ in true } == p.ctlArgs(), "\(verb)")
         }
     }
 
-    @Test func onlyRemoveRunsWithTheNameWhenAFileOrTheFolderIsGone() {
-        let p = ComposeProject.from(labels: labels())
-        let noFile: (String) -> Bool = { $0 == "/Users/ab/web" }
+    @Test func onlyRemoveRunsWithTheNameWhenAFileOrTheFolderIsGone() throws {
+        let p = try #require(ComposeProject.from(labels: labels(env: "/Users/ab/web/.env")))
+        let noFile: (String) -> Bool = { $0 != "/Users/ab/web/compose.yaml" }
+        let noEnvFile: (String) -> Bool = { $0 != "/Users/ab/web/.env" }
         let noFolder: (String) -> Bool = { $0 != "/Users/ab/web" }
-        for exists in [noFile, noFolder] {
-            #expect(p?.ctlArgs(for: .remove, exists: exists) == ["web"])
-            #expect(p?.ctlArgs(for: .pull, exists: exists) == nil)
-            #expect(p?.ctlArgs(for: .up, exists: exists) == nil)
-            #expect(p?.ctlArgs(for: .down, exists: exists) == nil)
+        for exists in [noFile, noEnvFile, noFolder] {
+            #expect(p.ctlArgs(for: .remove, exists: exists) == ["web"])
+            #expect(p.ctlArgs(for: .pull, exists: exists) == nil)
+            #expect(p.ctlArgs(for: .up, exists: exists) == nil)
+            #expect(p.ctlArgs(for: .down, exists: exists) == nil)
         }
     }
 
