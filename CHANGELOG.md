@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-11-06
+
 ### Fixed
 
 - The trash button and **Remove Project…** of a Compose project now work when the project folder, a Compose file or an env file is gone, for example a deleted temporary folder. Before, both were off. Docker finds the containers by the project name. See [Compose projects](docs/usage.md#compose-projects).
@@ -333,7 +335,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/imohitkr/colima-bar/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/imohitkr/colima-bar/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/imohitkr/colima-bar/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/imohitkr/colima-bar/compare/v0.16.0...v0.17.0
