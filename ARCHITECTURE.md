@@ -213,7 +213,7 @@ The heartbeat runs each second while a dashboard is open or an action runs. Othe
 | `.battery` | 10 s | 20 s | 10 min |
 | `.strong` (Low Power Mode, or thermal state serious or critical) | 15 s | 30 s | 15 min |
 
-Each ping time is a whole number of ticks. A VM in another state refreshes after 60 seconds. The proxies and the folder watcher do not depend on the tick. Auto-start and auto-stop read the busy marker directly, so auto-start is not slower. The hourglass for an action from outside the app follows the tick: in Low Power Mode with the dashboard closed, it can lag by up to about 22 seconds.
+Each ping time is a whole number of ticks. If the VM runs and no container list has loaded since the start, each ping reads the list again. Colima restarts dockerd during a start, so the first list can fail. A VM in another state refreshes after 60 seconds. The proxies and the folder watcher do not depend on the tick. Auto-start and auto-stop read the busy marker directly, so auto-start is not slower. The hourglass for an action from outside the app follows the tick: in Low Power Mode with the dashboard closed, it can lag by up to about 22 seconds.
 
 ColimaBar runs `colima list -j` only in these cases:
 
