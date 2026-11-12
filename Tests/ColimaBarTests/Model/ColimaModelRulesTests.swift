@@ -17,6 +17,13 @@ import Testing
         Container(id: "x", name: "x", image: "i", state: state, status: status, ports: [], project: nil)
     }
 
+    @Test func theListIsNeededOnlyForARunningVMWithAnAnsweringDaemonAndNoList() {
+        #expect(ColimaModel.needsContainerList(up: true, state: .running, listed: 0))
+        #expect(!ColimaModel.needsContainerList(up: true, state: .running, listed: 1))
+        #expect(!ColimaModel.needsContainerList(up: false, state: .running, listed: 0))
+        #expect(!ColimaModel.needsContainerList(up: true, state: .stopped, listed: 0))
+    }
+
     @Test func hidesWhenEnabledAndStopped() {
         #expect(hides())
     }

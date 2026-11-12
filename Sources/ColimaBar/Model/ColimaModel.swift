@@ -39,6 +39,9 @@ final class ColimaModel {
     private(set) var containers: [Container] = [] {
         didSet { updateDerivedLists() }
     }
+    /// The number of container lists read from the daemon since the VM was
+    /// last not running. 0 means the list is not loaded yet.
+    private(set) var containersListed = 0
     private(set) var stats: [String: Stat] = [:]  // by container id
     private(set) var cpuHistory: [Double] = []  // % of VM CPU used by containers
     private(set) var memHistory: [Double] = []  // % of VM memory used by containers
@@ -871,8 +874,14 @@ final class ColimaModel {
             let stale = Date().timeIntervalSince(lastColima) > staleAfter
             if up != (state == .running) || stale {
                 await refreshStatus()
-            } else if up, events == nil {
-                startEvents()
+            } else if up {
+                if events == nil { startEvents() }
+                // Colima restarts dockerd during a start, and the events stream
+                // can stay open across it. Then the first list may have failed
+                // and nothing else would list again.
+                if Self.needsContainerList(up: up, state: state, listed: containersListed) {
+                    await refreshContainers()
+                }
             }
         }
         checkIdle()
@@ -1072,6 +1081,7 @@ final class ColimaModel {
         resetDF()
         syncStatStreams()
         set(\.containers, [])
+        if containersListed != 0 { containersListed = 0 }
         // A stopped VM keeps the ports that its containers claim. A profile switch forgets them.
         if because == .profileChanged { domainClaims.reset() }
         setDomainRestartHints([])
@@ -1165,6 +1175,7 @@ final class ColimaModel {
         }
         // Stable order by name: rows never reorder because a number changed.
         set(\.containers, mapped.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
+        containersListed += 1
         updateDomainRoutes(visible)
         syncStatStreams()
         scheduleImageUpdateScan()

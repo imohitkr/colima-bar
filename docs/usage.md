@@ -9,9 +9,9 @@ ColimaBar shows the state of your Colima VM and its containers in the menu bar. 
 The icon shows the state of the selected [profile](#profiles):
 
 - **Box outline**: Colima is stopped.
-- **Filled box with a number**: Colima runs. The number counts the running containers.
-- **Warning triangle**: Colima runs, and at least one container is unhealthy.
-- **Hourglass**: an action runs, for example a start or a stop.
+- **Filled box with a number**: Colima runs. The number counts the running containers. It keeps the width of its largest value until Colima stops or you switch the profile, so the icon does not move. A new number shows when it has stayed the same for 1 second. A drop to 0 shows at once, and the number then disappears.
+- **Warning triangle with a number**: Colima runs, and at least one container is unhealthy. The number follows the same rules as on the filled box.
+- **Hourglass**: an action runs, for example a start or a stop. It also shows while Colima starts, for a moment after an action such as a restart, a repair or a settings change ends, and while ColimaBar loads the container list at launch or after a profile switch. While an action runs, the hourglass stays. After the action, the hourglass stays until the number of running containers has been the same for 3 seconds. This wait lasts 60 seconds at most.
 
 Left-click the icon to open the dashboard. Right-click or Control-click the icon to open [the right-click menu](#the-right-click-menu).
 

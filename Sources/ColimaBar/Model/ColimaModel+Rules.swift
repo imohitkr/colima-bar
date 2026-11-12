@@ -56,6 +56,12 @@ extension ColimaModel {
     /// least this old.
     nonisolated static let statusMaxAgeOnOpen: TimeInterval = 60
 
+    /// True if the daemon answers, the VM runs and no container list has
+    /// loaded since the VM started.
+    nonisolated static func needsContainerList(up: Bool, state: VMState, listed: Int) -> Bool {
+        up && state == .running && listed == 0
+    }
+
     /// The Images, Volumes and System tabs show data from `/system/df`.
     nonisolated static func showsDiskUsage(_ tab: DashboardTab) -> Bool { tab != .containers }
 
