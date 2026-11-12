@@ -982,11 +982,7 @@ compose_check() {
   esac
   shift 3
   [ $# -gt "$nenv" ] && [ $(($# - nenv)) -le 16 ] || { notify "Compose needs 1 to 16 files."; exit 1; }
-  case "$name" in
-    ""|[-_]*|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*)
-      notify "Invalid Compose project name."; exit 1 ;;
-  esac
-  [ "${#name}" -le 63 ] || { notify "Invalid Compose project name."; exit 1; }
+  compose_check_name "$name"
   case "$dir" in
     /*) ;;
     *) notify "Invalid folder for the Compose project $name."; exit 1 ;;
@@ -999,6 +995,20 @@ compose_check() {
     esac
     [ -f "$f" ] || { notify "A Compose file of $name is missing. The project folder moved or was deleted."; exit 1; }
   done
+  compose_check_plugin
+}
+
+# compose_check_name NAME: the name has the letters, digits, "-" and "_" of
+# Compose, starts with a letter or digit, and has at most 63 characters.
+compose_check_name() {
+  case "$1" in
+    ""|[-_]*|*[!abcdefghijklmnopqrstuvwxyz0123456789_-]*)
+      notify "Invalid Compose project name."; exit 1 ;;
+  esac
+  [ "${#1}" -le 63 ] || { notify "Invalid Compose project name."; exit 1; }
+}
+
+compose_check_plugin() {
   docker compose version >/dev/null 2>&1 \
     || { notify "docker compose is missing. Open Doctor in ColimaBar."; exit 1; }
 }
@@ -1014,18 +1024,26 @@ compose_show() {
   rm -f "$file"
 }
 
-# compose_run VERB NAME DIR NENV ENV... FILE...: runs docker compose for the
+# compose_run VERB NAME [DIR NENV ENV... FILE...]: runs docker compose for the
 # profile (DOCKER_HOST). VERB is pull, up, down or remove. A plain down keeps
 # the volumes and the images. remove runs `down --remove-orphans`, and adds
 # `--volumes` if COMPOSE_VOLUMES is set (see remove_confirm). The output goes to stdout only, never to ctl.log:
 # it can show values of the project. Docker runs in the background, so a stop
 # of this script (the time limit of ColimaBar) stops docker too.
+# With only NAME, docker compose finds the containers, networks and volumes
+# by their project label. remove uses this when the Compose files are gone.
+# Docker runs in / without COMPOSE_FILE and COMPOSE_ENV_FILES, so it cannot read
+# another compose.yaml. ColimaBar passes the env files of the project with --env-file.
 compose_run() {
-  local verb="$1" name="$2" dir="$3" nenv="$4" f rc
-  shift 4
-  local argv=(compose -p "$name" --project-directory "$dir")
-  while [ "$nenv" -gt 0 ]; do argv+=(--env-file "$1"); shift; nenv=$((nenv - 1)); done
-  for f in "$@"; do argv+=(-f "$f"); done
+  local verb="$1" name="$2" f rc
+  local argv=(compose -p "$name")
+  if [ $# -gt 2 ]; then
+    local dir="$3" nenv="$4"
+    shift 4
+    argv+=(--project-directory "$dir")
+    while [ "$nenv" -gt 0 ]; do argv+=(--env-file "$1"); shift; nenv=$((nenv - 1)); done
+    for f in "$@"; do argv+=(-f "$f"); done
+  fi
   case "$verb" in
     up) argv+=(up -d) ;;
     # Orphans too, so no container of the project stays in the list.
@@ -1037,7 +1055,7 @@ compose_run() {
   (umask 077 && mkdir -p "$STATE_DIR")
   COMPOSE_OUT="$STATE_DIR/compose-out.$$"
   (umask 077 && : >"$COMPOSE_OUT")
-  docker "${argv[@]}" >"$COMPOSE_OUT" 2>&1 &
+  (cd / && unset COMPOSE_FILE COMPOSE_ENV_FILES && exec docker "${argv[@]}") >"$COMPOSE_OUT" 2>&1 &
   CHILD=$!
   wait "$CHILD"
   rc=$?
@@ -1492,6 +1510,7 @@ $list" || exit 2
     exec docker run --rm -it --name "$name" --pid "container:$id" --network "container:$id" --cap-add SYS_PTRACE "$img" ;;
   # Compose projects: compose-pull|compose-up|compose-down|compose-remove NAME DIR NENV ENV... FILE...
   # Not VM actions: no lock and no busy marker. Only down and remove ask first.
+  # compose-remove NAME alone removes a project whose Compose files are gone.
   compose-pull) compose_check "${@:2}"; compose_run pull "${@:2}" ;;
   compose-up)   compose_check "${@:2}"; compose_run up "${@:2}" ;;
   compose-down)
@@ -1499,7 +1518,12 @@ $list" || exit 2
     confirm "Stop and remove the containers and networks of the Compose project $2 in $NAMED? Volumes and images stay." || exit 2
     compose_run down "${@:2}" ;;
   compose-remove)
-    compose_check "${@:2}"
+    if [ $# -eq 2 ]; then
+      compose_check_name "$2"
+      compose_check_plugin
+    else
+      compose_check "${@:2}"
+    fi
     remove_confirm "$2" || exit 2
     compose_run remove "${@:2}" ;;
   # Idle auto-stop from ColimaBar: no confirmation, just a notification.
@@ -1662,7 +1686,7 @@ $list" || exit 2
     if [ ${#files[@]} -eq 0 ] || ! open -a Console "${files[@]}"; then notify "No Colima logs yet."; fi ;;
 
   *)
-    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|vm-recreate VMTYPE MOUNTTYPE|ctr-*|compose-pull|compose-up|compose-down|compose-remove NAME DIR NENV ENV... FILE...|img-rm|img-pull|vol-rm|log-truncate ID [NAME]|disk-trim|auto-prune|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME [VMTYPE MOUNTTYPE]]|profile-delete}" >&2
+    echo "usage: $0 {start|stop|restart|resources CPU MEM|rosetta on|off|k8s on|off|disk GB|vm-config STAGED SHA|disk-shrink GB|vm-recreate VMTYPE MOUNTTYPE|ctr-*|compose-pull|compose-up|compose-down|compose-remove NAME DIR NENV ENV... FILE...|compose-remove NAME|img-rm|img-pull|vol-rm|log-truncate ID [NAME]|disk-trim|auto-prune|stop-all|prune KIND|ssh|config|logs|copy-env|stale-files|repair|auto-stop MIN|profile-create CPU MEM DISK [RUNTIME [VMTYPE MOUNTTYPE]]|profile-delete}" >&2
     echo "env: COLIMABAR_PROFILE selects the colima profile (default: default)" >&2
     echo "env: COLIMABAR_EXPECT_RUNNING=1|0 makes resources, rosetta, k8s and vm-config stop if the VM state differs" >&2
     echo "env: COLIMABAR_UPGRADE_NOTE and COLIMABAR_RELEASE_NOTES make start, restart and the config actions ask after an upgrade" >&2

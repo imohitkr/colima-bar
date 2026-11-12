@@ -23,6 +23,7 @@ import Testing
             "docker",
             """
             printf 'docker %s host=%s\\n' "$*" "$DOCKER_HOST" >> "\(sb.log)"
+            printf 'cwd=%s compose_file=%s env_files=%s\\n' "$PWD" "${COMPOSE_FILE-unset}" "${COMPOSE_ENV_FILES-unset}" >> "\(sb.log)"
             if [ "$1 $2" = "compose version" ]; then exit "${STUB_COMPOSE_VERSION_EXIT:-0}"; fi
             # The volume lists of compose-remove: named volumes, containers, their mounts.
             case "$1" in
@@ -187,6 +188,74 @@ import Testing
         let last = try #require(dockerCalls(sb).last)
         #expect(last.hasSuffix(" down --remove-orphans --volumes host=\(host(sb))"))
         #expect(!last.contains("--rmi"))
+    }
+
+    @Test func removeWithOnlyTheNameRunsDownByTheProjectLabel() async throws {
+        let (sb, _, _, _) = try sandbox()
+        let r = try await sb.ctl(
+            ["compose-remove", "demo"], env: ["STUB_VOLUMES": "demo_db", "STUB_OSASCRIPT_OUT": "Delete Volumes"])
+        #expect(r.status == 0, "\(r.out)")
+        #expect(dialogs(sb).count == 1)
+        #expect(rawLog(sb).contains("their data: demo_db."))
+        #expect(
+            dockerCalls(sb).last == "docker compose -p demo down --remove-orphans --volumes host=\(host(sb))")
+    }
+
+    @Test func dockerComposeRunsInTheRootFolderWithoutComposeEnvironment() async throws {
+        let (sb, dir, files, _) = try sandbox()
+        let env = ["STUB_OSASCRIPT_OUT": "Remove", "COMPOSE_FILE": "/x/compose.yaml", "COMPOSE_ENV_FILES": "/x/.env"]
+        for args in [["compose-remove", "demo"], ["compose-up", "demo", dir, "0"] + files] {
+            let r = try await sb.ctl(args, env: env)
+            #expect(r.status == 0, "\(r.out)")
+            #expect(sb.calls.last == "cwd=/ compose_file=unset env_files=unset", "\(args[0])")
+        }
+    }
+
+    @Test(arguments: ["Keep Volumes", "Remove"])
+    func removeWithOnlyTheNameKeepsTheVolumesUnlessAsked(answer: String) async throws {
+        let (sb, _, _, _) = try sandbox()
+        let volumes = answer == "Remove" ? "" : "demo_db"
+        let r = try await sb.ctl(
+            ["compose-remove", "demo"], env: ["STUB_VOLUMES": volumes, "STUB_OSASCRIPT_OUT": answer])
+        #expect(r.status == 0, "\(r.out)")
+        #expect(dockerCalls(sb).last == "docker compose -p demo down --remove-orphans host=\(host(sb))")
+    }
+
+    @Test func removeWithOnlyTheNameNeedsTheComposePlugin() async throws {
+        let (sb, _, _, _) = try sandbox()
+        let r = try await sb.ctl(
+            ["compose-remove", "demo"], env: ["STUB_COMPOSE_VERSION_EXIT": "1", "STUB_OSASCRIPT_OUT": "Remove"])
+        #expect(r.status == 1, "\(r.out)")
+        #expect(r.out.contains("COLIMABAR_NOTIFY:docker compose is missing."))
+        #expect(dialogs(sb).isEmpty)
+        #expect(!dockerCalls(sb).contains { $0.contains(" down") })
+    }
+
+    @Test(arguments: [["compose-remove"], ["compose-remove", "demo", "/tmp"]])
+    func removeWithNoNameOrNoFilesExitsWith1(args: [String]) async throws {
+        let (sb, _, _, _) = try sandbox()
+        let r = try await sb.ctl(args, env: ["STUB_OSASCRIPT_OUT": "Remove"])
+        #expect(r.status == 1, "\(r.out)")
+        #expect(dialogs(sb).isEmpty)
+        #expect(dockerCalls(sb).isEmpty)
+    }
+
+    @Test(arguments: ["Web", "-web", "a/b", ""])
+    func removeWithOnlyAnInvalidNameExitsWith1(name: String) async throws {
+        let (sb, _, _, _) = try sandbox()
+        let r = try await sb.ctl(["compose-remove", name], env: ["STUB_OSASCRIPT_OUT": "Remove"])
+        #expect(r.status == 1, "\(r.out)")
+        #expect(r.out.contains("COLIMABAR_NOTIFY:Invalid Compose project name."))
+        #expect(dialogs(sb).isEmpty)
+        #expect(dockerCalls(sb).isEmpty)
+    }
+
+    @Test(arguments: ["compose-pull", "compose-up", "compose-down"])
+    func otherActionsNeedTheFiles(action: String) async throws {
+        let (sb, _, _, _) = try sandbox()
+        let r = try await sb.ctl([action, "demo"], env: ["STUB_OSASCRIPT_OUT": "OK"])
+        #expect(r.status == 1, "\(r.out)")
+        #expect(dockerCalls(sb).isEmpty)
     }
 
     @Test func aProjectWithNoVolumesGetsARemoveButton() async throws {

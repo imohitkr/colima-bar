@@ -65,8 +65,7 @@ extension ColimaModel {
             Self.mayRunCompose(
                 updateRestarting: updateRestarting, isDebug: isDebug, projectBusy: composeBusy.contains(key))
         else { return }
-        let missing = project.missingFiles { FileManager.default.fileExists(atPath: $0) }
-        guard missing.isEmpty else {
+        guard let args = project.ctlArgs(for: verb, exists: { FileManager.default.fileExists(atPath: $0) }) else {
             notify("The Compose files of \(project.name) are missing. The project folder moved or was deleted.")
             return
         }
@@ -74,17 +73,17 @@ extension ColimaModel {
         if verb.action.showsDialog(running: true) { dismissPopover() }
         setComposeBusy(composeBusy.union([key]))
         let p = profile
-        Task { await runCompose(verb, project: project, profile: p) }
+        Task { await runCompose(verb, project: project, args: args, profile: p) }
     }
 
-    private func runCompose(_ verb: ComposeVerb, project: ComposeProject, profile p: String) async {
+    private func runCompose(_ verb: ComposeVerb, project: ComposeProject, args: [String], profile p: String) async {
         let action = verb.action
         let key = Self.composeKey(profile: p, name: project.name)
         let env = action.environment(profile: p, expectRunning: nil)
         // Shell.run returns after the script ended. On the time limit the
         // script stops docker compose first, so busy stays on until then.
         let r = await Shell.run(
-            [Paths.ctl, action.rawValue] + project.ctlArgs(), timeout: Self.composeTimeout, extraEnv: env)
+            [Paths.ctl, action.rawValue] + args, timeout: Self.composeTimeout, extraEnv: env)
         let notices = Self.notices(in: r.out)
         for text in notices { notify(text) }
         if let text = Self.composeFailureNotice(

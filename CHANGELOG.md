@@ -11,6 +11,12 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - The menu bar icon no longer moves while the containers restart after a start. The number keeps the width of its largest value until Colima stops or you switch the profile, and the icon symbols have one size. The hourglass shows while Colima starts, for a moment after an action such as a restart ends, and while ColimaBar loads the container list, until the number has stayed the same for 3 seconds (60 seconds at most). Later, a new number shows after 1 second. A drop to 0 shows at once.
 - After a start, the container list could stay empty until a container changed, because Colima restarts the Docker daemon during the start. ColimaBar now reads the list again at the next check of the daemon.
 
+## [0.18.2] - 2026-11-06
+
+### Fixed
+
+- The trash button and **Remove Project…** of a Compose project now work when the project folder, a Compose file or an env file is gone, for example a deleted temporary folder. Before, both were off. Docker finds the containers by the project name. See [Compose projects](docs/usage.md#compose-projects).
+
 ## [0.18.1] - 2026-10-30
 
 ### Fixed
@@ -334,7 +340,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/imohitkr/colima-bar/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/imohitkr/colima-bar/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/imohitkr/colima-bar/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/imohitkr/colima-bar/compare/v0.16.0...v0.17.0
