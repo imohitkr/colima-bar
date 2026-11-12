@@ -6,6 +6,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-11-12
+
 ### Fixed
 
 - The menu bar icon no longer moves while the containers restart after a start. The number keeps the width of its largest value until Colima stops or you switch the profile, and the icon symbols have one size. The hourglass shows while Colima starts, for a moment after an action such as a restart ends, and while ColimaBar loads the container list, until the number has stayed the same for 3 seconds (60 seconds at most). Later, a new number shows when it has stayed the same for 1 second. A drop to 0 shows at once.
@@ -340,7 +342,8 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 - Notifications for failures only.
 - A hover hint for each control.
 
-[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/imohitkr/colima-bar/compare/v0.18.3...HEAD
+[0.18.3]: https://github.com/imohitkr/colima-bar/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/imohitkr/colima-bar/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/imohitkr/colima-bar/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/imohitkr/colima-bar/compare/v0.17.0...v0.18.0
