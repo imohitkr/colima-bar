@@ -268,6 +268,8 @@ import Testing
     @Test func tooManySessionsGetAServiceUnavailablePage() async throws {
         var limits = DomainProxy.Limits()
         limits.maxSessions = 1
+        // The holder sends no head. Keep its session open on a slow runner.
+        limits.headTimeout = 600
         let (proxy, port) = try await started(limits: limits)
         defer { proxy.stop() }
         let holder = await onOwnThread { TCPClient(port: port) }
