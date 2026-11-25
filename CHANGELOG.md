@@ -6,6 +6,10 @@ The format follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/
 
 ## [Unreleased]
 
+### Added
+
+- Bind mounts from `/tmp` now work through the ColimaBar socket and the profile sockets. If `colima.yaml` shares `/private/tmp`, ColimaBar changes a bind source in `/tmp` to `/private/tmp` when a container is created. See [Bind mounts from /tmp](docs/usage.md#bind-mounts-from-tmp).
+
 ## [0.18.3] - 2026-11-12
 
 ### Fixed

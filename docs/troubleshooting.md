@@ -128,6 +128,10 @@ If containers cannot resolve names, for example after you connect to a VPN, set 
 
 To check, run `colima ssh -- cat /etc/resolv.conf`. The file must show your servers.
 
+## A bind mount from /tmp is empty
+
+If a container sees an empty folder for a bind source in `/tmp`, share `/private/tmp` with the VM and restart it. Docker looks for the source in the VM, and the VM has no `/tmp` of your Mac. Use the ColimaBar socket or a `colimabar-PROFILE` context: they change `/tmp` to `/private/tmp`. See [Bind mounts from /tmp](usage.md#bind-mounts-from-tmp).
+
 ## Published ports stop answering
 
 A published port can answer in the VM but not on the Mac. This can happen after the Mac sleeps or the network changes. The Colima port forwarder then does not forward the port again. ColimaBar finds it ([When the Mac sleeps](usage.md#when-the-mac-sleeps)), shows a notice in the Containers tab and checks the port again in [Doctor](usage.md#doctor), in **Port forwarding**.
