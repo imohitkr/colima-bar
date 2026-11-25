@@ -9,9 +9,12 @@ import os
 /// Every docker client (shell DOCKER_HOST, launchd env for IDEs, the docker
 /// context, testcontainers.properties) points at the stable path. The
 /// `colimabar-PROFILE` contexts point at the profile sockets. While the VM is
-/// up, connections are spliced byte-for-byte to Colima's socket, so attach,
-/// exec, builds and log streams all work. While it's down, the first real
-/// request starts Colima, waits for it, then continues on the same connection.
+/// up, connections are spliced to Colima's socket, so attach, exec, builds and
+/// log streams all work. While it's down, the first real request starts
+/// Colima, waits for it, then continues on the same connection.
+///
+/// The splice changes only one thing: the `/tmp` bind sources of a container
+/// create request (see BindPathRewrite and BindRewriteStream).
 ///
 /// `docker` pings before every command (HEAD /_ping), and so do many idle
 /// pollers. Pings are answered locally while the VM is down, so only a request
@@ -39,6 +42,9 @@ final class SocketProxy: @unchecked Sendable {
     private var lastWakeSucceeded = false
     private var conns: [Int: Connection] = [:]
     private var nextConn = 0
+    /// True after the log got the hint to share `/private/tmp`, so it gets
+    /// the hint once for each proxy.
+    private var tmpHintLogged = false
 
     /// One open client connection. `isWork` is true while its latest
     /// request does real work (see isWork(_:)).
@@ -50,6 +56,11 @@ final class SocketProxy: @unchecked Sendable {
 
     /// Opens a connection to Colima's socket (injectable for tests).
     let connectUpstream: @Sendable (String) -> Result<Int32, UnixSocket.Error>
+
+    /// Decides if the profile of an upstream socket shares `/private/tmp`
+    /// with the VM (injectable for tests). The proxy asks only when a create
+    /// request binds a path in `/tmp`.
+    let isTmpShared: @Sendable (String) -> Bool
 
     /// While the VM is down, or before its first request, a client that
     /// sends nothing for this many seconds is closed. Otherwise each idle
@@ -82,13 +93,15 @@ final class SocketProxy: @unchecked Sendable {
         upstream: String, path: String = Paths.proxySocket, idleTimeout: Int = 5 * 60, label: String = "",
         connectUpstream: @escaping @Sendable (String) -> Result<Int32, UnixSocket.Error> = {
             UnixSocket.tryConnect($0)
-        }
+        },
+        isTmpShared: @escaping @Sendable (String) -> Bool = { BindPathRewrite.sharesTarget(upstream: $0) }
     ) {
         _upstream = upstream
         self.path = path
         self.label = label
         self.idleTimeout = idleTimeout
         self.connectUpstream = connectUpstream
+        self.isTmpShared = isTmpShared
     }
 
     /// Starts Colima and returns once Docker is ready (or false on failure).
@@ -245,7 +258,7 @@ final class SocketProxy: @unchecked Sendable {
         switch connectIfAwake() {
         case .up(let up):
             // Read the start of the first request to classify the connection
-            // (auto-stop activity); the bytes are forwarded as they are.
+            // (auto-stop activity); splice() then forwards the bytes.
             // A client that sends nothing closes after idleTimeout. splice()
             // removes the timeout again before it streams.
             UnixSocket.setTimeout(client, idleTimeout)
@@ -452,11 +465,16 @@ final class SocketProxy: @unchecked Sendable {
 
     /// Copies bytes both ways until each side closes, half-closing as it goes
     /// so request/response streams (and hijacked attach/exec) end cleanly.
+    /// The bytes from the client go through a BindRewriteStream.
     private func splice(_ client: Int32, _ upstream: Int32, initial: Data, work: Bool = false) {
         // Streams can be silent for a long time: remove the idle timeout of
         // the VM-down path.
         UnixSocket.setTimeout(client, 0)
-        if !initial.isEmpty, !UnixSocket.writeAll(upstream, initial) {
+        let rewrite = BindRewriteStream { [self] in tmpShared() }
+        let sent = initial.withUnsafeBytes { chunk in
+            rewrite.feed(chunk) { UnixSocket.writeAll(upstream, $0) }
+        }
+        if !sent {
             close(client)
             close(upstream)
             return
@@ -477,7 +495,7 @@ final class SocketProxy: @unchecked Sendable {
             shutdown(client, SHUT_RD)
             done.signal()
         }
-        copy(from: client, to: upstream, conn: id, classify: true)
+        copy(from: client, to: upstream, conn: id, classify: true, rewrite: rewrite)
         done.wait()
         close(client)
         close(upstream)
@@ -492,9 +510,14 @@ final class SocketProxy: @unchecked Sendable {
     ///
     /// Each direction allocates one buffer for the whole connection. It is
     /// freed when the copy ends.
-    private func copy(from src: Int32, to dst: Int32, conn: Int, classify: Bool = false) {
+    ///
+    /// With `rewrite`, the bytes go through the stream before they reach `dst`.
+    private func copy(
+        from src: Int32, to dst: Int32, conn: Int, classify: Bool = false, rewrite: BindRewriteStream? = nil
+    ) {
         withUnsafeTemporaryAllocation(byteCount: Self.bufferSize, alignment: 16) { buf in
             guard let base = buf.baseAddress else { return }
+            let send: (UnsafeRawBufferPointer) -> Bool = { UnixSocket.writeAll(dst, $0) }
             var lastTouch = Date.distantPast
             while true {
                 let n = read(src, base, buf.count)
@@ -514,18 +537,32 @@ final class SocketProxy: @unchecked Sendable {
                     touch(conn)
                     lastTouch = now
                 }
-                var off = 0
-                while off < n {
-                    let w = write(dst, base + off, n - off)
-                    if w <= 0 {
-                        shutdown(src, SHUT_RD)
-                        shutdown(dst, SHUT_WR)
-                        return
-                    }
-                    off += w
+                let chunk = UnsafeRawBufferPointer(rebasing: buf[0..<n])
+                guard rewrite?.feed(chunk, emit: send) ?? send(chunk) else {
+                    shutdown(src, SHUT_RD)
+                    shutdown(dst, SHUT_WR)
+                    return
                 }
             }
+            // The client closed in the middle of a request: send what the stream holds.
+            _ = rewrite?.finish(emit: send)
             shutdown(dst, SHUT_WR)
         }
+    }
+
+    /// Asks `isTmpShared` for the upstream. If the profile does not share
+    /// `/private/tmp`, the log gets a hint, once for each proxy.
+    private func tmpShared() -> Bool {
+        if isTmpShared(upstream) { return true }
+        let first = lock.withLock { () -> Bool in
+            defer { tmpHintLogged = true }
+            return !tmpHintLogged
+        }
+        if first {
+            log.notice(
+                "a container binds a path in /tmp, but the colima.yaml of \(self.label.isEmpty ? "the selected profile" : "profile " + self.label, privacy: .public) does not share /private/tmp. Docker then binds an empty folder of the VM. To fix it, add /private/tmp to the mounts and restart the VM."
+            )
+        }
+        return false
     }
 }

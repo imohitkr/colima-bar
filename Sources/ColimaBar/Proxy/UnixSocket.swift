@@ -103,15 +103,18 @@ enum UnixSocket {
     }
 
     static func writeAll(_ fd: Int32, _ data: Data) -> Bool {
-        data.withUnsafeBytes { raw -> Bool in
-            var off = 0
-            while off < raw.count {
-                let n = write(fd, raw.baseAddress! + off, raw.count - off)
-                if n <= 0 { return false }
-                off += n
-            }
-            return true
+        data.withUnsafeBytes { writeAll(fd, $0) }
+    }
+
+    static func writeAll(_ fd: Int32, _ raw: UnsafeRawBufferPointer) -> Bool {
+        guard let base = raw.baseAddress else { return true }
+        var off = 0
+        while off < raw.count {
+            let n = write(fd, base + off, raw.count - off)
+            if n <= 0 { return false }
+            off += n
         }
+        return true
     }
 
     private static func address(_ path: String) -> sockaddr_un? {

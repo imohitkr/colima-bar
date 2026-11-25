@@ -197,7 +197,7 @@ If a restore fails, see [A volume restore fails](troubleshooting.md#a-volume-res
 - **DNS servers**: up to 3 IP addresses, separated by commas. Use them when names do not resolve, for example with a VPN. If the field is empty, the VM uses the DNS of your Mac.
 - **Reachable IP address**: gives the VM an address that your Mac can reach. It needs the `vz` VM type. Colima cannot turn it off again. When the VM runs, the page shows the IP address and a button to copy it.
 - **Port forwarder**: `ssh` forwards TCP only and is stable. `grpc` also forwards UDP and is experimental.
-- **Mounts**: the Mac folders that the VM shares. Click **Add Folder…** to pick one. **Writable** lets containers change the files. The page knows three cases. If `colima.yaml` has no `mounts` key, or `mounts: null`, Colima mounts no folder, and the page says "No folders are mounted." The first folder that you add is then the only one. If `colima.yaml` has `mounts: []`, Colima mounts your home folder, writable. The first folder that you add then goes after `~`. Remove `~` if you do not want your home folder. If you remove the last folder of a list, ColimaBar writes `mounts: []`, and Colima mounts your home folder again. A folder must exist. Colima does not start if one folder path begins with another, for example `~` and `~/code`, so ColimaBar refuses that list. A folder name must have no line break or control character.
+- **Mounts**: the Mac folders that the VM shares. Click **Add Folder…** to pick one. **Writable** lets containers change the files. The page knows three cases. If `colima.yaml` has no `mounts` key, or `mounts: null`, Colima mounts no folder, and the page says "No folders are mounted." The first folder that you add is then the only one. If `colima.yaml` has `mounts: []`, Colima mounts your home folder, writable. The first folder that you add then goes after `~`. Remove `~` if you do not want your home folder. If you remove the last folder of a list, ColimaBar writes `mounts: []`, and Colima mounts your home folder again. A folder must exist. Colima does not start if one folder path begins with another, for example `~` and `~/code`, so ColimaBar refuses that list. A folder name must have no line break or control character. To bind files from `/tmp` into a container, add `/private/tmp`. See [Bind mounts from /tmp](#bind-mounts-from-tmp).
 - **Send file changes to the VM (inotify)**: for tools that watch files. It is experimental.
 - **Docker registries**: mirrors that Docker tries before Docker Hub (an http or https address with no user name, query or fragment), and insecure registries that Docker reaches without TLS. They need the `docker` runtime.
 - **VM type and mount type**: the VM type (`vz` or `qemu`) and the mount type (`virtiofs`, `sshfs` or `9p`). Colima fixes both when it creates the VM, so a change needs **Change and Recreate…**. See [Change the VM type or mount type](#change-the-vm-type-or-mount-type). The page also shows the architecture and the runtime. They are read-only.
@@ -207,6 +207,22 @@ ColimaBar shows a problem in red and turns **Apply** off until you fix it. If th
 ColimaBar changes only the lines that you changed in `colima.yaml`. It keeps your comments and the keys that it does not know. Before it writes, it saves a copy of the old file in `~/.cache/colima-bar/colima.PROFILE.yaml.bak`. If `colima.yaml` changed outside ColimaBar after the page read it, ColimaBar changes nothing. It shows the message "colima.yaml changed outside ColimaBar. ColimaBar reloaded it. Check your changes and click Apply again." and drops your edits. After a good **Apply**, the page shows the new file, so **Apply** and **Revert** are off again. If the VM does not start with the new settings, or the restart does not end (it stops, or it takes longer than 15 minutes), ColimaBar puts the old file back. See [The VM does not start after a VM settings change](troubleshooting.md#the-vm-does-not-start-after-a-vm-settings-change).
 
 If a setting has a form that ColimaBar cannot edit (an anchor, or a list over several lines), the page shows it as read-only. Edit `colima.yaml` by hand then.
+
+### Bind mounts from /tmp
+
+On macOS, `/tmp` is a link to `/private/tmp`. The Docker daemon runs in the VM, so `docker run -v /tmp/x:/x` binds the `/tmp` folder of the VM, not the folder of your Mac. Docker then makes an empty folder.
+
+The ColimaBar socket and the profile sockets fix this. If `colima.yaml` of the profile shares `/private/tmp`, they change each bind source in `/tmp` to the same path in `/private/tmp`. This applies to `-v`, `--mount type=bind` and Compose bind mounts. It does not change `/tmpfoo`, `/private/tmp` or named volumes. The `colima` docker context uses the Colima socket directly, so it gets no change.
+
+To share `/private/tmp`, open **More VM settings…**, click **Add Folder…**, press Shift-Command-G, type `/private/tmp` and turn on **Writable**. Or add this entry to `mounts` in `colima.yaml`:
+
+```yaml
+mounts:
+  - location: /private/tmp
+    writable: true
+```
+
+Then restart the VM. If `/private/tmp` is not shared, ColimaBar changes nothing and writes a hint to its log.
 
 ### Change the VM type or mount type
 

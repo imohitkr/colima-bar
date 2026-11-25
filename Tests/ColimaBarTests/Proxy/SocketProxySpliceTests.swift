@@ -72,6 +72,67 @@ import Testing
         #expect(resp.contains("could not start Colima"))
     }
 
+    private static let createBody = #"{"Image":"alpine","HostConfig":{"Binds":["/tmp/x/file.py:/app/file.py"]}}"#
+    private static let create =
+        "POST /v1.54/containers/create HTTP/1.1\r\nHost: docker\r\nContent-Length: \(createBody.utf8.count)\r\n\r\n"
+        + createBody
+
+    @Test(arguments: [true, false]) func rewritesTmpBindsOnlyWhenTheVMSharesPrivateTmp(shared: Bool) async throws {
+        let daemon = FakeDaemon(path: upstream)
+        try daemon.start()
+        defer { daemon.stop() }
+        let asked = Counter()
+        let p = SocketProxy(
+            upstream: upstream, path: stable,
+            isTmpShared: { _ in
+                asked.add()
+                return shared
+            })
+        p.start()
+        defer {
+            p.stop()
+            unlink(stable)
+        }
+
+        let resp = await roundTrip(stable, Self.create)
+        #expect(resp.hasSuffix("hello"))
+        let request = try #require(daemon.seenRequests.first)
+        #expect(request.line == "POST /v1.54/containers/create HTTP/1.1")
+        #expect(request.headers["content-length"] == String(request.body.count))
+        let body = String(decoding: request.body, as: UTF8.self)
+        if shared {
+            #expect(body.contains("/private/tmp/x/file.py:/app/file.py"))
+        } else {
+            #expect(body == Self.createBody)
+        }
+        #expect(asked.value == 1)
+    }
+
+    @Test func rewritesTheRequestThatWakesTheVM() async throws {
+        unlink(upstream)
+        let daemon = FakeDaemon(path: upstream)
+        let p = SocketProxy(upstream: upstream, path: stable, isTmpShared: { _ in true })
+        p.apiVersion = "1.54"
+        p.wake = {
+            try? daemon.start()
+            return true
+        }
+        p.start()
+        defer {
+            p.stop()
+            daemon.stop()
+            unlink(stable)
+        }
+
+        // The proxy answers the ping, then the create request wakes the VM.
+        let resp = await roundTrip(stable, "HEAD /_ping HTTP/1.1\r\nHost: docker\r\n\r\n" + Self.create)
+        #expect(resp.hasSuffix("hello"))
+        let request = try #require(daemon.seenRequests.first)
+        #expect(request.line == "POST /v1.54/containers/create HTTP/1.1")
+        #expect(request.headers["content-length"] == String(request.body.count))
+        #expect(String(decoding: request.body, as: UTF8.self).contains("/private/tmp/x/file.py:/app/file.py"))
+    }
+
     @Test func stopLeavesSymlinkToColima() throws {
         let p = SocketProxy(upstream: upstream, path: stable)
         p.start()

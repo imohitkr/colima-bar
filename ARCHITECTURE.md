@@ -79,7 +79,7 @@ The `colimabar` command. See [Command line](#command-line). `CLIParser` reads th
 
 ### `Proxy/`
 
-`SocketProxy` is the auto-start proxy. `SocketProxy+HTTP` parses just enough HTTP to answer pings and to classify requests. `ProfileProxies` owns one `SocketProxy` for each docker profile. `ProfileSocket` derives and checks the path of a profile socket. `UnixSocket` has the socket helpers.
+`SocketProxy` is the auto-start proxy. `SocketProxy+HTTP` parses just enough HTTP to answer pings and to classify requests. `BindRewriteStream` follows the requests from a client and sends each container create request through `BindPathRewrite`, which changes `/tmp` bind sources to `/private/tmp`. `ProfileProxies` owns one `SocketProxy` for each docker profile. `ProfileSocket` derives and checks the path of a profile socket. `UnixSocket` has the socket helpers.
 
 ### `Domains/`
 
@@ -183,6 +183,8 @@ The upstream of the stable socket is the Colima socket of the selected profile. 
 - `wakeForProxy()` waits for `colima start` to exit. Then it waits for several successful `/images/json` probes in a row. An open socket does not mean that the Docker daemon is ready.
 - After the wake, the request continues on the same connection. If the wake fails, the proxy answers HTTP 503 with a JSON `message`.
 - `wakeForProxy()` does not start a deleted non-default profile, or a profile with a runtime other than docker.
+
+The splice changes one kind of request: a container create request (`POST /containers/create`, with or without a version) with a bind source in `/tmp`. On macOS, `/tmp` links to `/private/tmp`, but the daemon looks up the source in the VM. `BindRewriteStream` reads each request head from the client and passes each body by its `Content-Length`. It holds only a create body of at most 1 MiB. `BindPathRewrite` then changes `HostConfig.Binds` sources and `HostConfig.Mounts` sources of type `bind` from `/tmp` to `/private/tmp`, and sets a new `Content-Length`. It does this only if the `colima.yaml` next to the upstream socket shares `/private/tmp` at the same path in the VM. Else the request passes unchanged, and the proxy logs a hint once. After a request that it cannot follow, the stream passes every later byte unchanged: a chunked body, bytes that are not HTTP, an `Upgrade` header, attach, exec start or a BuildKit session. Thus hijacked streams stay raw. A create request with `Expect: 100-continue` also passes unchanged, because its client waits for the daemon before it sends the body.
 
 On quit, or when auto-start is off, `SocketProxy.stop()` replaces the path with a symlink to the Colima socket. It creates the link before it closes the listener, so a client never sees a missing socket.
 
